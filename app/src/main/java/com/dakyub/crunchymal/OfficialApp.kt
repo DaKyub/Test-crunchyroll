@@ -8,34 +8,58 @@ import android.net.Uri
 import android.os.Build
 import android.widget.Toast
 
-/**
- * Liens profonds de l'app Crunchyroll TV. L'analyse de l'app a montré que MainActivity accepte
- * crunchyroll://<route>, avec la route "showdetails/{showid}?type={type}" ; aucune route de lecteur.
- */
-enum class LinkFormat(val label: String) {
-    /** Ouvre la fiche de la série (fiable) : l'épisode suivant s'y lance avec « Lecture ». */
-    SERIES_PAGE("Fiche de la série (showdetails, type=series)"),
-
-    /** Essai : la même route avec l'identifiant de l'épisode. */
-    EPISODE("Épisode direct (showdetails, type=episode)");
-
-    fun uri(seriesId: String?, episodeId: String?): Uri? = when (this) {
-        SERIES_PAGE -> seriesId?.takeIf { it.isNotBlank() }?.let { Uri.parse("crunchyroll://showdetails/$it?type=series") }
-        EPISODE -> episodeId?.takeIf { it.isNotBlank() }?.let { Uri.parse("crunchyroll://showdetails/$it?type=episode") }
-    }
-}
-
 /** Délègue la lecture à l'application Crunchyroll officielle. */
 object OfficialApp {
     const val PACKAGE = "com.crunchyroll.crunchyroid"
 
-    private fun intent(uri: Uri) = Intent(Intent.ACTION_VIEW, uri)
-        .setPackage(PACKAGE)
-        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    const val DEFAULT_TEMPLATE = "crunchyroll://showdetails/{series}?type=series"
+
+    /**
+     * Formats de liens à essayer depuis les paramètres. {series} / {episode} sont remplacés par les
+     * identifiants ; un préfixe "Activité|" force l'ouverture de cette activité précise.
+     */
+    val CANDIDATES = listOf(
+        "crunchyroll://showdetails/{series}?type=series",
+        "crunchyroll://showdetails/{series}?type=SERIES",
+        "crunchyroll://showdetails/{series}",
+        "crunchyroll://showdetails/{episode}?type=episode",
+        "crunchyroll://series/{series}",
+        "crunchyroll://watch/{episode}",
+        "crunchyroll://episode/{episode}",
+        "crunchyroll://media/{episode}",
+        "crunchyroll://play/{episode}",
+        "crunchyroll://player/{episode}",
+        "crunchyroll://www.crunchyroll.com/series/{series}",
+        "crunchyroll://www.crunchyroll.com/watch/{episode}",
+        "crunchyroll://deeplink?url=https%3A%2F%2Fwww.crunchyroll.com%2Fseries%2F{series}",
+        "ShowDetailsActivity|crunchyroll://showdetails/{series}?type=series",
+        "PlayerActivity|crunchyroll://watch/{episode}",
+    )
+
+    private val activities = mapOf(
+        "ShowDetailsActivity" to "com.crunchyroll.crunchyroid.showdetails.ui.ShowDetailsActivity",
+        "PlayerActivity" to "com.crunchyroll.crunchyroid.player.ui.PlayerActivity",
+    )
+
+    /** Intent pour un format donné, ou null s'il manque l'identifiant requis. */
+    fun buildIntent(template: String, seriesId: String?, episodeId: String?): Intent? {
+        if ("{series}" in template && seriesId.isNullOrBlank()) return null
+        if ("{episode}" in template && episodeId.isNullOrBlank()) return null
+        val activity = template.substringBefore('|', "").takeIf { it.isNotBlank() }
+        val uri = template.substringAfter('|')
+            .replace("{series}", seriesId.orEmpty())
+            .replace("{episode}", episodeId.orEmpty())
+        // CLEAR_TASK : si Crunchyroll tourne déjà, il redémarre et traite le lien au lieu de juste revenir au premier plan.
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(uri))
+            .setPackage(PACKAGE)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        activity?.let { name -> activities[name]?.let { intent.setClassName(PACKAGE, it) } }
+        return intent
+    }
 
     /** Activité de l'app officielle qui accepte les liens crunchyroll://, ou null. */
     fun resolve(context: Context): String? {
-        val probe = intent(Uri.parse("crunchyroll://showdetails/TEST?type=series"))
+        val probe = Intent(Intent.ACTION_VIEW, Uri.parse("crunchyroll://showdetails/TEST?type=series")).setPackage(PACKAGE)
         val info = if (Build.VERSION.SDK_INT >= 33) {
             context.packageManager.resolveActivity(probe, PackageManager.ResolveInfoFlags.of(0))
         } else {
@@ -57,23 +81,26 @@ object OfficialApp {
         pkg.activities.orEmpty().filter { it.exported }.map { it.name.removePrefix("com.crunchyroll.") }
     }.getOrDefault(emptyList())
 
-    /** Ouvre un épisode : selon le réglage, fiche de la série ou essai direct sur l'épisode. */
+    private fun template(context: Context) =
+        (context.applicationContext as CrunchyMalApp).graph.settings.linkTemplate ?: DEFAULT_TEMPLATE
+
     fun openEpisode(context: Context, episodeId: String, seriesId: String?) {
-        val settings = (context.applicationContext as CrunchyMalApp).graph.settings
-        val preferred = settings.linkFormat ?: LinkFormat.SERIES_PAGE
-        val uri = preferred.uri(seriesId, episodeId)
-            ?: LinkFormat.SERIES_PAGE.uri(seriesId, episodeId)
-            ?: LinkFormat.EPISODE.uri(seriesId, episodeId)
-        open(context, uri)
+        val intent = buildIntent(template(context), seriesId, episodeId)
+            ?: buildIntent(DEFAULT_TEMPLATE, seriesId, episodeId)
+        start(context, intent)
     }
 
-    fun openSeries(context: Context, seriesId: String) = open(context, LinkFormat.SERIES_PAGE.uri(seriesId, null))
+    fun openSeries(context: Context, seriesId: String) {
+        val chosen = template(context).takeIf { "{episode}" !in it } ?: DEFAULT_TEMPLATE
+        start(context, buildIntent(chosen, seriesId, null))
+    }
 
-    private fun open(context: Context, uri: Uri?) {
-        if (uri != null && resolve(context) != null) {
+    /** Lance l'intent ; renvoie false (et ouvre l'accueil de Crunchyroll) si impossible. */
+    fun start(context: Context, intent: Intent?): Boolean {
+        if (intent != null) {
             try {
-                context.startActivity(intent(uri))
-                return
+                context.startActivity(intent)
+                return true
             } catch (_: ActivityNotFoundException) {
             } catch (_: SecurityException) {
             }
@@ -82,9 +109,10 @@ object OfficialApp {
         val launch = pm.getLeanbackLaunchIntentForPackage(PACKAGE) ?: pm.getLaunchIntentForPackage(PACKAGE)
         if (launch != null) {
             context.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            Toast.makeText(context, "Lien direct non pris en charge : Crunchyroll ouvert à l'accueil", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, "Lien refusé : Crunchyroll ouvert à l'accueil", Toast.LENGTH_LONG).show()
         } else {
             Toast.makeText(context, "L'application Crunchyroll n'est pas installée", Toast.LENGTH_LONG).show()
         }
+        return false
     }
 }

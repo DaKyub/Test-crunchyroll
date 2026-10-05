@@ -10,10 +10,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -28,7 +30,7 @@ import androidx.tv.material3.OutlinedButton
 import androidx.tv.material3.Text
 import com.dakyub.crunchymal.AppAnalyzer
 import com.dakyub.crunchymal.CrunchyMalApp
-import com.dakyub.crunchymal.LinkFormat
+import com.dakyub.crunchymal.data.WatchlistEntry
 import com.dakyub.crunchymal.LocalGraph
 import com.dakyub.crunchymal.OfficialApp
 import com.dakyub.crunchymal.ui.components.TvTextField
@@ -52,7 +54,11 @@ fun SettingsScreen() {
     var locale by remember { mutableStateOf(settings.locale) }
     var audio by remember { mutableStateOf(settings.preferredAudio) }
     var malId by remember { mutableStateOf(settings.malClientIdOverride) }
-    var linkFormat by remember { mutableStateOf(settings.linkFormat) }
+    var linkTemplate by remember { mutableStateOf(settings.linkTemplate ?: OfficialApp.DEFAULT_TEMPLATE) }
+    // Série / épisode d'exemple pour le banc d'essai : premier élément de la watchlist.
+    val sample by produceState<WatchlistEntry?>(null) {
+        value = runCatching { graph.watchlist.get().firstOrNull { it.nextEpisodeId != null } }.getOrNull()
+    }
     var basic by remember { mutableStateOf(settings.basicAuthOverride) }
     var ua by remember { mutableStateOf(settings.userAgentOverride) }
     val resolvedActivity = remember { OfficialApp.resolve(context) }
@@ -121,24 +127,26 @@ fun SettingsScreen() {
         item { Section("Lecture dans l'app Crunchyroll") }
         item {
             Text(
-                "Comment « Reprendre » et les épisodes s'ouvrent dans Crunchyroll. La fiche de la série est fiable ; " +
-                    "l'épisode direct est un essai. " +
-                    (resolvedActivity?.let { "Liens crunchyroll:// acceptés par $it." } ?: "Liens crunchyroll:// refusés par l'app officielle."),
+                "Banc d'essai : « Essayer » ouvre Crunchyroll avec ce format sur « ${sample?.series?.title ?: "…"} ». " +
+                    "Quand un format ouvre la bonne fiche ou l'épisode, appuie sur « Choisir ». " +
+                    (resolvedActivity?.let { "Liens crunchyroll:// reçus par $it." } ?: "Liens crunchyroll:// refusés par l'app officielle."),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                LinkFormat.entries.forEach { format ->
-                    FilterChip(
-                        selected = (linkFormat ?: LinkFormat.SERIES_PAGE) == format,
-                        onClick = {
-                            linkFormat = format
-                            settings.linkFormat = format
-                        },
-                    ) { Text(format.label) }
+        itemsIndexed(OfficialApp.CANDIDATES) { index, template ->
+            val entry = sample
+            val intent = entry?.let { OfficialApp.buildIntent(template, it.series.id, it.nextEpisodeId) }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedButton(onClick = { OfficialApp.start(context, intent) }, enabled = intent != null) {
+                    Text("Essayer ${index + 1}")
                 }
+                FilterChip(selected = linkTemplate == template, onClick = {
+                    linkTemplate = template
+                    settings.linkTemplate = template
+                    toast("Format ${index + 1} choisi")
+                }) { Text(if (linkTemplate == template) "✓ Choisi" else "Choisir") }
+                Text(template, style = MaterialTheme.typography.labelMedium)
             }
         }
         item {

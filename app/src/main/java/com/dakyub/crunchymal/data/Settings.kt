@@ -26,12 +26,10 @@ class Settings(context: Context) {
         get() = prefs.getString("user_agent", "")!!
         set(value) = prefs.edit().putString("user_agent", value.trim()).apply()
 
-    /** Format de lien direct choisi pour l'app officielle (null = automatique). */
-    var linkFormat: com.dakyub.crunchymal.LinkFormat?
-        get() = prefs.getString("link_format", null)?.let { name ->
-            com.dakyub.crunchymal.LinkFormat.entries.firstOrNull { it.name == name }
-        }
-        set(value) = prefs.edit().putString("link_format", value?.name).apply()
+    /** Modèle de lien choisi pour ouvrir un contenu dans l'app officielle (null = défaut). */
+    var linkTemplate: String?
+        get() = prefs.getString("link_template", null)
+        set(value) = prefs.edit().putString("link_template", value).apply()
 
     /** Client ID de l'API officielle MyAnimeList (myanimelist.net/apiconfig). */
     var malClientIdOverride: String
