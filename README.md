@@ -5,6 +5,13 @@ Application Android TV (Kotlin + Compose for TV) qui affiche ton catalogue et ta
 
 ## Fonctionnalités
 
+- **Crunchyroll et ADN** : bouton « Service » en haut (Crunchyroll → ADN → les deux). En mode « les deux »,
+  accueil, Parcourir et Recherche mélangent les catalogues avec un badge CR / ADN ; une série présente
+  sur les deux n'apparaît qu'une fois.
+- **Parcourir** : catégories Crunchyroll et genres ADN, tri par popularité ou alphabétique.
+- **Genres** sur la fiche série : ceux de MyAnimeList, sinon ceux du service.
+- **Notes des épisodes** : IMDb (clé OMDb) et TMDB en secours (clé TMDB), dans **Paramètres → Notes des épisodes**.
+
 - **Note MAL partout** : sur l'accueil, la watchlist, la recherche et la fiche série, avec une note par saison sur la fiche.
 - **Watchlist filtrable** :
   - par statut : *Non commencées* (aucun épisode vu), *En cours*, *Terminées / à jour* (tous les épisodes disponibles vus) ;
@@ -61,6 +68,8 @@ Pour compiler toi-même : `./gradlew assembleRelease` (il faut le SDK Android, A
 | --- | --- |
 | Catalogue, watchlist, historique, playheads | API **non officielle** de Crunchyroll (celle de l'app Android TV) |
 | Notes MyAnimeList | API officielle MyAnimeList v2 (Client ID gratuit) |
+| Catalogue ADN | API non officielle `gw.api.animationdigitalnetwork.fr` |
+| Notes des épisodes | OMDb (IMDb) et TMDB, clés gratuites |
 
 - **Mises à jour.** L'APK est toujours signé avec la même clé (`app/signing`) : une nouvelle version
   s'installe par-dessus l'ancienne, sans désinstaller ni perdre la connexion.

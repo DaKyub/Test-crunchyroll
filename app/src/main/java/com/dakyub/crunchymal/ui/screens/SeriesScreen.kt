@@ -58,6 +58,8 @@ import com.dakyub.crunchymal.ui.components.MalBadge
 import com.dakyub.crunchymal.ui.components.MediaCard
 import com.dakyub.crunchymal.ui.components.TvTextField
 import com.dakyub.crunchymal.ui.components.rememberMalRecord
+import com.dakyub.crunchymal.ui.components.GenresLine
+import com.dakyub.crunchymal.ui.components.rememberSeasonRatings
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -70,6 +72,8 @@ data class SeriesUi(
     val treeError: String? = null,
     val inWatchlist: Boolean? = null,
     val selectedSeason: Int = 0,
+    /** Catégories Crunchyroll (repli quand MAL n'a pas de genres). */
+    val categories: List<String> = emptyList(),
 )
 
 class SeriesViewModel(private val graph: Graph, private val seriesId: String) : ViewModel() {
@@ -90,6 +94,10 @@ class SeriesViewModel(private val graph: Graph, private val seriesId: String) : 
                 return@launch
             }
             state.value = state.value.copy(loading = false, series = series)
+            launch {
+                val categories = runCatching { graph.api.categoriesOf(seriesId).map { it.title } }.getOrDefault(emptyList())
+                state.value = state.value.copy(categories = categories)
+            }
             launch {
                 val inList = runCatching { graph.api.isInWatchlist(seriesId) }.getOrNull()
                 state.value = state.value.copy(inWatchlist = inList)
@@ -208,6 +216,10 @@ fun SeriesScreen(seriesId: String) {
                         }
                     }
                     item {
+                        val record = rememberMalRecord(ref.malKey, ref.malTitles)
+                        GenresLine(record?.genres, state.categories)
+                    }
+                    item {
                         Text(
                             series.description,
                             style = MaterialTheme.typography.bodyMedium,
@@ -273,6 +285,10 @@ fun SeriesScreen(seriesId: String) {
                         }
                         item {
                             val season = tree.seasons.getOrNull(state.selectedSeason)
+                            val seriesRecord = rememberMalRecord(ref.malKey, ref.malTitles)
+                            val ratingTitles = listOfNotNull(seriesRecord?.englishTitle, series.slugTitle.replace('-', ' '), series.title)
+                                .filter { it.isNotBlank() }.distinct()
+                            val ratings = rememberSeasonRatings(ratingTitles, season?.season?.seasonNumber ?: 1)
                             if (season != null) {
                                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Text(season.season.title, style = MaterialTheme.typography.titleMedium)
@@ -282,12 +298,16 @@ fun SeriesScreen(seriesId: String) {
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                     LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                                        items(season.episodes, key = { it.episode.id }) { node ->
+                                        itemsIndexed(season.episodes, key = { _, n -> n.episode.id }) { index, node ->
                                             val ep = node.episode
+                                            val rating = ratings.find(ep.episodeNumber, index)
                                             MediaCard(
                                                 item = CardItem(
                                                     series = SeriesRef(ep.id, "${if (node.watched) "✓ " else ""}${ep.label} · ${ep.title}", wideUrl = ep.images.thumbnail.best(400)),
-                                                    subtitle = if (ep.durationMs > 0) "${ep.durationMs / 60000} min" else null,
+                                                    subtitle = listOfNotNull(
+                                                        rating?.label,
+                                                        if (ep.durationMs > 0) "${ep.durationMs / 60000} min" else null,
+                                                    ).joinToString(" · ").ifBlank { null },
                                                     progress = node.progress.takeIf { it > 0f },
                                                     wide = true,
                                                 ),

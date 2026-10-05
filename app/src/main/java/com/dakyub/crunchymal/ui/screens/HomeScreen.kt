@@ -23,7 +23,9 @@ import com.dakyub.crunchymal.Graph
 import com.dakyub.crunchymal.LocalGraph
 import com.dakyub.crunchymal.OfficialApp
 import com.dakyub.crunchymal.data.CardItem
+import com.dakyub.crunchymal.data.Provider
 import com.dakyub.crunchymal.data.SeriesRef
+import androidx.compose.runtime.LaunchedEffect
 import com.dakyub.crunchymal.data.crunchyroll.CrPanel
 import com.dakyub.crunchymal.data.crunchyroll.best
 import com.dakyub.crunchymal.ui.components.CenteredMessage
@@ -81,16 +83,25 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
     val state = MutableStateFlow(HomeState())
     private var job: Job? = null
 
-    init {
-        load()
+    private var loadedFor: Set<Provider>? = null
+
+    /** Charge (ou recharge si les services affichés ont changé). */
+    fun ensure(providers: Set<Provider>) {
+        if (providers != loadedFor) load()
     }
 
     fun load() {
+        val providers = graph.providers.selected.value
+        loadedFor = providers
         job?.cancel()
         job = viewModelScope.launch {
             state.value = HomeState(loading = true)
-            val feed = runCatching { graph.api.homeFeed() }.getOrNull()
-            val loaders = feed?.let { feedLoaders(it) }?.takeIf { it.isNotEmpty() } ?: fallbackLoaders()
+            val loaders = mutableListOf<Pair<String, suspend () -> List<CardItem>>>()
+            if (Provider.CRUNCHYROLL in providers) {
+                val feed = runCatching { graph.api.homeFeed() }.getOrNull()
+                loaders += feed?.let { feedLoaders(it) }?.takeIf { it.isNotEmpty() } ?: fallbackLoaders()
+            }
+            if (Provider.ADN in providers) loaders += adnLoaders()
 
             // Les rangées s'affichent au fur et à mesure, dans l'ordre du fil officiel.
             val results = arrayOfNulls<List<CardItem>>(loaders.size)
@@ -176,6 +187,11 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
         }
     }
 
+    private fun adnLoaders(): List<Pair<String, suspend () -> List<CardItem>>> = listOf(
+        "ADN · Simulcasts" to row { graph.adn.catalog(order = "popular", simulcastOnly = true, limit = 40).map { it.toCard() } },
+        "ADN · Populaires" to row { graph.adn.catalog(order = "popular", limit = 40).map { it.toCard() } },
+    )
+
     private fun fallbackLoaders(): List<Pair<String, suspend () -> List<CardItem>>> = listOf(
         "Continuer à regarder" to continueWatching(),
         "Ma watchlist" to watchlistRow(),
@@ -185,10 +201,12 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
 }
 
 @Composable
-fun HomeScreen(onOpenSeries: (String) -> Unit) {
+fun HomeScreen(onOpenSeries: (SeriesRef) -> Unit) {
     val graph = LocalGraph.current
     val vm = viewModel { HomeViewModel(graph) }
     val state by vm.state.collectAsState()
+    val providers by graph.providers.selected.collectAsState()
+    LaunchedEffect(providers) { vm.ensure(providers) }
     val context = LocalContext.current
 
     when {
@@ -215,7 +233,7 @@ fun HomeScreen(onOpenSeries: (String) -> Unit) {
                                 item = item,
                                 onClick = {
                                     when {
-                                        item.series.id.isNotBlank() -> onOpenSeries(item.series.id)
+                                        item.series.id.isNotBlank() -> onOpenSeries(item.series)
                                         item.episodeId != null -> OfficialApp.openEpisode(context, item.episodeId, null)
                                     }
                                 },

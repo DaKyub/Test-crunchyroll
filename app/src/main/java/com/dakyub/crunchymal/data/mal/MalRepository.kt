@@ -28,6 +28,9 @@ data class MalRecord(
     val url: String? = null,
     val fetchedAt: Long = 0,
     val manual: Boolean = false,
+    /** null = fiche mise en cache avant l'ajout des genres (à rafraîchir). */
+    val genres: List<String>? = null,
+    val englishTitle: String? = null,
 )
 
 class MalRepository(context: Context, clientId: () -> String) {
@@ -69,6 +72,7 @@ class MalRepository(context: Context, clientId: () -> String) {
         return when {
             r.manual && r.malId == null -> false
             r.malId == null -> age > NO_MATCH_TTL
+            r.genres == null -> true
             else -> age > SCORE_TTL
         }
     }
@@ -129,6 +133,8 @@ class MalRepository(context: Context, clientId: () -> String) {
         url = url,
         fetchedAt = now,
         manual = manual,
+        genres = genres,
+        englishTitle = titleEnglish,
     )
 
     private companion object {

@@ -25,6 +25,17 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.OutlinedButton
 import androidx.tv.material3.Text
 import com.dakyub.crunchymal.CrunchyMalApp
+import com.dakyub.crunchymal.AdnApp
+import com.dakyub.crunchymal.AppAnalyzer
+import com.dakyub.crunchymal.data.Provider
+import com.dakyub.crunchymal.data.adn.AdnShow
+import com.dakyub.crunchymal.data.adn.AdnVideo
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.runtime.produceState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.dakyub.crunchymal.LocalGraph
 import com.dakyub.crunchymal.ui.components.TvTextField
 import com.dakyub.crunchymal.ui.components.UpdateButton
@@ -46,6 +57,23 @@ fun SettingsScreen() {
     var audio by remember { mutableStateOf(settings.preferredAudio) }
     var malId by remember { mutableStateOf(settings.malClientIdOverride) }
     var basic by remember { mutableStateOf(settings.basicAuthOverride) }
+    var omdb by remember { mutableStateOf(settings.omdbKey) }
+    var tmdb by remember { mutableStateOf(settings.tmdbKey) }
+    var adnUser by remember { mutableStateOf(graph.adn.username) }
+    var adnPassword by remember { mutableStateOf("") }
+    var adnStatus by remember { mutableStateOf<String?>(null) }
+    val adnLoggedIn by graph.adn.loggedIn.collectAsState()
+    val providers by graph.providers.selected.collectAsState()
+    var adnTemplate by remember { mutableStateOf(settings.adnLinkTemplate) }
+    var adnAnalysis by remember { mutableStateOf<List<String>?>(null) }
+    var adnAnalyzing by remember { mutableStateOf(false) }
+    // Série / épisode ADN d'exemple pour le banc d'essai des liens.
+    val adnSample by produceState<Pair<AdnShow, AdnVideo?>?>(null, adnLoggedIn) {
+        value = runCatching {
+            val show = graph.adn.catalog(order = "popular", limit = 1).first()
+            show to graph.adn.episodes(show.id.toString()).firstOrNull()
+        }.getOrNull()
+    }
     var ua by remember { mutableStateOf(settings.userAgentOverride) }
 
     fun toast(msg: String) = Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
@@ -83,6 +111,123 @@ fun SettingsScreen() {
                 UpdateButton()
             }
         }
+        item { Section("Services") }
+        item {
+            SettingRow("Afficher") {
+                listOf(
+                    setOf(Provider.CRUNCHYROLL) to "Crunchyroll",
+                    setOf(Provider.ADN) to "ADN",
+                    setOf(Provider.CRUNCHYROLL, Provider.ADN) to "Les deux",
+                ).forEach { (value, label) ->
+                    FilterChip(selected = providers == value, onClick = { graph.providers.set(value) }) { Text(label) }
+                }
+            }
+        }
+
+        item { Section("ADN") }
+        item {
+            Text(
+                if (adnLoggedIn) "Connecté à ADN (${graph.adn.username})." else
+                    "Le catalogue ADN fonctionne sans connexion ; la connexion servira à ta liste et ta progression.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (!adnLoggedIn) {
+            item { TvTextField(adnUser, { adnUser = it }, "E-mail ou identifiant ADN") }
+            item { TvTextField(adnPassword, { adnPassword = it }, "Mot de passe ADN", password = true) }
+        }
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (adnLoggedIn) {
+                    OutlinedButton(onClick = { graph.adn.logout() }) { Text("Se déconnecter d'ADN") }
+                } else {
+                    Button(onClick = {
+                        adnStatus = "Connexion…"
+                        scope.launch {
+                            val error = runCatching { graph.adn.login(adnUser, adnPassword) }.getOrElse { it.message }
+                            adnStatus = error?.let { "Échec : $it" } ?: "Connecté"
+                            if (error == null) adnPassword = ""
+                        }
+                    }, enabled = adnUser.isNotBlank() && adnPassword.isNotBlank()) { Text("Se connecter à ADN") }
+                }
+                adnStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+            }
+        }
+        item {
+            Text(
+                "Lecture dans l'app ADN : « Essayer » ouvre « ${adnSample?.first?.title ?: "…"} » avec ce format. " +
+                    "Quand un format ouvre la bonne série ou l'épisode, appuie sur « Choisir ».",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        itemsIndexed(AdnApp.CANDIDATES) { index, template ->
+            val sample = adnSample
+            val intent = sample?.let { AdnApp.buildIntent(context, template, it.first, it.second) }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedButton(onClick = { AdnApp.start(context, intent) }, enabled = intent != null) {
+                    Text("Essayer ${index + 1}")
+                }
+                FilterChip(selected = adnTemplate == template, onClick = {
+                    adnTemplate = template
+                    settings.adnLinkTemplate = template
+                    toast("Format ADN ${index + 1} choisi")
+                }) { Text(if (adnTemplate == template) "✓ Choisi" else "Choisir") }
+                Text(template, style = MaterialTheme.typography.labelMedium)
+            }
+        }
+        item {
+            OutlinedButton(onClick = {
+                val pkg = AdnApp.packageName(context)
+                if (pkg == null) {
+                    adnAnalysis = listOf("Application ADN introuvable sur cet appareil.")
+                } else {
+                    adnAnalyzing = true
+                    scope.launch {
+                        adnAnalysis = withContext(Dispatchers.IO) {
+                            try {
+                                listOf("Paquet : $pkg") + AppAnalyzer.analyze(context, pkg)
+                            } catch (t: Throwable) {
+                                listOf("Analyse interrompue : ${t.javaClass.simpleName} ${t.message}")
+                            }
+                        }
+                        adnAnalyzing = false
+                    }
+                }
+            }) { Text(if (adnAnalyzing) "Analyse en cours…" else "Analyser l'app ADN (liens et liste)") }
+        }
+        adnAnalysis?.let { lines ->
+            items(lines.chunked(2)) { pair ->
+                Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                    pair.forEach { line ->
+                        Text(line, style = MaterialTheme.typography.labelSmall, maxLines = 2, modifier = Modifier.weight(1f))
+                    }
+                    if (pair.size == 1) Spacer(Modifier.weight(1f))
+                }
+            }
+        }
+
+        item { Section("Notes des épisodes") }
+        item {
+            Text(
+                "IMDb via une clé OMDb (omdbapi.com → API Key → FREE) et TMDB en secours (themoviedb.org → Paramètres → API). " +
+                    "Une seule clé suffit, les deux donnent le meilleur résultat.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        item { TvTextField(omdb, { omdb = it }, "Clé OMDb (8 caractères)") }
+        item { TvTextField(tmdb, { tmdb = it }, "Clé API TMDB (v3) ou jeton de lecture (v4)") }
+        item {
+            Button(onClick = {
+                settings.omdbKey = omdb
+                settings.tmdbKey = tmdb
+                graph.ratings.clear()
+                toast("Clés enregistrées")
+            }) { Text("Enregistrer les clés") }
+        }
+
         item { Section("MyAnimeList") }
         item {
             Text(

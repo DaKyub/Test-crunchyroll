@@ -24,6 +24,7 @@ data class MalAnime(
     val type: String?,
     val episodes: Int?,
     val startYear: Int?,
+    val genres: List<String> = emptyList(),
 ) {
     val url: String get() = "https://myanimelist.net/anime/$malId"
 
@@ -40,6 +41,9 @@ private data class AltTitles(
 )
 
 @Serializable
+private data class Genre(val name: String = "")
+
+@Serializable
 private data class Node(
     val id: Int = 0,
     val title: String = "",
@@ -49,6 +53,7 @@ private data class Node(
     @SerialName("media_type") val mediaType: String? = null,
     @SerialName("num_episodes") val numEpisodes: Int? = null,
     @SerialName("start_date") val startDate: String? = null,
+    val genres: List<Genre> = emptyList(),
 ) {
     fun toAnime() = MalAnime(
         malId = id,
@@ -61,6 +66,7 @@ private data class Node(
         type = mediaType,
         episodes = numEpisodes?.takeIf { it > 0 },
         startYear = startDate?.take(4)?.toIntOrNull(),
+        genres = genres.map { it.name }.filter { it.isNotBlank() },
     )
 }
 
@@ -122,7 +128,7 @@ class MalApi(private val clientId: () -> String) {
 
     private companion object {
         const val BASE = "https://api.myanimelist.net/v2"
-        const val FIELDS = "id,title,alternative_titles,mean,num_scoring_users,media_type,num_episodes,start_date"
+        const val FIELDS = "id,title,alternative_titles,mean,num_scoring_users,media_type,num_episodes,start_date,genres"
         const val MIN_INTERVAL_MS = 400L
     }
 }

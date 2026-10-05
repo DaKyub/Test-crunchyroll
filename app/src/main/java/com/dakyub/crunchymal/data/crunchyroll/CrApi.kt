@@ -90,6 +90,25 @@ class CrApi(private val auth: CrAuth, private val settings: Settings) {
             mapOf("n" to "20", "preferred_audio_language" to settings.preferredAudio) + params,
         ).all
 
+    suspend fun categories(): List<CrCategory> =
+        get<CrListResponse<CrCategory>>("/content/v2/discover/categories").all
+
+    /** Catégories d'un contenu (série) : sert de repli quand MAL n'a pas de genres. */
+    suspend fun categoriesOf(contentId: String): List<CrCategory> =
+        get<CrListResponse<CrCategory>>("/content/v2/discover/categories", mapOf("guid" to contentId)).all
+
+    suspend fun browseCategory(category: String, sortBy: String = "popularity", n: Int = 60): List<CrPanel> =
+        get<CrListResponse<CrPanel>>(
+            "/content/v2/discover/browse",
+            mapOf(
+                "categories" to category,
+                "sort_by" to sortBy,
+                "n" to n.toString(),
+                "type" to "series",
+                "preferred_audio_language" to settings.preferredAudio,
+            ),
+        ).all
+
     suspend fun search(query: String, n: Int = 40): List<CrPanel> =
         get<CrListResponse<CrSearchBucket>>(
             "/content/v2/discover/search",

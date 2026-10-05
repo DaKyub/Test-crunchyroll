@@ -23,6 +23,12 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import coil.compose.AsyncImage
 import com.dakyub.crunchymal.data.CardItem
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import com.dakyub.crunchymal.LocalGraph
+import com.dakyub.crunchymal.data.Provider
+import com.dakyub.crunchymal.ui.theme.AdnBlue
 import com.dakyub.crunchymal.ui.theme.CrunchyOrange
 
 val PosterWidth = 140.dp
@@ -64,6 +70,23 @@ fun MediaCard(
                         modifier = Modifier
                             .align(Alignment.TopEnd)
                             .padding(6.dp),
+                    )
+                }
+                // Badge du service, seulement quand plusieurs services sont affichés.
+                val providers by LocalGraph.current.providers.selected.collectAsState()
+                if (showMal && providers.size > 1 && item.series.id.isNotBlank()) {
+                    Text(
+                        (listOf(item.series.provider) + item.series.alsoOn).distinct().joinToString("+") { it.badge },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.White,
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(6.dp)
+                            .background(
+                                if (item.series.provider == Provider.ADN) AdnBlue else CrunchyOrange,
+                                RoundedCornerShape(4.dp),
+                            )
+                            .padding(horizontal = 5.dp, vertical = 1.dp),
                     )
                 }
                 item.progress?.let { p ->

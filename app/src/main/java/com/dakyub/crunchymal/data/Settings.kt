@@ -26,6 +26,28 @@ class Settings(context: Context) {
         get() = prefs.getString("user_agent", "")!!
         set(value) = prefs.edit().putString("user_agent", value.trim()).apply()
 
+    /** Services affichés (Crunchyroll, ADN ou les deux). */
+    var providers: Set<Provider>
+        get() = prefs.getStringSet("providers", null)
+            ?.mapNotNull { name -> Provider.entries.firstOrNull { it.name == name } }?.toSet()
+            ?.takeIf { it.isNotEmpty() } ?: setOf(Provider.CRUNCHYROLL)
+        set(value) = prefs.edit().putStringSet("providers", value.map { it.name }.toSet()).apply()
+
+    /** Format de lien choisi pour ouvrir un contenu dans l'app ADN (null = ouvrir l'app). */
+    var adnLinkTemplate: String?
+        get() = prefs.getString("adn_link_template", null)
+        set(value) = prefs.edit().putString("adn_link_template", value).apply()
+
+    /** Clé OMDb (notes IMDb des épisodes), gratuite sur omdbapi.com. */
+    var omdbKey: String
+        get() = prefs.getString("omdb_key", "")!!
+        set(value) = prefs.edit().putString("omdb_key", value.trim()).apply()
+
+    /** Clé TMDB (clé API v3 ou jeton de lecture v4), gratuite sur themoviedb.org. */
+    var tmdbKey: String
+        get() = prefs.getString("tmdb_key", "")!!
+        set(value) = prefs.edit().putString("tmdb_key", value.trim()).apply()
+
     /** Client ID de l'API officielle MyAnimeList (myanimelist.net/apiconfig). */
     var malClientIdOverride: String
         get() = prefs.getString("mal_client_id", "")!!

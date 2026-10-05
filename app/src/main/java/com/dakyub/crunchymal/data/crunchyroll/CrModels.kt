@@ -179,3 +179,26 @@ data class CrFeedItem(
     @SerialName("source_media_title") val sourceMediaTitle: String = "",
     @SerialName("query_params") val queryParams: kotlinx.serialization.json.JsonObject? = null,
 )
+
+@Serializable
+data class CrCategoryImage(val source: String = "", val width: Int = 0)
+
+@Serializable
+data class CrCategoryImages(
+    val background: List<CrCategoryImage> = emptyList(),
+    val low: List<CrCategoryImage> = emptyList(),
+)
+
+@Serializable
+data class CrCategoryLocalization(val title: String = "", val description: String = "")
+
+/** Catégorie Crunchyroll (action, isekai…). */
+@Serializable
+data class CrCategory(
+    val id: String = "",
+    val slug: String = "",
+    val images: CrCategoryImages = CrCategoryImages(),
+    val localization: CrCategoryLocalization = CrCategoryLocalization(),
+) {
+    val title: String get() = localization.title.ifBlank { slug.ifBlank { id } }
+}

@@ -2,7 +2,10 @@ package com.dakyub.crunchymal
 
 import android.content.Context
 import androidx.compose.runtime.staticCompositionLocalOf
+import com.dakyub.crunchymal.data.ProviderSelection
 import com.dakyub.crunchymal.data.Settings
+import com.dakyub.crunchymal.data.adn.AdnApi
+import com.dakyub.crunchymal.data.ratings.RatingsRepository
 import com.dakyub.crunchymal.data.WatchlistRepository
 import com.dakyub.crunchymal.data.crunchyroll.CrApi
 import com.dakyub.crunchymal.data.crunchyroll.CrAuth
@@ -19,6 +22,9 @@ class Graph(context: Context) {
     val progress = ProgressRepository(context, api)
     val watchlist = WatchlistRepository(api)
     val updates = UpdateManager(context)
+    val providers = ProviderSelection(settings)
+    val adn = AdnApi(context)
+    val ratings = RatingsRepository(settings)
 }
 
 val LocalGraph = staticCompositionLocalOf<Graph> { error("Graph non fourni") }

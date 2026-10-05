@@ -30,6 +30,7 @@ import androidx.tv.material3.OutlinedButton
 import androidx.tv.material3.Text
 import com.dakyub.crunchymal.Graph
 import com.dakyub.crunchymal.LocalGraph
+import com.dakyub.crunchymal.data.Provider
 import com.dakyub.crunchymal.data.crunchyroll.CrConfig
 import com.dakyub.crunchymal.data.crunchyroll.PollResult
 import com.dakyub.crunchymal.ui.components.TvTextField
@@ -149,6 +150,9 @@ fun LoginScreen() {
                         }
                     }
                 }
+            }
+            OutlinedButton(onClick = { graph.providers.set(setOf(Provider.ADN)) }) {
+                Text("Continuer avec ADN uniquement (sans Crunchyroll)")
             }
         }
     }

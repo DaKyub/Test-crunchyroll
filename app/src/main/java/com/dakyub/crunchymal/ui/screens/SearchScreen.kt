@@ -19,6 +19,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.dakyub.crunchymal.Graph
 import com.dakyub.crunchymal.LocalGraph
 import com.dakyub.crunchymal.data.CardItem
+import com.dakyub.crunchymal.data.SeriesRef
 import com.dakyub.crunchymal.ui.components.CenteredMessage
 import com.dakyub.crunchymal.ui.components.MediaCard
 import com.dakyub.crunchymal.ui.components.PosterWidth
@@ -29,6 +30,10 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import com.dakyub.crunchymal.data.Provider
+import com.dakyub.crunchymal.data.mergeProviders
 
 data class SearchUi(val loading: Boolean = false, val results: List<CardItem> = emptyList(), val error: String? = null)
 
@@ -49,8 +54,20 @@ class SearchViewModel(private val graph: Graph) : ViewModel() {
             return
         }
         ui.value = ui.value.copy(loading = true, error = null)
-        ui.value = runCatching { graph.api.search(q.trim()).map { it.toSeriesCard() } }
-            .fold({ SearchUi(results = it) }, { SearchUi(error = it.message) })
+        val providers = graph.providers.selected.value
+        val query = q.trim()
+        ui.value = runCatching {
+            coroutineScope {
+                val cr = async {
+                    if (Provider.CRUNCHYROLL in providers) graph.api.search(query).map { it.toSeriesCard() } else emptyList()
+                }
+                val adn = async {
+                    if (Provider.ADN in providers) graph.adn.catalog(order = "popular", search = query, limit = 40).map { it.toCard() }
+                    else emptyList()
+                }
+                mergeProviders(cr.await(), adn.await())
+            }
+        }.fold({ SearchUi(results = it) }, { SearchUi(error = it.message) })
     }
 
     fun submit() {
@@ -59,7 +76,7 @@ class SearchViewModel(private val graph: Graph) : ViewModel() {
 }
 
 @Composable
-fun SearchScreen(onOpenSeries: (String) -> Unit) {
+fun SearchScreen(onOpenSeries: (SeriesRef) -> Unit) {
     val graph = LocalGraph.current
     val vm = viewModel { SearchViewModel(graph) }
     val query by vm.query.collectAsState()
@@ -79,7 +96,7 @@ fun SearchScreen(onOpenSeries: (String) -> Unit) {
                 modifier = Modifier.fillMaxSize(),
             ) {
                 items(ui.results) { item ->
-                    MediaCard(item = item, onClick = { onOpenSeries(item.series.id) })
+                    MediaCard(item = item, onClick = { onOpenSeries(item.series) })
                 }
             }
         }

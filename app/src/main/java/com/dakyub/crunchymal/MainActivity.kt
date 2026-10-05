@@ -32,6 +32,12 @@ import androidx.tv.material3.Tab
 import androidx.tv.material3.TabRow
 import androidx.tv.material3.Text
 import com.dakyub.crunchymal.ui.components.UpdateBanner
+import androidx.tv.material3.OutlinedButton
+import com.dakyub.crunchymal.data.Provider
+import com.dakyub.crunchymal.data.ProviderSelection
+import com.dakyub.crunchymal.data.SeriesRef
+import com.dakyub.crunchymal.ui.screens.AdnSeriesScreen
+import com.dakyub.crunchymal.ui.screens.BrowseScreen
 import com.dakyub.crunchymal.ui.screens.HomeScreen
 import com.dakyub.crunchymal.ui.screens.LoginScreen
 import com.dakyub.crunchymal.ui.screens.SearchScreen
@@ -65,48 +71,67 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun AppRoot() {
-    val loggedIn by LocalGraph.current.auth.loggedIn.collectAsState()
-    if (!loggedIn) {
+    val graph = LocalGraph.current
+    val loggedIn by graph.auth.loggedIn.collectAsState()
+    val providers by graph.providers.selected.collectAsState()
+    // La connexion Crunchyroll n'est exigée que si Crunchyroll est affiché.
+    if (!loggedIn && Provider.CRUNCHYROLL in providers) {
         LoginScreen()
         return
     }
     val nav = rememberNavController()
     NavHost(navController = nav, startDestination = "main") {
         composable("main") {
-            MainTabs(onOpenSeries = { id -> nav.navigate("series/$id") })
+            MainTabs(onOpenSeries = { ref -> if (ref.id.isNotBlank()) nav.navigate(ref.route) })
         }
-        composable("series/{id}", arguments = listOf(navArgument("id") { type = NavType.StringType })) { entry ->
-            SeriesScreen(seriesId = entry.arguments?.getString("id").orEmpty())
+        composable(
+            "series/{provider}/{id}",
+            arguments = listOf(
+                navArgument("provider") { type = NavType.StringType },
+                navArgument("id") { type = NavType.StringType },
+            ),
+        ) { entry ->
+            val id = entry.arguments?.getString("id").orEmpty()
+            when (entry.arguments?.getString("provider")) {
+                Provider.ADN.name -> AdnSeriesScreen(showId = id)
+                else -> SeriesScreen(seriesId = id)
+            }
         }
     }
 }
 
-private val Tabs = listOf("Accueil", "Watchlist", "Recherche", "Paramètres")
+private val Tabs = listOf("Accueil", "Parcourir", "Watchlist", "Recherche", "Paramètres")
 
 @Composable
-private fun MainTabs(onOpenSeries: (String) -> Unit) {
+private fun MainTabs(onOpenSeries: (SeriesRef) -> Unit) {
     var selected by rememberSaveable { mutableIntStateOf(0) }
-    val updates = LocalGraph.current.updates
-    LaunchedEffect(Unit) { updates.check() }
+    val graph = LocalGraph.current
+    val providers by graph.providers.selected.collectAsState()
+    LaunchedEffect(Unit) { graph.updates.check() }
     Column(Modifier.fillMaxSize()) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(24.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
             modifier = Modifier.padding(start = 48.dp, end = 48.dp, top = 16.dp, bottom = 4.dp),
         ) {
             TabRow(selectedTabIndex = selected, modifier = Modifier.weight(1f, fill = false)) {
                 Tabs.forEachIndexed { index, title ->
                     Tab(selected = index == selected, onFocus = { selected = index }) {
-                        Text(title, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+                        Text(title, modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp))
                     }
                 }
+            }
+            // Sélecteur de services : Crunchyroll → ADN → les deux.
+            OutlinedButton(onClick = { graph.providers.next() }) {
+                Text("Service : ${ProviderSelection.label(providers)}", style = MaterialTheme.typography.labelLarge)
             }
             UpdateBanner()
         }
         when (selected) {
             0 -> HomeScreen(onOpenSeries)
-            1 -> WatchlistScreen(onOpenSeries)
-            2 -> SearchScreen(onOpenSeries)
+            1 -> BrowseScreen(onOpenSeries)
+            2 -> WatchlistScreen(onOpenSeries)
+            3 -> SearchScreen(onOpenSeries)
             else -> SettingsScreen()
         }
     }

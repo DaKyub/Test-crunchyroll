@@ -28,6 +28,8 @@ import com.dakyub.crunchymal.Graph
 import com.dakyub.crunchymal.LocalGraph
 import com.dakyub.crunchymal.OfficialApp
 import com.dakyub.crunchymal.data.CardItem
+import com.dakyub.crunchymal.data.Provider
+import com.dakyub.crunchymal.data.SeriesRef
 import com.dakyub.crunchymal.data.WatchlistEntry
 import com.dakyub.crunchymal.data.progress.WatchStatus
 import com.dakyub.crunchymal.ui.components.CenteredMessage
@@ -144,8 +146,13 @@ class WatchlistViewModel(private val graph: Graph) : ViewModel() {
 }
 
 @Composable
-fun WatchlistScreen(onOpenSeries: (String) -> Unit) {
+fun WatchlistScreen(onOpenSeries: (SeriesRef) -> Unit) {
     val graph = LocalGraph.current
+    val providers by graph.providers.selected.collectAsState()
+    if (Provider.CRUNCHYROLL !in providers) {
+        CenteredMessage("La watchlist ADN (avec progression) arrive dans la prochaine version.")
+        return
+    }
     val vm = viewModel { WatchlistViewModel(graph) }
     val ui by vm.ui.collectAsState()
     val malError by graph.mal.lastError.collectAsState()
@@ -195,7 +202,7 @@ fun WatchlistScreen(onOpenSeries: (String) -> Unit) {
                     MediaCard(
                         item = item,
                         width = GridPosterWidth,
-                        onClick = { onOpenSeries(item.series.id) },
+                        onClick = { onOpenSeries(item.series) },
                         onLongClick = item.episodeId?.let { id -> { OfficialApp.openEpisode(context, id, item.series.id) } },
                     )
                 }

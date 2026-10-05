@@ -7,6 +7,7 @@ import androidx.tv.material3.darkColorScheme
 
 val CrunchyOrange = Color(0xFFF47521)
 val MalBlue = Color(0xFF2E51A2)
+val AdnBlue = Color(0xFF0096D6)
 val Background = Color(0xFF0F0F12)
 
 private val colors = darkColorScheme(

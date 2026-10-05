@@ -1,5 +1,11 @@
 package com.dakyub.crunchymal.data
 
+/** Service de streaming d'où vient un contenu. */
+enum class Provider(val label: String, val badge: String) {
+    CRUNCHYROLL("Crunchyroll", "CR"),
+    ADN("ADN", "ADN"),
+}
+
 /** Référence minimale d'une série pour l'affichage (carte, badge MAL, navigation). */
 data class SeriesRef(
     val id: String,
@@ -7,12 +13,24 @@ data class SeriesRef(
     val slug: String = "",
     val posterUrl: String? = null,
     val wideUrl: String? = null,
+    val provider: Provider = Provider.CRUNCHYROLL,
+    /** Titres supplémentaires pour MAL (titre original ADN, etc.). */
+    val altTitles: List<String> = emptyList(),
+    /** Autres services proposant la même série (fusion "Les deux"). */
+    val alsoOn: Set<Provider> = emptySet(),
 ) {
     /** Titres utilisés pour chercher sur MAL : le slug est en anglais quelle que soit la langue choisie. */
     val malTitles: List<String>
-        get() = listOf(slug.replace('-', ' '), title).filter { it.isNotBlank() }.distinct()
+        get() = (listOf(slug.replace('-', ' ')) + altTitles + title).filter { it.isNotBlank() }.distinct()
 
-    val malKey: String get() = "series:$id"
+    val malKey: String
+        get() = when (provider) {
+            Provider.CRUNCHYROLL -> "series:$id"
+            Provider.ADN -> "adn:$id"
+        }
+
+    /** Route de navigation vers la fiche. */
+    val route: String get() = "series/${provider.name}/$id"
 }
 
 /** Carte affichée dans les rangées / grilles. */
