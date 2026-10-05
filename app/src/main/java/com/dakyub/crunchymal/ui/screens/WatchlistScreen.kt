@@ -196,7 +196,7 @@ fun WatchlistScreen(onOpenSeries: (String) -> Unit) {
                         item = item,
                         width = GridPosterWidth,
                         onClick = { onOpenSeries(item.series.id) },
-                        onLongClick = item.episodeId?.let { id -> { OfficialApp.openEpisode(context, id) } },
+                        onLongClick = item.episodeId?.let { id -> { OfficialApp.openEpisode(context, id, item.series.id) } },
                     )
                 }
             }

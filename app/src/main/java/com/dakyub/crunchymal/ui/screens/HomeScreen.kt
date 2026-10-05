@@ -216,10 +216,10 @@ fun HomeScreen(onOpenSeries: (String) -> Unit) {
                                 onClick = {
                                     when {
                                         item.series.id.isNotBlank() -> onOpenSeries(item.series.id)
-                                        item.episodeId != null -> OfficialApp.openEpisode(context, item.episodeId)
+                                        item.episodeId != null -> OfficialApp.openEpisode(context, item.episodeId, null)
                                     }
                                 },
-                                onLongClick = item.episodeId?.let { id -> { OfficialApp.openEpisode(context, id) } },
+                                onLongClick = item.episodeId?.let { id -> { OfficialApp.openEpisode(context, id, item.series.id) } },
                             )
                         }
                     }

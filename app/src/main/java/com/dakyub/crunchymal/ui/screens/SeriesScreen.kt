@@ -220,7 +220,7 @@ fun SeriesScreen(seriesId: String) {
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             val nextId = summary?.nextEpisodeId
                             Button(onClick = {
-                                if (nextId != null) OfficialApp.openEpisode(context, nextId) else OfficialApp.openSeries(context, series.id)
+                                if (nextId != null) OfficialApp.openEpisode(context, nextId, series.id) else OfficialApp.openSeries(context, series.id)
                             }) {
                                 Text(
                                     when {
@@ -291,7 +291,7 @@ fun SeriesScreen(seriesId: String) {
                                                     progress = node.progress.takeIf { it > 0f },
                                                     wide = true,
                                                 ),
-                                                onClick = { OfficialApp.openEpisode(context, ep.id) },
+                                                onClick = { OfficialApp.openEpisode(context, ep.id, series.id) },
                                                 showMal = false,
                                             )
                                         }

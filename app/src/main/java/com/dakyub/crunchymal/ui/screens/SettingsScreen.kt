@@ -55,7 +55,7 @@ fun SettingsScreen() {
     var linkFormat by remember { mutableStateOf(settings.linkFormat) }
     var basic by remember { mutableStateOf(settings.basicAuthOverride) }
     var ua by remember { mutableStateOf(settings.userAgentOverride) }
-    val resolved = remember { LinkFormat.entries.associateWith { OfficialApp.resolve(context, it) } }
+    val resolvedActivity = remember { OfficialApp.resolve(context) }
     val activities = remember { OfficialApp.exportedActivities(context) }
     var analysis by remember { mutableStateOf<List<String>?>(null) }
     var analyzing by remember { mutableStateOf(false) }
@@ -121,25 +121,23 @@ fun SettingsScreen() {
         item { Section("Lecture dans l'app Crunchyroll") }
         item {
             Text(
-                "Choisis le format de lien utilisé pour ouvrir un épisode. ✓ = accepté par l'app officielle. " +
-                    "Teste en ouvrant un épisode : si Crunchyroll s'ouvre sur l'accueil au lieu de l'épisode, essaie un autre format.",
+                "Comment « Reprendre » et les épisodes s'ouvrent dans Crunchyroll. La fiche de la série est fiable ; " +
+                    "l'épisode direct est un essai. " +
+                    (resolvedActivity?.let { "Liens crunchyroll:// acceptés par $it." } ?: "Liens crunchyroll:// refusés par l'app officielle."),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(selected = linkFormat == null, onClick = {
-                    linkFormat = null
-                    settings.linkFormat = null
-                }) { Text("Automatique (premier format accepté)") }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 LinkFormat.entries.forEach { format ->
-                    FilterChip(selected = linkFormat == format, onClick = {
-                        linkFormat = format
-                        settings.linkFormat = format
-                    }) {
-                        Text("${if (resolved[format] != null) "✓" else "✗"}  ${format.label}" + (resolved[format]?.let { "  →  $it" } ?: ""))
-                    }
+                    FilterChip(
+                        selected = (linkFormat ?: LinkFormat.SERIES_PAGE) == format,
+                        onClick = {
+                            linkFormat = format
+                            settings.linkFormat = format
+                        },
+                    ) { Text(format.label) }
                 }
             }
         }
