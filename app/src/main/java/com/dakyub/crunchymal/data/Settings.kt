@@ -26,11 +26,6 @@ class Settings(context: Context) {
         get() = prefs.getString("user_agent", "")!!
         set(value) = prefs.edit().putString("user_agent", value.trim()).apply()
 
-    /** Modèle de lien choisi pour ouvrir un contenu dans l'app officielle (null = défaut). */
-    var linkTemplate: String?
-        get() = prefs.getString("link_template", null)
-        set(value) = prefs.edit().putString("link_template", value).apply()
-
     /** Client ID de l'API officielle MyAnimeList (myanimelist.net/apiconfig). */
     var malClientIdOverride: String
         get() = prefs.getString("mal_client_id", "")!!

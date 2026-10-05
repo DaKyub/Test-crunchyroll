@@ -5,17 +5,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -28,18 +24,13 @@ import androidx.tv.material3.FilterChip
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.OutlinedButton
 import androidx.tv.material3.Text
-import com.dakyub.crunchymal.AppAnalyzer
 import com.dakyub.crunchymal.CrunchyMalApp
-import com.dakyub.crunchymal.data.WatchlistEntry
 import com.dakyub.crunchymal.LocalGraph
-import com.dakyub.crunchymal.OfficialApp
 import com.dakyub.crunchymal.ui.components.TvTextField
 import com.dakyub.crunchymal.ui.components.UpdateButton
 import com.dakyub.crunchymal.ui.components.label
 import com.dakyub.crunchymal.update.UpdateState
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 private val Locales = listOf("fr-FR" to "Français", "en-US" to "English")
 private val Audios = listOf("ja-JP" to "Japonais", "fr-FR" to "Français", "en-US" to "Anglais")
@@ -54,17 +45,8 @@ fun SettingsScreen() {
     var locale by remember { mutableStateOf(settings.locale) }
     var audio by remember { mutableStateOf(settings.preferredAudio) }
     var malId by remember { mutableStateOf(settings.malClientIdOverride) }
-    var linkTemplate by remember { mutableStateOf(settings.linkTemplate ?: OfficialApp.DEFAULT_TEMPLATE) }
-    // Série / épisode d'exemple pour le banc d'essai : premier élément de la watchlist.
-    val sample by produceState<WatchlistEntry?>(null) {
-        value = runCatching { graph.watchlist.get().firstOrNull { it.nextEpisodeId != null } }.getOrNull()
-    }
     var basic by remember { mutableStateOf(settings.basicAuthOverride) }
     var ua by remember { mutableStateOf(settings.userAgentOverride) }
-    val resolvedActivity = remember { OfficialApp.resolve(context) }
-    val activities = remember { OfficialApp.exportedActivities(context) }
-    var analysis by remember { mutableStateOf<List<String>?>(null) }
-    var analyzing by remember { mutableStateOf(false) }
 
     fun toast(msg: String) = Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
 
@@ -120,72 +102,6 @@ fun SettingsScreen() {
                 }) { Text("Enregistrer le Client ID") }
                 OutlinedButton(onClick = { scope.launch { graph.mal.clear(); graph.mal.configChanged(); toast("Cache MAL vidé") } }) {
                     Text("Vider les notes MAL")
-                }
-            }
-        }
-
-        item { Section("Lecture dans l'app Crunchyroll") }
-        item {
-            Text(
-                "Banc d'essai : « Essayer » ouvre Crunchyroll avec ce format sur « ${sample?.series?.title ?: "…"} ». " +
-                    "Quand un format ouvre la bonne fiche ou l'épisode, appuie sur « Choisir ». " +
-                    (resolvedActivity?.let { "Liens crunchyroll:// reçus par $it." } ?: "Liens crunchyroll:// refusés par l'app officielle."),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        itemsIndexed(OfficialApp.CANDIDATES) { index, template ->
-            val entry = sample
-            val intent = entry?.let { OfficialApp.buildIntent(template, it.series.id, it.nextEpisodeId) }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedButton(onClick = { OfficialApp.start(context, intent) }, enabled = intent != null) {
-                    Text("Essayer ${index + 1}")
-                }
-                FilterChip(selected = linkTemplate == template, onClick = {
-                    linkTemplate = template
-                    settings.linkTemplate = template
-                    toast("Format ${index + 1} choisi")
-                }) { Text(if (linkTemplate == template) "✓ Choisi" else "Choisir") }
-                Text(template, style = MaterialTheme.typography.labelMedium)
-            }
-        }
-        item {
-            Text(
-                if (activities.isEmpty()) "App Crunchyroll introuvable." else "Activités de l'app officielle : " + activities.joinToString(", "),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-
-        item {
-            OutlinedButton(onClick = {
-                analyzing = true
-                scope.launch {
-                    analysis = withContext(Dispatchers.IO) {
-                        try {
-                            AppAnalyzer.analyze(context)
-                        } catch (t: Throwable) {
-                            listOf("Analyse interrompue : ${t.javaClass.simpleName} ${t.message}") +
-                                generateSequence(t.cause) { it.cause }.map { "Cause : ${it.javaClass.simpleName} ${it.message}" }.toList()
-                        }
-                    }
-                    analyzing = false
-                }
-            }) { Text(if (analyzing) "Analyse en cours…" else "Analyser les liens de l'app Crunchyroll") }
-        }
-        analysis?.let { lines ->
-            // Affichage dense sur deux colonnes pour tenir en quelques photos.
-            items(lines.chunked(2)) { pair ->
-                Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                    pair.forEach { line ->
-                        Text(
-                            line,
-                            style = MaterialTheme.typography.labelSmall,
-                            maxLines = 2,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                    if (pair.size == 1) Spacer(Modifier.weight(1f))
                 }
             }
         }

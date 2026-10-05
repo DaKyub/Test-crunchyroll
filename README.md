@@ -78,7 +78,8 @@ Pour compiler toi-même : `./gradlew assembleRelease` (il faut le SDK Android, A
   C'est sans risque pour un usage perso, mais à tes risques.
 - Si la connexion échoue (HTTP 401/403), les identifiants client de l'app TV ont probablement changé.
   Mets-les à jour dans **Paramètres → Avancé**, sans recompiler (voir la section sur les identifiants client).
-- L'app TV officielle ne documente pas ses liens directs. **Paramètres → Lecture** liste les formats
-  qu'elle accepte (✓) et permet d'en choisir un. Si aucun ne fonctionne, Crunchyroll s'ouvre sur son accueil.
+- La lecture passe par les liens profonds de l'app TV officielle, non documentés mais validés sur Shield :
+  `crunchyroll://episode/<id>` (lance l'épisode) et `crunchyroll://series/<id>` (fiche de la série).
+  Crunchyroll est relancé à chaque ouverture, faute de quoi il ignore le lien s'il tournait déjà.
 - Sur MAL, chaque saison est une fiche distincte. La note « série » correspond à la meilleure correspondance,
   généralement la saison 1. La fiche série affiche la note de chaque saison.
