@@ -211,12 +211,12 @@ fun WatchlistScreen(onOpenSeries: (SeriesRef) -> Unit) {
     }
 }
 
-private fun StatusFilter.next() = StatusFilter.entries[(ordinal + 1) % StatusFilter.entries.size]
+internal fun StatusFilter.next() = StatusFilter.entries[(ordinal + 1) % StatusFilter.entries.size]
 
 private fun SortMode.next() = SortMode.entries[(ordinal + 1) % SortMode.entries.size]
 
 @Composable
-private fun CycleButton(label: String, value: String, onClick: () -> Unit) {
+internal fun CycleButton(label: String, value: String, onClick: () -> Unit) {
     OutlinedButton(onClick = onClick, scale = OutlinedButtonDefaults.scale(focusedScale = 1.05f)) {
         Text("$label : ", style = MaterialTheme.typography.labelLarge)
         Text(value, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
