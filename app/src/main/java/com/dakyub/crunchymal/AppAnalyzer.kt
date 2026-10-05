@@ -1,98 +1,85 @@
 package com.dakyub.crunchymal
 
 import android.content.Context
-import android.content.res.XmlResourceParser
-import org.xmlpull.v1.XmlPullParser
-import java.nio.ByteBuffer
+import java.io.File
+import java.io.RandomAccessFile
 import java.nio.ByteOrder
+import java.nio.MappedByteBuffer
+import java.nio.channels.FileChannel
 import java.util.zip.ZipFile
 
 /**
- * Diagnostic : cherche dans l'APK de l'app Crunchyroll officielle comment elle gère les liens
- * (filtres d'intent du manifeste + chaînes du code évoquant des liens profonds).
+ * Diagnostic : cherche dans le code de l'app Crunchyroll officielle les chaînes évoquant des liens
+ * profonds. Chaque .dex est copié dans le cache puis lu en mémoire mappée (pas de gros tableau sur le tas).
  */
 object AppAnalyzer {
-    private const val ANDROID_NS = "http://schemas.android.com/apk/res/android"
-
     private val interesting = Regex(
-        """crunchyroll://|deep.?link|^/?(watch|series|episode|play|media|show)(/|\?|$)|\{(id|guid|mediaId|episodeId|seriesId)}""",
+        """crunchyroll://|deep.?link|uriPattern|^/?(watch|series|episode|play|media|show)(/|\?|$)|\{[a-zA-Z_]*(id|Id|guid)}""",
         RegexOption.IGNORE_CASE,
     )
 
     fun analyze(context: Context): List<String> {
         val out = mutableListOf<String>()
-        val appInfo = runCatching { context.packageManager.getApplicationInfo(OfficialApp.PACKAGE, 0) }.getOrNull()
-            ?: return listOf("App Crunchyroll introuvable.")
-
-        out += "— Filtres d'intent (manifeste) —"
-        out += runCatching { intentFilters(context) }.getOrElse { listOf("Lecture du manifeste impossible : ${it.message}") }
-
-        out += "— Chaînes de liens trouvées dans le code —"
-        val apks = listOf(appInfo.sourceDir) + appInfo.splitSourceDirs.orEmpty()
-        val found = sortedSetOf<String>()
-        for (apk in apks) {
-            runCatching {
-                ZipFile(apk).use { zip ->
-                    zip.entries().asSequence()
-                        .filter { it.name.matches(Regex("""classes\d*\.dex""")) }
-                        .forEach { entry ->
-                            runCatching {
-                                val bytes = zip.getInputStream(entry).use { it.readBytes() }
-                                dexStrings(bytes).filterTo(found) { it.length in 3..200 && interesting.containsMatchIn(it) }
-                            }.onFailure { out += "${entry.name} illisible : ${it.message}" }
-                        }
-                }
-            }.onFailure { out += "Lecture de $apk impossible : ${it.message}" }
+        val appInfo = try {
+            context.packageManager.getApplicationInfo(OfficialApp.PACKAGE, 0)
+        } catch (t: Throwable) {
+            return listOf("App Crunchyroll introuvable.")
         }
-        out += if (found.isEmpty()) listOf("(aucune)") else found.take(300)
+
+        val found = sortedSetOf<String>()
+        val apks = listOf(appInfo.sourceDir) + appInfo.splitSourceDirs.orEmpty()
+        val tmp = File(context.cacheDir, "analyze.dex")
+        for (apk in apks) {
+            try {
+                ZipFile(apk).use { zip ->
+                    val dexEntries = zip.entries().asSequence()
+                        .filter { it.name.matches(Regex("""classes\d*\.dex""")) }
+                        .toList()
+                    out += "${File(apk).name} : ${dexEntries.size} fichier(s) dex"
+                    for (entry in dexEntries) {
+                        try {
+                            zip.getInputStream(entry).use { input -> tmp.outputStream().use { input.copyTo(it) } }
+                            scanDex(tmp, found)
+                        } catch (t: Throwable) {
+                            out += "${entry.name} illisible : ${t.javaClass.simpleName} ${t.message}"
+                        } finally {
+                            tmp.delete()
+                        }
+                    }
+                }
+            } catch (t: Throwable) {
+                out += "Lecture de $apk impossible : ${t.javaClass.simpleName} ${t.message}"
+            }
+        }
+        out += "— ${found.size} chaîne(s) de liens trouvée(s) —"
+        out += found.take(400)
         return out
     }
 
-    /** Lit le manifeste binaire de l'app officielle via ses ressources. */
-    private fun intentFilters(context: Context): List<String> {
-        val res = context.packageManager.getResourcesForApplication(OfficialApp.PACKAGE)
-        val parser: XmlResourceParser = res.assets.openXmlResourceParser("AndroidManifest.xml")
-        val lines = mutableListOf<String>()
-        var activity = ""
-        var filter = StringBuilder()
-        val p = parser
-        try {
-            while (p.next() != XmlPullParser.END_DOCUMENT) {
-                when (p.eventType) {
-                    XmlPullParser.START_TAG -> when (p.name) {
-                        "activity", "activity-alias" -> activity = p.getAttributeValue(ANDROID_NS, "name").orEmpty()
-                            .removePrefix("com.crunchyroll.")
-                        "intent-filter" -> filter = StringBuilder()
-                        "action" -> filter.append(" action=").append(p.getAttributeValue(ANDROID_NS, "name")?.substringAfterLast('.'))
-                        "category" -> filter.append(" cat=").append(p.getAttributeValue(ANDROID_NS, "name")?.substringAfterLast('.'))
-                        "data" -> listOf("scheme", "host", "port", "path", "pathPrefix", "pathPattern", "mimeType").forEach { a ->
-                            p.getAttributeValue(ANDROID_NS, a)?.let { filter.append(" $a=").append(it) }
-                        }
-                    }
-                    XmlPullParser.END_TAG -> if (p.name == "intent-filter") lines += "$activity :$filter"
+    /** Parcourt la table des chaînes du .dex (format : https://source.android.com/docs/core/runtime/dex-format). */
+    private fun scanDex(file: File, found: MutableSet<String>) {
+        RandomAccessFile(file, "r").use { raf ->
+            val buf: MappedByteBuffer = raf.channel.map(FileChannel.MapMode.READ_ONLY, 0, raf.length())
+            buf.order(ByteOrder.LITTLE_ENDIAN)
+            val size = buf.limit()
+            if (size < 0x70) return
+            val count = buf.getInt(0x38)
+            val idsOff = buf.getInt(0x3C)
+            val bytes = ByteArray(256)
+            for (i in 0 until count) {
+                var pos = buf.getInt(idsOff + i * 4)
+                // Longueur ULEB128 ignorée : la chaîne MUTF-8 se termine par un octet nul.
+                while (pos < size && buf.get(pos).toInt() and 0x80 != 0) pos++
+                pos++
+                var len = 0
+                while (pos + len < size && buf.get(pos + len) != 0.toByte() && len < bytes.size) {
+                    bytes[len] = buf.get(pos + len)
+                    len++
                 }
+                if (len < 3 || len >= bytes.size) continue
+                val s = String(bytes, 0, len, Charsets.UTF_8)
+                if (interesting.containsMatchIn(s)) found += s
             }
-        } finally {
-            p.close()
-        }
-        if (lines.isEmpty()) lines += "(aucun filtre lu — le manifeste lu n'est peut-être pas celui de Crunchyroll)"
-        return lines
-    }
-
-    /** Extrait la table des chaînes d'un fichier .dex. */
-    private fun dexStrings(dex: ByteArray): Sequence<String> = sequence {
-        if (dex.size < 0x70) return@sequence
-        val buf = ByteBuffer.wrap(dex).order(ByteOrder.LITTLE_ENDIAN)
-        val count = buf.getInt(0x38)
-        val idsOff = buf.getInt(0x3C)
-        for (i in 0 until count) {
-            var pos = buf.getInt(idsOff + i * 4)
-            // Longueur ULEB128 (en caractères UTF-16), ignorée : la chaîne se termine par un octet nul.
-            while (dex[pos].toInt() and 0x80 != 0) pos++
-            pos++
-            var end = pos
-            while (end < dex.size && dex[end] != 0.toByte()) end++
-            yield(String(dex, pos, end - pos, Charsets.UTF_8))
         }
     }
 }

@@ -25,6 +25,7 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.OutlinedButton
 import androidx.tv.material3.Text
 import com.dakyub.crunchymal.AppAnalyzer
+import com.dakyub.crunchymal.CrunchyMalApp
 import com.dakyub.crunchymal.LinkFormat
 import com.dakyub.crunchymal.LocalGraph
 import com.dakyub.crunchymal.OfficialApp
@@ -56,11 +57,23 @@ fun SettingsScreen() {
 
     fun toast(msg: String) = Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
 
+    var lastCrash by remember { mutableStateOf(CrunchyMalApp.lastCrash(context)) }
+
     LazyColumn(
         contentPadding = PaddingValues(horizontal = 48.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
         modifier = Modifier.fillMaxSize(),
     ) {
+        lastCrash?.let { crash ->
+            item { Section("Dernier plantage") }
+            item { Text(crash, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error) }
+            item {
+                OutlinedButton(onClick = {
+                    CrunchyMalApp.clearCrash(context)
+                    lastCrash = null
+                }) { Text("Effacer le rapport") }
+            }
+        }
         item { Section("MyAnimeList") }
         item {
             Text(
@@ -121,7 +134,13 @@ fun SettingsScreen() {
             OutlinedButton(onClick = {
                 analyzing = true
                 scope.launch {
-                    analysis = withContext(Dispatchers.IO) { AppAnalyzer.analyze(context) }
+                    analysis = withContext(Dispatchers.IO) {
+                        try {
+                            AppAnalyzer.analyze(context)
+                        } catch (t: Throwable) {
+                            listOf("Analyse interrompue : ${t.javaClass.simpleName} ${t.message}")
+                        }
+                    }
                     analyzing = false
                 }
             }) { Text(if (analyzing) "Analyse en cours…" else "Analyser les liens de l'app Crunchyroll") }
