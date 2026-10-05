@@ -30,15 +30,28 @@ data class MalRecord(
     val manual: Boolean = false,
 )
 
-class MalRepository(context: Context) {
+class MalRepository(context: Context, clientId: () -> String) {
     private val file = File(context.filesDir, "mal_cache.json")
-    private val jikan = JikanApi()
+    private val api = MalApi(clientId)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val pending = ConcurrentHashMap.newKeySet<String>()
     private val writeLock = Mutex()
 
     private val _records = MutableStateFlow(load())
     val records: StateFlow<Map<String, MalRecord>> = _records
+
+    /** Dernière erreur rencontrée (affichée dans l'interface pour le diagnostic). */
+    private val _lastError = MutableStateFlow<String?>(null)
+    val lastError: StateFlow<String?> = _lastError
+
+    /** Incrémenté quand la configuration change : les badges redemandent alors leur note. */
+    private val _version = MutableStateFlow(0)
+    val version: StateFlow<Int> = _version
+
+    fun configChanged() {
+        _lastError.value = null
+        _version.value++
+    }
 
     private fun load(): Map<String, MalRecord> = runCatching {
         if (file.exists()) Http.json.decodeFromString<Map<String, MalRecord>>(file.readText()) else emptyMap()
@@ -73,8 +86,10 @@ class MalRepository(context: Context) {
         scope.launch {
             try {
                 put(key, resolve(existing, queries))
+                _lastError.value = null
             } catch (e: Exception) {
                 Log.w("MalRepository", "Échec MAL pour $key", e)
+                _lastError.value = e.message ?: e.javaClass.simpleName
             } finally {
                 pending.remove(key)
             }
@@ -84,19 +99,19 @@ class MalRepository(context: Context) {
     private suspend fun resolve(existing: MalRecord?, queries: List<String>): MalRecord {
         val now = System.currentTimeMillis()
         existing?.malId?.let { id ->
-            return jikan.anime(id).toRecord(now, existing.manual)
+            return api.anime(id).toRecord(now, existing.manual)
         }
         for (q in queries) {
-            val best = TitleMatcher.pick(jikan.search(q), queries)
+            val best = TitleMatcher.pick(api.search(q), queries)
             if (best != null) return best.toRecord(now, manual = false)
         }
         return MalRecord(malId = null, fetchedAt = now)
     }
 
-    suspend fun candidates(query: String): List<JikanAnime> = jikan.search(query, limit = 15)
+    suspend fun candidates(query: String): List<MalAnime> = api.search(query, limit = 15)
 
     /** Correction manuelle ; [anime] null = "pas sur MAL". */
-    suspend fun setManual(key: String, anime: JikanAnime?) {
+    suspend fun setManual(key: String, anime: MalAnime?) {
         val now = System.currentTimeMillis()
         put(key, anime?.toRecord(now, manual = true) ?: MalRecord(malId = null, fetchedAt = now, manual = true))
     }
@@ -106,7 +121,7 @@ class MalRepository(context: Context) {
         writeLock.withLock { file.delete() }
     }
 
-    private fun JikanAnime.toRecord(now: Long, manual: Boolean) = MalRecord(
+    private fun MalAnime.toRecord(now: Long, manual: Boolean) = MalRecord(
         malId = malId,
         title = title,
         score = score,

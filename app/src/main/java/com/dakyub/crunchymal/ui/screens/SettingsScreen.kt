@@ -2,6 +2,7 @@ package com.dakyub.crunchymal.ui.screens
 
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -22,7 +23,9 @@ import androidx.tv.material3.FilterChip
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.OutlinedButton
 import androidx.tv.material3.Text
+import com.dakyub.crunchymal.LinkFormat
 import com.dakyub.crunchymal.LocalGraph
+import com.dakyub.crunchymal.OfficialApp
 import com.dakyub.crunchymal.ui.components.TvTextField
 import kotlinx.coroutines.launch
 
@@ -38,8 +41,12 @@ fun SettingsScreen() {
 
     var locale by remember { mutableStateOf(settings.locale) }
     var audio by remember { mutableStateOf(settings.preferredAudio) }
+    var malId by remember { mutableStateOf(settings.malClientIdOverride) }
+    var linkFormat by remember { mutableStateOf(settings.linkFormat) }
     var basic by remember { mutableStateOf(settings.basicAuthOverride) }
     var ua by remember { mutableStateOf(settings.userAgentOverride) }
+    val resolved = remember { LinkFormat.entries.associateWith { OfficialApp.resolve(context, it) } }
+    val activities = remember { OfficialApp.exportedActivities(context) }
 
     fun toast(msg: String) = Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
 
@@ -48,8 +55,65 @@ fun SettingsScreen() {
         verticalArrangement = Arrangement.spacedBy(16.dp),
         modifier = Modifier.fillMaxSize(),
     ) {
+        item { Section("MyAnimeList") }
         item {
-            SettingRow("Langue des titres") {
+            Text(
+                "Client ID de l'API officielle : crée-le sur myanimelist.net/apiconfig (type « other »), puis colle-le ici." +
+                    if (settings.malClientIdOverride.isBlank() && settings.malClientId.isNotBlank()) " Un Client ID est déjà intégré au build." else "",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        item { TvTextField(malId, { malId = it }, "Client ID MyAnimeList (32 caractères)") }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Button(onClick = {
+                    settings.malClientIdOverride = malId
+                    graph.mal.configChanged()
+                    toast("Client ID MAL enregistré")
+                }) { Text("Enregistrer le Client ID") }
+                OutlinedButton(onClick = { scope.launch { graph.mal.clear(); graph.mal.configChanged(); toast("Cache MAL vidé") } }) {
+                    Text("Vider les notes MAL")
+                }
+            }
+        }
+
+        item { Section("Lecture dans l'app Crunchyroll") }
+        item {
+            Text(
+                "Choisis le format de lien utilisé pour ouvrir un épisode. ✓ = accepté par l'app officielle. " +
+                    "Teste en ouvrant un épisode : si Crunchyroll s'ouvre sur l'accueil au lieu de l'épisode, essaie un autre format.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = linkFormat == null, onClick = {
+                    linkFormat = null
+                    settings.linkFormat = null
+                }) { Text("Automatique (premier format accepté)") }
+                LinkFormat.entries.forEach { format ->
+                    FilterChip(selected = linkFormat == format, onClick = {
+                        linkFormat = format
+                        settings.linkFormat = format
+                    }) {
+                        Text("${if (resolved[format] != null) "✓" else "✗"}  ${format.label}" + (resolved[format]?.let { "  →  $it" } ?: ""))
+                    }
+                }
+            }
+        }
+        item {
+            Text(
+                if (activities.isEmpty()) "App Crunchyroll introuvable." else "Activités de l'app officielle : " + activities.joinToString(", "),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        item { Section("Langues") }
+        item {
+            SettingRow("Titres") {
                 Locales.forEach { (code, label) ->
                     FilterChip(selected = locale == code, onClick = {
                         locale = code
@@ -69,18 +133,19 @@ fun SettingsScreen() {
                 }
             }
         }
+
+        item { Section("Compte et avancé") }
         item {
-            SettingRow("Caches") {
-                OutlinedButton(onClick = { scope.launch { graph.mal.clear(); toast("Cache MAL vidé") } }) {
-                    Text("Vider les notes MAL")
-                }
-                OutlinedButton(onClick = { scope.launch { graph.progress.clear(); toast("Progression recalculée au prochain affichage") } }) {
-                    Text("Vider la progression")
-                }
+            OutlinedButton(onClick = { scope.launch { graph.progress.clear(); toast("Progression recalculée au prochain affichage") } }) {
+                Text("Vider le cache de progression")
             }
         }
         item {
-            Text("Avancé : identifiants client de l'app TV (laisser vide pour la valeur par défaut)", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "Identifiants client de l'app TV Crunchyroll (laisser vide pour la valeur du build)",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
         item { TvTextField(basic, { basic = it }, "Basic xxxxxxxx= (identifiant:secret en base64)") }
         item { TvTextField(ua, { ua = it }, "User-Agent, ex. Crunchyroll/ANDROIDTV/3.xx.x_xxxxx (Android 14; en-US; Chromecast)") }
@@ -101,6 +166,11 @@ fun SettingsScreen() {
             }
         }
     }
+}
+
+@Composable
+private fun Section(title: String) {
+    Text(title, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
 }
 
 @Composable

@@ -14,7 +14,7 @@ class Graph(context: Context) {
     val settings = Settings(context)
     val auth = CrAuth(context, settings)
     val api = CrApi(auth, settings)
-    val mal = MalRepository(context)
+    val mal = MalRepository(context) { settings.malClientId }
     val progress = ProgressRepository(context, api)
     val watchlist = WatchlistRepository(api)
 }

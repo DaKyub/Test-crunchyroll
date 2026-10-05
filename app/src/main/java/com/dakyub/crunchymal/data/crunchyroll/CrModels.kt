@@ -164,3 +164,18 @@ data class CrOAuthError(val error: String = "", @SerialName("error_description")
 
 @Serializable
 data class CrAccount(@SerialName("account_id") val accountId: String = "")
+
+/** Élément du fil d'accueil de l'app officielle (home_feed). */
+@Serializable
+data class CrFeedItem(
+    val id: String = "",
+    val title: String = "",
+    val description: String = "",
+    @SerialName("resource_type") val resourceType: String = "",
+    @SerialName("response_type") val responseType: String = "",
+    val link: String = "",
+    val ids: List<String> = emptyList(),
+    @SerialName("source_media_id") val sourceMediaId: String = "",
+    @SerialName("source_media_title") val sourceMediaTitle: String = "",
+    @SerialName("query_params") val queryParams: kotlinx.serialization.json.JsonObject? = null,
+)

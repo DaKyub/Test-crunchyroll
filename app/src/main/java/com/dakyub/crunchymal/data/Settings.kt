@@ -26,6 +26,21 @@ class Settings(context: Context) {
         get() = prefs.getString("user_agent", "")!!
         set(value) = prefs.edit().putString("user_agent", value.trim()).apply()
 
+    /** Format de lien direct choisi pour l'app officielle (null = automatique). */
+    var linkFormat: com.dakyub.crunchymal.LinkFormat?
+        get() = prefs.getString("link_format", null)?.let { name ->
+            com.dakyub.crunchymal.LinkFormat.entries.firstOrNull { it.name == name }
+        }
+        set(value) = prefs.edit().putString("link_format", value?.name).apply()
+
+    /** Client ID de l'API officielle MyAnimeList (myanimelist.net/apiconfig). */
+    var malClientIdOverride: String
+        get() = prefs.getString("mal_client_id", "")!!
+        set(value) = prefs.edit().putString("mal_client_id", value.trim()).apply()
+
+    val malClientId: String
+        get() = malClientIdOverride.ifBlank { BuildConfig.MAL_CLIENT_ID }
+
     val basicAuth: String
         get() = basicAuthOverride.ifBlank { BuildConfig.CR_BASIC_AUTH }.let {
             if (it.isBlank() || it.startsWith("Basic ")) it else "Basic $it"

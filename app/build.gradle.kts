@@ -15,8 +15,10 @@ android {
         applicationId = "com.dakyub.crunchymal"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        // Numéro de build GitHub Actions : chaque nouvel APK est une version supérieure.
+        val runNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
+        versionCode = runNumber
+        versionName = "0.2.$runNumber"
 
         // Identifiants client de l'app Android TV Crunchyroll ("Basic xxx=" ou juste "xxx=").
         // Fournis par la variable d'environnement CR_BASIC_AUTH ou par local.properties (cr.basicAuth).
@@ -26,13 +28,31 @@ android {
         val basicAuth = System.getenv("CR_BASIC_AUTH")?.takeIf { it.isNotBlank() }
             ?: localProps.getProperty("cr.basicAuth", "")
         buildConfigField("String", "CR_BASIC_AUTH", "\"${basicAuth.trim()}\"")
+
+        // Client ID de l'API MyAnimeList : variable MAL_CLIENT_ID ou local.properties (mal.clientId).
+        val malClientId = System.getenv("MAL_CLIENT_ID")?.takeIf { it.isNotBlank() }
+            ?: localProps.getProperty("mal.clientId", "")
+        buildConfigField("String", "MAL_CLIENT_ID", "\"${malClientId.trim()}\"")
+    }
+
+    // Clé de signature fixe (app perso installée en sideload) : chaque build peut ainsi
+    // être installé par-dessus le précédent sans désinstaller.
+    signingConfigs {
+        create("sideload") {
+            storeFile = file("signing/crunchymal.jks")
+            storePassword = "crunchymal"
+            keyAlias = "crunchymal"
+            keyPassword = "crunchymal"
+        }
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("sideload")
+        }
         release {
             isMinifyEnabled = false
-            // Signé avec la clé de debug pour pouvoir être installé en sideload sans keystore.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("sideload")
         }
     }
 

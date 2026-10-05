@@ -29,6 +29,14 @@ Trois façons de les fournir :
 - **Dans l'app** : si l'APK a été compilé sans identifiants, l'écran de connexion les demande.
   Ils restent modifiables dans **Paramètres → Avancé**.
 
+## Client ID MyAnimeList (obligatoire pour les notes)
+
+1. Connecte-toi sur <https://myanimelist.net/apiconfig> et clique sur **Create ID**.
+2. Remplis le formulaire : *App Type* `other`, nom et description libres,
+   *App Redirect URL* `http://localhost`, *Homepage URL* l'adresse de ce dépôt, usage non commercial.
+3. Copie le **Client ID** (32 caractères ; le *Client Secret* est inutile).
+4. Colle-le dans **Paramètres → MyAnimeList** de l'app, ou ajoute un secret GitHub `MAL_CLIENT_ID` puis relance le build.
+
 ## Installation sur le Shield
 
 1. Récupère l'APK dans l'onglet **Actions** du dépôt : dernier build vert, artefact `CrunchyMAL-apk`.
@@ -44,13 +52,15 @@ Pour compiler toi-même : `./gradlew assembleRelease` (il faut le SDK Android, A
 | Donnée | Source |
 | --- | --- |
 | Catalogue, watchlist, historique, playheads | API **non officielle** de Crunchyroll (celle de l'app Android TV) |
-| Notes MyAnimeList | [Jikan](https://jikan.moe), API publique de MAL sans clé |
+| Notes MyAnimeList | API officielle MyAnimeList v2 (Client ID gratuit) |
 
+- **Mises à jour.** L'APK est toujours signé avec la même clé (`app/signing`) : une nouvelle version
+  s'installe par-dessus l'ancienne, sans désinstaller ni perdre la connexion.
 - **Correspondance avec MAL.** Crunchyroll ne fournit pas d'identifiant MAL. L'app cherche donc par titre
   (titre anglais déduit du slug, puis titre affiché) et garde le candidat le plus proche, à 60 % de similarité minimum.
   Les notes sont mises en cache 7 jours. Tes corrections manuelles sont conservées définitivement.
-- **Débit Jikan limité.** Jikan accepte environ 1 requête par seconde : au premier lancement, les notes apparaissent
-  progressivement. Ensuite, tout vient du cache.
+- **Débit MAL limité.** L'app espace ses requêtes (environ 2 par seconde) : au premier lancement, les notes
+  apparaissent progressivement. Ensuite, tout vient du cache.
 - **Coût du calcul de progression.** Il faut récupérer saisons, épisodes et playheads de chaque série
   de la watchlist. Le résultat est mis en cache 6 h et recalculé au retour de l'app officielle.
 
@@ -60,7 +70,7 @@ Pour compiler toi-même : `./gradlew assembleRelease` (il faut le SDK Android, A
   C'est sans risque pour un usage perso, mais à tes risques.
 - Si la connexion échoue (HTTP 401/403), les identifiants client de l'app TV ont probablement changé.
   Mets-les à jour dans **Paramètres → Avancé**, sans recompiler (voir la section sur les identifiants client).
-- L'ouverture d'un épisode précis passe par le lien `https://www.crunchyroll.com/watch/<id>`.
-  Si l'app TV officielle ne gère pas ce lien, CrunchyMAL ouvre Crunchyroll sur son accueil.
+- L'app TV officielle ne documente pas ses liens directs. **Paramètres → Lecture** liste les formats
+  qu'elle accepte (✓) et permet d'en choisir un. Si aucun ne fonctionne, Crunchyroll s'ouvre sur son accueil.
 - Sur MAL, chaque saison est une fiche distincte. La note « série » correspond à la meilleure correspondance,
   généralement la saison 1. La fiche série affiche la note de chaque saison.

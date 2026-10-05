@@ -65,6 +65,31 @@ class CrApi(private val auth: CrAuth, private val settings: Settings) {
             mapOf("sort_by" to sortBy, "n" to n.toString(), "type" to "series"),
         ).all
 
+    suspend fun homeFeed(n: Int = 60): List<CrFeedItem> =
+        get<CrListResponse<CrFeedItem>>(
+            "/content/v2/discover/$account/home_feed",
+            mapOf("n" to n.toString(), "preferred_audio_language" to settings.preferredAudio),
+        ).all
+
+    suspend fun recommendations(n: Int = 20): List<CrPanel> =
+        get<CrListResponse<CrPanel>>(
+            "/content/v2/discover/$account/recommendations",
+            mapOf("n" to n.toString(), "preferred_audio_language" to settings.preferredAudio),
+        ).all
+
+    suspend fun similarTo(contentId: String, n: Int = 20): List<CrPanel> =
+        get<CrListResponse<CrPanel>>(
+            "/content/v2/discover/$account/similar_to/$contentId",
+            mapOf("n" to n.toString(), "preferred_audio_language" to settings.preferredAudio),
+        ).all
+
+    /** Browse avec des paramètres arbitraires (ceux fournis par le home_feed). */
+    suspend fun browseWith(params: Map<String, String>): List<CrPanel> =
+        get<CrListResponse<CrPanel>>(
+            "/content/v2/discover/browse",
+            mapOf("n" to "20", "preferred_audio_language" to settings.preferredAudio) + params,
+        ).all
+
     suspend fun search(query: String, n: Int = 40): List<CrPanel> =
         get<CrListResponse<CrSearchBucket>>(
             "/content/v2/discover/search",

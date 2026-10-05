@@ -51,7 +51,7 @@ import com.dakyub.crunchymal.data.CardItem
 import com.dakyub.crunchymal.data.SeriesRef
 import com.dakyub.crunchymal.data.crunchyroll.CrSeries
 import com.dakyub.crunchymal.data.crunchyroll.best
-import com.dakyub.crunchymal.data.mal.JikanAnime
+import com.dakyub.crunchymal.data.mal.MalAnime
 import com.dakyub.crunchymal.data.progress.SeriesTree
 import com.dakyub.crunchymal.ui.components.CenteredMessage
 import com.dakyub.crunchymal.ui.components.MalBadge
@@ -315,7 +315,7 @@ private fun MalCorrectionDialog(malKey: String, initialQuery: String, onDismiss:
     val mal = LocalGraph.current.mal
     val scope = rememberCoroutineScope()
     var query by remember { mutableStateOf(initialQuery) }
-    var results by remember { mutableStateOf<List<JikanAnime>?>(null) }
+    var results by remember { mutableStateOf<List<MalAnime>?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
 
     fun search() {

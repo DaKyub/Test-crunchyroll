@@ -22,6 +22,7 @@ jobs:
         run: ./gradlew --no-daemon assembleRelease
         env:
           CR_BASIC_AUTH: ${{ secrets.CR_BASIC_AUTH }}
+          MAL_CLIENT_ID: ${{ secrets.MAL_CLIENT_ID }}
 
       - uses: actions/upload-artifact@v4
         with:

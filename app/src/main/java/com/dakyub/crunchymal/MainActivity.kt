@@ -22,6 +22,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import androidx.tv.material3.LocalContentColor
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Tab
 import androidx.tv.material3.TabRow
@@ -41,12 +42,15 @@ class MainActivity : ComponentActivity() {
         setContent {
             CompositionLocalProvider(LocalGraph provides graph) {
                 CrunchyMalTheme {
-                    Box(
-                        Modifier
-                            .fillMaxSize()
-                            .background(MaterialTheme.colorScheme.background)
-                    ) {
-                        AppRoot()
+                    // Sans Surface, la couleur de texte par défaut est le noir : on la fixe explicitement.
+                    CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onBackground) {
+                        Box(
+                            Modifier
+                                .fillMaxSize()
+                                .background(MaterialTheme.colorScheme.background)
+                        ) {
+                            AppRoot()
+                        }
                     }
                 }
             }
@@ -78,7 +82,7 @@ private val Tabs = listOf("Accueil", "Watchlist", "Recherche", "Paramètres")
 private fun MainTabs(onOpenSeries: (String) -> Unit) {
     var selected by rememberSaveable { mutableIntStateOf(0) }
     Column(Modifier.fillMaxSize()) {
-        TabRow(selectedTabIndex = selected, modifier = Modifier.padding(start = 48.dp, top = 24.dp, bottom = 8.dp)) {
+        TabRow(selectedTabIndex = selected, modifier = Modifier.padding(start = 48.dp, top = 16.dp, bottom = 4.dp)) {
             Tabs.forEachIndexed { index, title ->
                 Tab(selected = index == selected, onFocus = { selected = index }) {
                     Text(title, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))

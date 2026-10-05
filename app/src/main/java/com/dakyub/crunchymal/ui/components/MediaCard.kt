@@ -25,7 +25,8 @@ import coil.compose.AsyncImage
 import com.dakyub.crunchymal.data.CardItem
 import com.dakyub.crunchymal.ui.theme.CrunchyOrange
 
-val PosterWidth = 150.dp
+val PosterWidth = 140.dp
+val GridPosterWidth = 112.dp
 val WideWidth = 260.dp
 
 @Composable

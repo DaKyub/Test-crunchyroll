@@ -21,8 +21,8 @@ import com.dakyub.crunchymal.data.mal.MalRecord
 import com.dakyub.crunchymal.ui.theme.MalBlue
 import java.util.Locale
 
-fun formatScore(record: MalRecord?): String = when {
-    record == null -> "…"
+fun formatScore(record: MalRecord?, failing: Boolean = false): String = when {
+    record == null -> if (failing) "?" else "…"
     record.score != null -> String.format(Locale.US, "%.2f", record.score)
     record.malId != null -> "N/A"
     else -> "—"
@@ -32,7 +32,8 @@ fun formatScore(record: MalRecord?): String = when {
 @Composable
 fun rememberMalRecord(key: String, titles: List<String>): MalRecord? {
     val mal = LocalGraph.current.mal
-    LaunchedEffect(key) { mal.request(key, titles) }
+    val version by mal.version.collectAsState()
+    LaunchedEffect(key, version) { mal.request(key, titles) }
     val records by mal.records.collectAsState()
     return records[key]
 }
@@ -40,6 +41,7 @@ fun rememberMalRecord(key: String, titles: List<String>): MalRecord? {
 @Composable
 fun MalBadge(key: String, titles: List<String>, modifier: Modifier = Modifier, large: Boolean = false) {
     val record = rememberMalRecord(key, titles)
+    val error by LocalGraph.current.mal.lastError.collectAsState()
     val style = if (large) MaterialTheme.typography.titleLarge else MaterialTheme.typography.labelMedium
     Row(
         modifier = modifier
@@ -49,6 +51,6 @@ fun MalBadge(key: String, titles: List<String>, modifier: Modifier = Modifier, l
         horizontalArrangement = Arrangement.spacedBy(if (large) 8.dp else 4.dp),
     ) {
         Text("MAL", style = style, color = Color.White.copy(alpha = 0.75f), fontWeight = FontWeight.Bold)
-        Text(formatScore(record), style = style, color = Color.White, fontWeight = FontWeight.Bold)
+        Text(formatScore(record, failing = error != null), style = style, color = Color.White, fontWeight = FontWeight.Bold)
     }
 }

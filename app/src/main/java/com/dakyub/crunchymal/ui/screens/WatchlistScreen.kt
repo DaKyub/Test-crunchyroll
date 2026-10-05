@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -16,11 +15,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.tv.material3.FilterChip
+import androidx.tv.material3.OutlinedButtonDefaults
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.OutlinedButton
 import androidx.tv.material3.Text
@@ -32,10 +32,11 @@ import com.dakyub.crunchymal.data.WatchlistEntry
 import com.dakyub.crunchymal.data.progress.WatchStatus
 import com.dakyub.crunchymal.ui.components.CenteredMessage
 import com.dakyub.crunchymal.ui.components.MediaCard
-import com.dakyub.crunchymal.ui.components.PosterWidth
+import com.dakyub.crunchymal.ui.components.GridPosterWidth
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -112,6 +113,12 @@ class WatchlistViewModel(private val graph: Graph) : ViewModel() {
 
     init {
         load(force = false)
+        // Client ID MAL ajouté ou modifié : on redemande les notes.
+        viewModelScope.launch {
+            graph.mal.version.drop(1).collect {
+                loaded.value.entries.forEach { graph.mal.request(it.series.malKey, it.series.malTitles) }
+            }
+        }
     }
 
     fun load(force: Boolean) {
@@ -141,37 +148,36 @@ fun WatchlistScreen(onOpenSeries: (String) -> Unit) {
     val graph = LocalGraph.current
     val vm = viewModel { WatchlistViewModel(graph) }
     val ui by vm.ui.collectAsState()
+    val malError by graph.mal.lastError.collectAsState()
     val context = LocalContext.current
 
-    Column(Modifier.fillMaxSize().padding(horizontal = 48.dp, vertical = 8.dp)) {
-        ChipRow("Statut") {
-            StatusFilter.entries.forEach { s ->
-                FilterChip(selected = ui.filters.status == s, onClick = { vm.setStatus(s) }) { Text(s.label) }
-            }
-        }
-        ChipRow("Trier") {
-            SortMode.entries.forEach { s ->
-                FilterChip(selected = ui.filters.sort == s, onClick = { vm.setSort(s) }) { Text(s.label) }
-            }
-        }
-        ChipRow("MAL ≥") {
-            MinScores.forEach { m ->
-                FilterChip(selected = ui.filters.minScore == m, onClick = { vm.setMinScore(m) }) {
-                    Text(m?.toString() ?: "Toutes")
-                }
-            }
-        }
+    Column(Modifier.fillMaxSize().padding(horizontal = 48.dp)) {
+        // Une seule ligne de filtres : chaque bouton passe à la valeur suivante.
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            modifier = Modifier.padding(vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.padding(vertical = 4.dp),
         ) {
+            CycleButton("Statut", ui.filters.status.label) { vm.setStatus(ui.filters.status.next()) }
+            CycleButton("Tri", ui.filters.sort.label) { vm.setSort(ui.filters.sort.next()) }
+            CycleButton("MAL ≥", ui.filters.minScore?.toString() ?: "toutes") {
+                vm.setMinScore(MinScores[(MinScores.indexOf(ui.filters.minScore) + 1) % MinScores.size])
+            }
+            OutlinedButton(onClick = { vm.load(force = true) }, scale = OutlinedButtonDefaults.scale(focusedScale = 1.05f)) {
+                Text("Actualiser", style = MaterialTheme.typography.labelLarge)
+            }
             Text(
-                "${ui.items.size} / ${ui.total} séries · progression ${ui.progressKnown}/${ui.total} · notes MAL ${ui.malKnown}/${ui.total}",
-                style = MaterialTheme.typography.bodySmall,
+                "${ui.items.size}/${ui.total} séries · progression ${ui.progressKnown}/${ui.total} · MAL ${ui.malKnown}/${ui.total}",
+                style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            OutlinedButton(onClick = { vm.load(force = true) }) { Text("Actualiser") }
+        }
+        malError?.let {
+            Text(
+                "Notes MAL indisponibles : $it",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
         }
 
         when {
@@ -179,15 +185,16 @@ fun WatchlistScreen(onOpenSeries: (String) -> Unit) {
             ui.error != null -> CenteredMessage(ui.error!!, "Réessayer") { vm.load(force = true) }
             ui.items.isEmpty() -> CenteredMessage("Aucune série ne correspond à ces filtres.")
             else -> LazyVerticalGrid(
-                columns = GridCells.Adaptive(PosterWidth + 16.dp),
-                contentPadding = PaddingValues(vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(20.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                columns = GridCells.Adaptive(GridPosterWidth + 12.dp),
+                contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.fillMaxSize(),
             ) {
                 items(ui.items, key = { it.series.id }) { item ->
                     MediaCard(
                         item = item,
+                        width = GridPosterWidth,
                         onClick = { onOpenSeries(item.series.id) },
                         onLongClick = item.episodeId?.let { id -> { OfficialApp.openEpisode(context, id) } },
                     )
@@ -197,14 +204,14 @@ fun WatchlistScreen(onOpenSeries: (String) -> Unit) {
     }
 }
 
+private fun StatusFilter.next() = StatusFilter.entries[(ordinal + 1) % StatusFilter.entries.size]
+
+private fun SortMode.next() = SortMode.entries[(ordinal + 1) % SortMode.entries.size]
+
 @Composable
-private fun ChipRow(label: String, content: @Composable () -> Unit) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier.padding(vertical = 4.dp),
-    ) {
-        Text(label, style = MaterialTheme.typography.labelLarge, modifier = Modifier.width(56.dp))
-        content()
+private fun CycleButton(label: String, value: String, onClick: () -> Unit) {
+    OutlinedButton(onClick = onClick, scale = OutlinedButtonDefaults.scale(focusedScale = 1.05f)) {
+        Text("$label : ", style = MaterialTheme.typography.labelLarge)
+        Text(value, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
     }
 }

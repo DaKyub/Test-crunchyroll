@@ -28,11 +28,15 @@ import com.dakyub.crunchymal.data.crunchyroll.CrPanel
 import com.dakyub.crunchymal.data.crunchyroll.best
 import com.dakyub.crunchymal.ui.components.CenteredMessage
 import com.dakyub.crunchymal.ui.components.MediaCard
-import kotlinx.coroutines.async
+import android.net.Uri
+import com.dakyub.crunchymal.data.crunchyroll.CrFeedItem
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.joinAll
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
-data class HomeRow(val title: String, val items: List<CardItem>)
+data class HomeRow(val key: String, val title: String, val items: List<CardItem>)
 
 data class HomeState(val loading: Boolean = true, val rows: List<HomeRow> = emptyList(), val error: String? = null)
 
@@ -49,62 +53,135 @@ fun CrPanel.toSeriesCard(): CardItem = CardItem(
     }?.ifBlank { null },
 )
 
+/** Carte "épisode" (historique, derniers épisodes) : vignette large + série associée. */
+fun CrPanel.toEpisodeCard(playhead: Long = 0, fullyWatched: Boolean = false, fallbackSeriesId: String = ""): CardItem {
+    val meta = episodeMetadata
+    val duration = meta?.durationMs ?: 0
+    return CardItem(
+        series = SeriesRef(
+            id = meta?.seriesId?.takeIf { it.isNotBlank() } ?: fallbackSeriesId,
+            title = meta?.seriesTitle?.takeIf { it.isNotBlank() } ?: title,
+            slug = meta?.seriesSlugTitle.orEmpty(),
+            wideUrl = images.thumbnail.best(400),
+        ),
+        subtitle = "S${meta?.seasonNumber ?: "?"} E${meta?.episode?.ifBlank { null } ?: meta?.episodeNumber ?: "?"} · $title",
+        episodeId = id,
+        progress = when {
+            fullyWatched -> 1f
+            duration > 0 && playhead > 0 -> playhead * 1000f / duration
+            else -> null
+        },
+        wide = true,
+    )
+}
+
+fun CrPanel.toCard(): CardItem = if (type == "episode") toEpisodeCard() else toSeriesCard()
+
 class HomeViewModel(private val graph: Graph) : ViewModel() {
     val state = MutableStateFlow(HomeState())
+    private var job: Job? = null
 
     init {
         load()
     }
 
     fun load() {
-        viewModelScope.launch {
-            state.value = state.value.copy(loading = true, error = null)
-            val api = graph.api
-            val continueRow = async {
-                runCatching {
-                    api.watchHistory()
-                        .filter { it.panel.type == "episode" }
-                        .distinctBy { it.panel.episodeMetadata?.seriesId ?: it.parentId }
-                        .take(20)
-                        .map { h ->
-                            val meta = h.panel.episodeMetadata
-                            val duration = meta?.durationMs ?: 0
-                            CardItem(
-                                series = SeriesRef(
-                                    id = meta?.seriesId?.takeIf { it.isNotBlank() } ?: h.parentId,
-                                    title = meta?.seriesTitle ?: h.panel.title,
-                                    slug = meta?.seriesSlugTitle.orEmpty(),
-                                    wideUrl = h.panel.images.thumbnail.best(400),
-                                ),
-                                subtitle = "S${meta?.seasonNumber ?: "?"} E${meta?.episode?.ifBlank { null } ?: meta?.episodeNumber ?: "?"} · ${h.panel.title}",
-                                episodeId = h.panel.id,
-                                progress = if (h.fullyWatched) 1f else if (duration > 0) h.playhead * 1000f / duration else null,
-                                wide = true,
-                            )
-                        }
-                }
-            }
-            val watchlistRow = async {
-                runCatching {
-                    graph.watchlist.get().take(30).map { e ->
-                        CardItem(series = e.series, episodeId = e.nextEpisodeId)
-                    }
-                }
-            }
-            val popular = async { runCatching { api.browse("popularity").map { it.toSeriesCard() } } }
-            val newest = async { runCatching { api.browse("newly_added").map { it.toSeriesCard() } } }
+        job?.cancel()
+        job = viewModelScope.launch {
+            state.value = HomeState(loading = true)
+            val feed = runCatching { graph.api.homeFeed() }.getOrNull()
+            val loaders = feed?.let { feedLoaders(it) }?.takeIf { it.isNotEmpty() } ?: fallbackLoaders()
 
-            val results = listOf(
-                "Continuer à regarder" to continueRow.await(),
-                "Ma watchlist" to watchlistRow.await(),
-                "Populaires" to popular.await(),
-                "Nouveautés" to newest.await(),
-            )
-            val rows = results.mapNotNull { (title, r) -> r.getOrNull()?.takeIf { it.isNotEmpty() }?.let { HomeRow(title, it) } }
-            val error = results.firstNotNullOfOrNull { it.second.exceptionOrNull() }?.message
-            state.value = HomeState(loading = false, rows = rows, error = if (rows.isEmpty()) error ?: "Rien à afficher" else null)
+            // Les rangées s'affichent au fur et à mesure, dans l'ordre du fil officiel.
+            val results = arrayOfNulls<List<CardItem>>(loaders.size)
+            val done = BooleanArray(loaders.size)
+            var firstError: String? = null
+            fun publish() {
+                val rows = loaders.indices.mapNotNull { i ->
+                    results[i]?.takeIf { it.isNotEmpty() }?.let { HomeRow("$i", loaders[i].first, it) }
+                }
+                val finished = done.all { it }
+                state.value = HomeState(
+                    loading = !finished,
+                    rows = rows,
+                    error = if (finished && rows.isEmpty()) firstError ?: "Rien à afficher" else null,
+                )
+            }
+            loaders.mapIndexed { i, (_, loader) ->
+                launch {
+                    runCatching { loader() }
+                        .onSuccess { results[i] = it }
+                        .onFailure { if (firstError == null) firstError = it.message }
+                    done[i] = true
+                    publish()
+                }
+            }.joinAll()
+            publish()
         }
     }
+
+    private fun row(block: suspend () -> List<CardItem>): suspend () -> List<CardItem> = block
+
+    private fun continueWatching(): suspend () -> List<CardItem> = {
+        graph.api.watchHistory()
+            .filter { it.panel.type == "episode" }
+            .distinctBy { it.panel.episodeMetadata?.seriesId ?: it.parentId }
+            .take(20)
+            .map { it.panel.toEpisodeCard(it.playhead, it.fullyWatched, it.parentId) }
+    }
+
+    private fun watchlistRow(): suspend () -> List<CardItem> = {
+        graph.watchlist.get().take(30).map { e -> CardItem(series = e.series, episodeId = e.nextEpisodeId) }
+    }
+
+    private fun feedLoaders(feed: List<CrFeedItem>): List<Pair<String, suspend () -> List<CardItem>>> {
+        val api = graph.api
+        return feed.mapNotNull { item ->
+            val title = item.title.ifBlank { item.sourceMediaTitle }
+            when (item.resourceType) {
+                "dynamic_collection" -> when (item.responseType) {
+                    "history" -> title.ifBlank { "Continuer à regarder" } to continueWatching()
+                    "watchlist" -> title.ifBlank { "Ma watchlist" } to watchlistRow()
+                    "recommendations" -> title.ifBlank { "Recommandé pour vous" } to row {
+                        api.recommendations().map { it.toCard() }
+                    }
+                    "because_you_watched" -> item.sourceMediaId.takeIf { it.isNotBlank() }?.let { id ->
+                        title.ifBlank { "Parce que vous avez regardé" } to row { api.similarTo(id).map { it.toCard() } }
+                    }
+                    "browse", "recent_episodes" -> title to row {
+                        api.browseWith(feedParams(item)).map { it.toCard() }
+                    }
+                    else -> null
+                }
+                "curated_collection" -> if (item.responseType == "series" && item.ids.isNotEmpty()) {
+                    title to row { api.objects(item.ids).map { it.toCard() } }
+                } else null
+                else -> null
+            }
+        }
+    }
+
+    /** Paramètres de browse : query_params si présents, sinon ceux du lien (sans les variables de locale). */
+    private fun feedParams(item: CrFeedItem): Map<String, String> {
+        val fromJson = item.queryParams?.mapValues { (_, v) ->
+            (v as? JsonPrimitive)?.content ?: v.toString()
+        }.orEmpty()
+        val fromLink = item.link.substringAfter('?', "").split('&').mapNotNull { part ->
+            val k = part.substringBefore('=', "")
+            val v = Uri.decode(part.substringAfter('=', ""))
+            if (k.isBlank() || v.isBlank()) null else k to v
+        }.toMap()
+        return (fromLink + fromJson).filter { (k, v) ->
+            k !in setOf("locale", "preferred_audio_language") && !v.contains('{')
+        }
+    }
+
+    private fun fallbackLoaders(): List<Pair<String, suspend () -> List<CardItem>>> = listOf(
+        "Continuer à regarder" to continueWatching(),
+        "Ma watchlist" to watchlistRow(),
+        "Populaires" to row { graph.api.browse("popularity").map { it.toSeriesCard() } },
+        "Nouveautés" to row { graph.api.browse("newly_added").map { it.toSeriesCard() } },
+    )
 }
 
 @Composable
@@ -122,7 +199,7 @@ fun HomeScreen(onOpenSeries: (String) -> Unit) {
             contentPadding = PaddingValues(vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(24.dp),
         ) {
-            items(state.rows, key = { it.title }) { row ->
+            items(state.rows, key = { it.key }) { row ->
                 Column {
                     Text(
                         row.title,
@@ -136,7 +213,12 @@ fun HomeScreen(onOpenSeries: (String) -> Unit) {
                         items(row.items) { item ->
                             MediaCard(
                                 item = item,
-                                onClick = { onOpenSeries(item.series.id) },
+                                onClick = {
+                                    when {
+                                        item.series.id.isNotBlank() -> onOpenSeries(item.series.id)
+                                        item.episodeId != null -> OfficialApp.openEpisode(context, item.episodeId)
+                                    }
+                                },
                                 onLongClick = item.episodeId?.let { id -> { OfficialApp.openEpisode(context, id) } },
                             )
                         }

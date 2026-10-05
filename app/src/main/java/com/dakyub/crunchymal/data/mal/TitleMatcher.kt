@@ -29,16 +29,16 @@ object TitleMatcher {
         return 2.0 * common / (x.length - 1 + y.length - 1)
     }
 
-    /** Meilleur candidat Jikan pour les titres Crunchyroll donnés, ou null sous le seuil. */
-    fun pick(candidates: List<JikanAnime>, titles: List<String>): JikanAnime? {
+    /** Meilleur candidat MAL pour les titres Crunchyroll donnés, ou null sous le seuil. */
+    fun pick(candidates: List<MalAnime>, titles: List<String>): MalAnime? {
         val scored = candidates.mapIndexed { index, anime ->
             val sim = anime.allTitles.maxOfOrNull { t -> titles.maxOf { similarity(it, t) } } ?: 0.0
-            val typeBonus = when (anime.type) {
-                "TV" -> 0.05
-                "Movie", "ONA" -> 0.02
+            val typeBonus = when (anime.type?.lowercase()) {
+                "tv" -> 0.05
+                "movie", "ona" -> 0.02
                 else -> 0.0
             }
-            // À similarité égale, on garde l'ordre de pertinence Jikan.
+            // À similarité égale, on garde l'ordre de pertinence de MAL.
             Triple(anime, sim + typeBonus - index * 0.001, sim)
         }
         return scored.filter { it.third >= THRESHOLD }.maxByOrNull { it.second }?.first
