@@ -13,10 +13,14 @@ import java.util.zip.ZipFile
  * profonds. Chaque .dex est copié dans le cache puis lu en mémoire mappée (pas de gros tableau sur le tas).
  */
 object AppAnalyzer {
-    private val interesting = Regex(
-        """crunchyroll://|deep.?link|uriPattern|^/?(watch|series|episode|play|media|show)(/|\?|$)|\{[a-zA-Z_]*(id|Id|guid)}""",
-        RegexOption.IGNORE_CASE,
-    )
+    // Accolades toujours échappées : le moteur regex d'Android (ICU) refuse un "}" isolé.
+    private val interesting by lazy {
+        Regex(
+            """crunchyroll://|deep.?link|uriPattern|^/?(watch|series|episode|play|media|show)(/|\?|$)|\{[a-zA-Z_]*(id|Id|guid)\}""",
+            RegexOption.IGNORE_CASE,
+        )
+    }
+    private val dexName by lazy { Regex("""classes\d*\.dex""") }
 
     fun analyze(context: Context): List<String> {
         val out = mutableListOf<String>()
@@ -33,7 +37,7 @@ object AppAnalyzer {
             try {
                 ZipFile(apk).use { zip ->
                     val dexEntries = zip.entries().asSequence()
-                        .filter { it.name.matches(Regex("""classes\d*\.dex""")) }
+                        .filter { it.name.matches(dexName) }
                         .toList()
                     out += "${File(apk).name} : ${dexEntries.size} fichier(s) dex"
                     for (entry in dexEntries) {

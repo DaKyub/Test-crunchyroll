@@ -138,7 +138,8 @@ fun SettingsScreen() {
                         try {
                             AppAnalyzer.analyze(context)
                         } catch (t: Throwable) {
-                            listOf("Analyse interrompue : ${t.javaClass.simpleName} ${t.message}")
+                            listOf("Analyse interrompue : ${t.javaClass.simpleName} ${t.message}") +
+                                generateSequence(t.cause) { it.cause }.map { "Cause : ${it.javaClass.simpleName} ${it.message}" }.toList()
                         }
                     }
                     analyzing = false
