@@ -38,6 +38,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.dakyub.crunchymal.LocalGraph
 import com.dakyub.crunchymal.ui.components.TvTextField
+import com.dakyub.crunchymal.ui.components.QrCode
 import com.dakyub.crunchymal.ui.components.UpdateButton
 import com.dakyub.crunchymal.ui.components.label
 import com.dakyub.crunchymal.update.UpdateState
@@ -58,6 +59,11 @@ fun SettingsScreen() {
     var malId by remember { mutableStateOf(settings.malClientIdOverride) }
     var basic by remember { mutableStateOf(settings.basicAuthOverride) }
     var omdb by remember { mutableStateOf(settings.omdbKey) }
+    val malLoggedIn by graph.malAuth.loggedIn.collectAsState()
+    var malAuthUrl by remember { mutableStateOf<String?>(null) }
+    var malCode by remember { mutableStateOf("") }
+    var malSecret by remember { mutableStateOf(settings.malClientSecret) }
+    var malStatus by remember { mutableStateOf<String?>(null) }
     var tmdb by remember { mutableStateOf(settings.tmdbKey) }
     var adnUser by remember { mutableStateOf(graph.adn.username) }
     var adnPassword by remember { mutableStateOf("") }
@@ -249,6 +255,61 @@ fun SettingsScreen() {
                     Text("Vider les notes MAL")
                 }
             }
+        }
+
+        item { Section("Compte MyAnimeList (pour noter)") }
+        item {
+            Text(
+                if (malLoggedIn) "Connecté à MAL (${graph.malAuth.username}) : bouton « Ma liste MAL » sur les fiches."
+                else "Pour noter et marquer tes séries terminées. L'URL de redirection de ton app MAL doit être http://localhost.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (malLoggedIn) {
+            item { OutlinedButton(onClick = { graph.malAuth.logout() }) { Text("Se déconnecter de MAL") } }
+        } else {
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Button(onClick = {
+                        settings.malClientSecret = malSecret
+                        malAuthUrl = graph.malAuth.authorizeUrl()
+                        malStatus = null
+                    }, enabled = settings.malClientId.isNotBlank()) { Text("Se connecter à MAL") }
+                    if (settings.malClientId.isBlank()) Text("Enregistre d'abord ton Client ID ci-dessus.", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            item { TvTextField(malSecret, { malSecret = it }, "Client Secret MAL (seulement si ton app MAL en affiche un)") }
+            malAuthUrl?.let { url ->
+                item {
+                    Row(horizontalArrangement = Arrangement.spacedBy(24.dp), verticalAlignment = Alignment.CenterVertically) {
+                        QrCode(url)
+                        Text(
+                            "1. Scanne ce QR code avec ton téléphone et autorise CrunchyMAL.\n" +
+                                "2. Le navigateur arrive sur une page « localhost » qui ne charge pas : c'est normal.\n" +
+                                "3. Copie l'adresse complète de cette page et colle-la ci-dessous (télécommande Google TV).",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+                item { TvTextField(malCode, { malCode = it }, "Adresse http://localhost/?code=… (ou le code seul)") }
+                item {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Button(onClick = {
+                            malStatus = "Validation…"
+                            scope.launch {
+                                val error = graph.malAuth.exchange(malCode)
+                                malStatus = error?.let { "Échec : $it" } ?: "Connecté à MAL ✓"
+                                if (error == null) {
+                                    malAuthUrl = null
+                                    malCode = ""
+                                }
+                            }
+                        }, enabled = malCode.isNotBlank()) { Text("Valider") }
+                    }
+                }
+            }
+            malStatus?.let { item { Text(it, style = MaterialTheme.typography.bodySmall) } }
         }
 
         item { Section("Langues") }

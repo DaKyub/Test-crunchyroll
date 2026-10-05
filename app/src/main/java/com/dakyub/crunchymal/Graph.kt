@@ -9,6 +9,7 @@ import com.dakyub.crunchymal.data.ratings.RatingsRepository
 import com.dakyub.crunchymal.data.WatchlistRepository
 import com.dakyub.crunchymal.data.crunchyroll.CrApi
 import com.dakyub.crunchymal.data.crunchyroll.CrAuth
+import com.dakyub.crunchymal.data.mal.MalAuth
 import com.dakyub.crunchymal.data.mal.MalRepository
 import com.dakyub.crunchymal.data.progress.ProgressRepository
 import com.dakyub.crunchymal.update.UpdateManager
@@ -18,7 +19,8 @@ class Graph(context: Context) {
     val settings = Settings(context)
     val auth = CrAuth(context, settings)
     val api = CrApi(auth, settings)
-    val mal = MalRepository(context) { settings.malClientId }
+    val malAuth = MalAuth(context, { settings.malClientId }, { settings.malClientSecret })
+    val mal = MalRepository(context, { settings.malClientId }, malAuth)
     val progress = ProgressRepository(context, api)
     val watchlist = WatchlistRepository(api)
     val updates = UpdateManager(context)

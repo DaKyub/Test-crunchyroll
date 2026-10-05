@@ -14,6 +14,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.tv.material3.OutlinedButton
+import com.dakyub.crunchymal.ui.components.MalEntryChoice
+import com.dakyub.crunchymal.ui.components.MalListDialog
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -95,6 +101,10 @@ fun AdnSeriesScreen(showId: String) {
     val state by vm.state.collectAsState()
     val context = LocalContext.current
     val show = state.show
+    var malListOpen by remember { mutableStateOf(false) }
+    if (malListOpen && show != null) {
+        MalListDialog(choices = listOf(MalEntryChoice("Série", show.toRef().malKey)), onDismiss = { malListOpen = false })
+    }
 
     when {
         state.loading && show == null -> CenteredMessage("Chargement…")
@@ -143,8 +153,11 @@ fun AdnSeriesScreen(showId: String) {
                             show.summary?.let {
                                 Text(it, style = MaterialTheme.typography.bodyMedium, maxLines = 4, overflow = TextOverflow.Ellipsis)
                             }
-                            Button(onClick = { AdnApp.open(context, show, state.episodes.firstOrNull()) }) {
-                                Text("▶ Ouvrir dans ADN")
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Button(onClick = { AdnApp.open(context, show, state.episodes.firstOrNull()) }) {
+                                    Text("▶ Ouvrir dans ADN")
+                                }
+                                OutlinedButton(onClick = { malListOpen = true }) { Text("Ma liste MAL") }
                             }
                         }
                     }

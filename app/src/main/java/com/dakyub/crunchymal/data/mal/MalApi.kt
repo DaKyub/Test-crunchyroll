@@ -76,6 +76,29 @@ private data class Wrapper(val node: Node = Node())
 @Serializable
 private data class SearchResponse(val data: List<Wrapper> = emptyList())
 
+/** Statut de l'anime dans la liste MAL de l'utilisateur. */
+@Serializable
+data class MalListStatus(
+    val status: String? = null,
+    val score: Int = 0,
+    @SerialName("num_episodes_watched") val episodesWatched: Int = 0,
+)
+
+@Serializable
+private data class MyStatusNode(
+    @SerialName("my_list_status") val myListStatus: MalListStatus? = null,
+    @SerialName("num_episodes") val numEpisodes: Int = 0,
+)
+
+/** Statuts MAL (valeur API → libellé). */
+val MalStatuses = listOf(
+    "plan_to_watch" to "À voir",
+    "watching" to "En cours",
+    "completed" to "Terminé",
+    "on_hold" to "En pause",
+    "dropped" to "Abandonné",
+)
+
 class MissingMalClientIdException : Exception("Client ID MyAnimeList manquant (Paramètres → MyAnimeList)")
 
 /**
@@ -124,6 +147,30 @@ class MalApi(private val clientId: () -> String) {
             .addQueryParameter("fields", FIELDS)
             .build().toString()
         return Http.json.decodeFromString<Node>(get(url)).toAnime()
+    }
+
+    /** Statut actuel dans la liste de l'utilisateur, et nombre d'épisodes de l'anime. */
+    suspend fun myStatus(malId: Int, accessToken: String): Pair<MalListStatus?, Int> {
+        val url = "$BASE/anime/$malId".toHttpUrl().newBuilder()
+            .addQueryParameter("fields", "my_list_status,num_episodes")
+            .build()
+        val request = Request.Builder().url(url).header("Authorization", "Bearer $accessToken").build()
+        val node = Http.json.decodeFromString<MyStatusNode>(Http.client.fetch(request))
+        return node.myListStatus to node.numEpisodes
+    }
+
+    /** Met à jour la liste de l'utilisateur (score 0 = pas de note). */
+    suspend fun updateStatus(malId: Int, accessToken: String, status: String, score: Int, episodesWatched: Int?) {
+        val form = okhttp3.FormBody.Builder()
+            .add("status", status)
+            .add("score", score.coerceIn(0, 10).toString())
+            .apply { episodesWatched?.let { add("num_watched_episodes", it.toString()) } }
+            .build()
+        val request = Request.Builder().url("$BASE/anime/$malId/my_list_status")
+            .header("Authorization", "Bearer $accessToken")
+            .patch(form)
+            .build()
+        Http.client.fetch(request)
     }
 
     private companion object {

@@ -33,7 +33,7 @@ data class MalRecord(
     val englishTitle: String? = null,
 )
 
-class MalRepository(context: Context, clientId: () -> String) {
+class MalRepository(context: Context, clientId: () -> String, val auth: MalAuth) {
     private val file = File(context.filesDir, "mal_cache.json")
     private val api = MalApi(clientId)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -111,6 +111,12 @@ class MalRepository(context: Context, clientId: () -> String) {
         }
         return MalRecord(malId = null, fetchedAt = now)
     }
+
+    /** Statut dans la liste MAL de l'utilisateur connecté, et nombre total d'épisodes. */
+    suspend fun myStatus(malId: Int): Pair<MalListStatus?, Int> = api.myStatus(malId, auth.accessToken())
+
+    suspend fun updateMyStatus(malId: Int, status: String, score: Int, episodesWatched: Int?) =
+        api.updateStatus(malId, auth.accessToken(), status, score, episodesWatched)
 
     suspend fun candidates(query: String): List<MalAnime> = api.search(query, limit = 15)
 

@@ -53,6 +53,11 @@ class Settings(context: Context) {
         get() = prefs.getString("mal_client_id", "")!!
         set(value) = prefs.edit().putString("mal_client_id", value.trim()).apply()
 
+    /** Client Secret MAL (facultatif : seulement si l'app MAL en a un). */
+    var malClientSecret: String
+        get() = prefs.getString("mal_client_secret", "")!!
+        set(value) = prefs.edit().putString("mal_client_secret", value.trim()).apply()
+
     val malClientId: String
         get() = malClientIdOverride.ifBlank { BuildConfig.MAL_CLIENT_ID }
 

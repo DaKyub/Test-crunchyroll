@@ -10,6 +10,8 @@ Application Android TV (Kotlin + Compose for TV) qui affiche ton catalogue et ta
   sur les deux n'apparaît qu'une fois.
 - **Parcourir** : catégories Crunchyroll et genres ADN, tri par popularité ou alphabétique.
 - **Genres** sur la fiche série : ceux de MyAnimeList, sinon ceux du service.
+- **Ma liste MAL** : après connexion du compte MAL (QR code dans les paramètres), statut et note 1-10
+  modifiables depuis chaque fiche ; « Terminé » remplit le nombre d'épisodes vus.
 - **Notes des épisodes** : IMDb (clé OMDb) et TMDB en secours (clé TMDB), dans **Paramètres → Notes des épisodes**.
 
 - **Note MAL partout** : sur l'accueil, la watchlist, la recherche et la fiche série, avec une note par saison sur la fiche.

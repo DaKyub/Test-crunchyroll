@@ -59,6 +59,8 @@ import com.dakyub.crunchymal.ui.components.MediaCard
 import com.dakyub.crunchymal.ui.components.TvTextField
 import com.dakyub.crunchymal.ui.components.rememberMalRecord
 import com.dakyub.crunchymal.ui.components.GenresLine
+import com.dakyub.crunchymal.ui.components.MalEntryChoice
+import com.dakyub.crunchymal.ui.components.MalListDialog
 import com.dakyub.crunchymal.ui.components.rememberSeasonRatings
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -164,6 +166,7 @@ fun SeriesScreen(seriesId: String) {
     val state by vm.state.collectAsState()
     val context = LocalContext.current
     var correcting by remember { mutableStateOf<Pair<String, String>?>(null) } // clé MAL, requête
+    var malListOpen by remember { mutableStateOf(false) }
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.onResume() }
 
@@ -248,6 +251,7 @@ fun SeriesScreen(seriesId: String) {
                                     Text(if (inList) "✓ Dans la watchlist" else "+ Watchlist")
                                 }
                             }
+                            OutlinedButton(onClick = { malListOpen = true }) { Text("Ma liste MAL") }
                             OutlinedButton(onClick = { correcting = ref.malKey to (ref.malTitles.firstOrNull() ?: series.title) }) {
                                 Text("Corriger MAL")
                             }
@@ -323,6 +327,17 @@ fun SeriesScreen(seriesId: String) {
                 }
             }
         }
+    }
+
+    if (malListOpen && series != null) {
+        val selectedSeason = state.tree?.seasons?.getOrNull(state.selectedSeason)?.season
+        MalListDialog(
+            choices = listOfNotNull(
+                MalEntryChoice("Série", "series:${series.id}"),
+                selectedSeason?.let { MalEntryChoice("Saison ${it.seasonNumber}", "season:${it.id}") },
+            ),
+            onDismiss = { malListOpen = false },
+        )
     }
 
     correcting?.let { (key, query) ->
