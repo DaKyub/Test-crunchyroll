@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -23,11 +24,14 @@ import androidx.tv.material3.FilterChip
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.OutlinedButton
 import androidx.tv.material3.Text
+import com.dakyub.crunchymal.AppAnalyzer
 import com.dakyub.crunchymal.LinkFormat
 import com.dakyub.crunchymal.LocalGraph
 import com.dakyub.crunchymal.OfficialApp
 import com.dakyub.crunchymal.ui.components.TvTextField
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private val Locales = listOf("fr-FR" to "Français", "en-US" to "English")
 private val Audios = listOf("ja-JP" to "Japonais", "fr-FR" to "Français", "en-US" to "Anglais")
@@ -47,6 +51,8 @@ fun SettingsScreen() {
     var ua by remember { mutableStateOf(settings.userAgentOverride) }
     val resolved = remember { LinkFormat.entries.associateWith { OfficialApp.resolve(context, it) } }
     val activities = remember { OfficialApp.exportedActivities(context) }
+    var analysis by remember { mutableStateOf<List<String>?>(null) }
+    var analyzing by remember { mutableStateOf(false) }
 
     fun toast(msg: String) = Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
 
@@ -109,6 +115,21 @@ fun SettingsScreen() {
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+
+        item {
+            OutlinedButton(onClick = {
+                analyzing = true
+                scope.launch {
+                    analysis = withContext(Dispatchers.IO) { AppAnalyzer.analyze(context) }
+                    analyzing = false
+                }
+            }) { Text(if (analyzing) "Analyse en cours…" else "Analyser les liens de l'app Crunchyroll") }
+        }
+        analysis?.let { lines ->
+            items(lines) { line ->
+                Text(line, style = MaterialTheme.typography.labelSmall)
+            }
         }
 
         item { Section("Langues") }
