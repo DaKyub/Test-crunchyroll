@@ -66,7 +66,7 @@ data class WatchlistUi(
     val filters: WatchlistFilters = WatchlistFilters(),
 )
 
-private data class Loaded(val loading: Boolean = true, val error: String? = null, val entries: List<WatchlistEntry> = emptyList())
+internal data class Loaded(val loading: Boolean = true, val error: String? = null, val entries: List<WatchlistEntry> = emptyList())
 
 class WatchlistViewModel(private val graph: Graph) : ViewModel() {
     private val loaded = MutableStateFlow(Loaded())
