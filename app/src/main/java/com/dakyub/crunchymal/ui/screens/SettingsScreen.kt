@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -147,8 +148,19 @@ fun SettingsScreen() {
             }) { Text(if (analyzing) "Analyse en cours…" else "Analyser les liens de l'app Crunchyroll") }
         }
         analysis?.let { lines ->
-            items(lines) { line ->
-                Text(line, style = MaterialTheme.typography.labelSmall)
+            // Affichage dense sur deux colonnes pour tenir en quelques photos.
+            items(lines.chunked(2)) { pair ->
+                Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                    pair.forEach { line ->
+                        Text(
+                            line,
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 2,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    if (pair.size == 1) Spacer(Modifier.weight(1f))
+                }
             }
         }
 

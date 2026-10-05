@@ -55,9 +55,30 @@ object AppAnalyzer {
                 out += "Lecture de $apk impossible : ${t.javaClass.simpleName} ${t.message}"
             }
         }
-        out += "— ${found.size} chaîne(s) de liens trouvée(s) —"
-        out += found.take(400)
+        out += "— ${found.size} chaîne(s) brutes, les plus pertinentes ci-dessous —"
+        out += found.asSequence()
+            .filter { it.length <= 120 && '\n' !in it && "deeplink_url_format" !in it }
+            .map { shorten(it) }
+            .distinct()
+            .sortedWith(compareBy({ priority(it) }, { it }))
+            .take(90)
+            .toList()
         return out
+    }
+
+    /** 0 = schéma crunchyroll://, 1 = chemins/modèles d'URL, 2 = noms de classes "deeplink", 3 = reste. */
+    private fun priority(s: String): Int = when {
+        "crunchyroll://" in s -> 0
+        s.startsWith("/") || '{' in s || "://" in s -> 1
+        s.startsWith("L") && s.endsWith(";") || '.' in s && ' ' !in s -> 2
+        else -> 3
+    }
+
+    /** Raccourcit les descripteurs de classes (Lcom/crunchyroll/x/Y;) en x.Y. */
+    private fun shorten(s: String): String =
+        if (s.startsWith("L") && s.endsWith(";")) {
+            s.removePrefix("L").removeSuffix(";").replace('/', '.').removePrefix("com.crunchyroll.")
+        } else s
     }
 
     /** Parcourt la table des chaînes du .dex (format : https://source.android.com/docs/core/runtime/dex-format). */
