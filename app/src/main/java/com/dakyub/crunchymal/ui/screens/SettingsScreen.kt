@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -31,6 +32,9 @@ import com.dakyub.crunchymal.LinkFormat
 import com.dakyub.crunchymal.LocalGraph
 import com.dakyub.crunchymal.OfficialApp
 import com.dakyub.crunchymal.ui.components.TvTextField
+import com.dakyub.crunchymal.ui.components.UpdateButton
+import com.dakyub.crunchymal.ui.components.label
+import com.dakyub.crunchymal.update.UpdateState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -73,6 +77,22 @@ fun SettingsScreen() {
                     CrunchyMalApp.clearCrash(context)
                     lastCrash = null
                 }) { Text("Effacer le rapport") }
+            }
+        }
+        item { Section("Mises à jour") }
+        item {
+            val updateState by graph.updates.state.collectAsState()
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    "Version installée : build ${graph.updates.currentBuild}" + when (updateState) {
+                        UpdateState.Checking -> " · vérification…"
+                        UpdateState.UpToDate -> " · à jour"
+                        else -> updateState.label()?.let { " · $it" } ?: ""
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                OutlinedButton(onClick = { scope.launch { graph.updates.check() } }) { Text("Vérifier") }
+                UpdateButton()
             }
         }
         item { Section("MyAnimeList") }

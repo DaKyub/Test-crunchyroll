@@ -8,7 +8,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.Alignment
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -27,6 +31,7 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Tab
 import androidx.tv.material3.TabRow
 import androidx.tv.material3.Text
+import com.dakyub.crunchymal.ui.components.UpdateBanner
 import com.dakyub.crunchymal.ui.screens.HomeScreen
 import com.dakyub.crunchymal.ui.screens.LoginScreen
 import com.dakyub.crunchymal.ui.screens.SearchScreen
@@ -81,13 +86,22 @@ private val Tabs = listOf("Accueil", "Watchlist", "Recherche", "Paramètres")
 @Composable
 private fun MainTabs(onOpenSeries: (String) -> Unit) {
     var selected by rememberSaveable { mutableIntStateOf(0) }
+    val updates = LocalGraph.current.updates
+    LaunchedEffect(Unit) { updates.check() }
     Column(Modifier.fillMaxSize()) {
-        TabRow(selectedTabIndex = selected, modifier = Modifier.padding(start = 48.dp, top = 16.dp, bottom = 4.dp)) {
-            Tabs.forEachIndexed { index, title ->
-                Tab(selected = index == selected, onFocus = { selected = index }) {
-                    Text(title, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(24.dp),
+            modifier = Modifier.padding(start = 48.dp, end = 48.dp, top = 16.dp, bottom = 4.dp),
+        ) {
+            TabRow(selectedTabIndex = selected, modifier = Modifier.weight(1f, fill = false)) {
+                Tabs.forEachIndexed { index, title ->
+                    Tab(selected = index == selected, onFocus = { selected = index }) {
+                        Text(title, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+                    }
                 }
             }
+            UpdateBanner()
         }
         when (selected) {
             0 -> HomeScreen(onOpenSeries)

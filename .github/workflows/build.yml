@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -24,7 +26,24 @@ jobs:
           CR_BASIC_AUTH: ${{ secrets.CR_BASIC_AUTH }}
           MAL_CLIENT_ID: ${{ secrets.MAL_CLIENT_ID }}
 
+      - name: Rename APK
+        run: cp app/build/outputs/apk/release/*.apk CrunchyMAL.apk
+
       - uses: actions/upload-artifact@v4
         with:
           name: CrunchyMAL-apk
-          path: app/build/outputs/apk/release/*.apk
+          path: CrunchyMAL.apk
+
+      # Publie l'APK dans une Release : lien fixe
+      # https://github.com/<dépôt>/releases/latest/download/CrunchyMAL.apk
+      # et source du bouton "Mettre à jour" de l'app.
+      - name: Publish release
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: CrunchyMAL build ${{ github.run_number }}
+          body: ${{ github.event.head_commit.message || 'Build manuel' }}
+          target_commitish: ${{ github.sha }}
+          make_latest: true
+          files: CrunchyMAL.apk

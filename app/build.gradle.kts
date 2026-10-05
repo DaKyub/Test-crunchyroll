@@ -29,6 +29,10 @@ android {
             ?: localProps.getProperty("cr.basicAuth", "")
         buildConfigField("String", "CR_BASIC_AUTH", "\"${basicAuth.trim()}\"")
 
+        // Dépôt GitHub dont les Releases servent aux mises à jour intégrées.
+        val repo = System.getenv("GITHUB_REPOSITORY")?.takeIf { it.isNotBlank() } ?: "DaKyub/Test-crunchyroll"
+        buildConfigField("String", "UPDATE_REPO", "\"$repo\"")
+
         // Client ID de l'API MyAnimeList : variable MAL_CLIENT_ID ou local.properties (mal.clientId).
         val malClientId = System.getenv("MAL_CLIENT_ID")?.takeIf { it.isNotBlank() }
             ?: localProps.getProperty("mal.clientId", "")

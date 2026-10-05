@@ -8,6 +8,7 @@ import com.dakyub.crunchymal.data.crunchyroll.CrApi
 import com.dakyub.crunchymal.data.crunchyroll.CrAuth
 import com.dakyub.crunchymal.data.mal.MalRepository
 import com.dakyub.crunchymal.data.progress.ProgressRepository
+import com.dakyub.crunchymal.update.UpdateManager
 
 /** Conteneur de dépendances (pas besoin de Hilt pour une app de cette taille). */
 class Graph(context: Context) {
@@ -17,6 +18,7 @@ class Graph(context: Context) {
     val mal = MalRepository(context) { settings.malClientId }
     val progress = ProgressRepository(context, api)
     val watchlist = WatchlistRepository(api)
+    val updates = UpdateManager(context)
 }
 
 val LocalGraph = staticCompositionLocalOf<Graph> { error("Graph non fourni") }

@@ -37,6 +37,14 @@ Trois façons de les fournir :
 3. Copie le **Client ID** (32 caractères ; le *Client Secret* est inutile).
 4. Colle-le dans **Paramètres → MyAnimeList** de l'app, ou ajoute un secret GitHub `MAL_CLIENT_ID` puis relance le build.
 
+## Mises à jour
+
+Chaque build publie l'APK dans une Release GitHub, à une adresse fixe :
+`https://github.com/DaKyub/Test-crunchyroll/releases/latest/download/CrunchyMAL.apk`.
+L'app vérifie au démarrage s'il existe un build plus récent et affiche un bouton **Mettre à jour**
+(aussi dans **Paramètres → Mises à jour**). La première fois, Android demande d'autoriser CrunchyMAL
+à installer des applications.
+
 ## Installation sur le Shield
 
 1. Récupère l'APK dans l'onglet **Actions** du dépôt : dernier build vert, artefact `CrunchyMAL-apk`.
