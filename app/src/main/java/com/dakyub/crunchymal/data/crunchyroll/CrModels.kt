@@ -41,7 +41,29 @@ data class CrEpisodeMeta(
     @SerialName("episode_number") val episodeNumber: Int? = null,
     val episode: String = "",
     @SerialName("duration_ms") val durationMs: Long = 0,
+    @SerialName("audio_locale") val audioLocale: String = "",
+    @SerialName("is_dubbed") val isDubbed: Boolean = false,
+    val versions: List<CrVersion> = emptyList(),
 )
+
+/**
+ * Garde uniquement la version originale de chaque épisode (pas les doublages) et une seule carte
+ * par épisode. Les éléments qui ne sont pas des épisodes sont conservés tels quels.
+ */
+fun List<CrPanel>.originalEpisodesOnly(): List<CrPanel> = filter { panel ->
+    val meta = panel.episodeMetadata
+    if (panel.type != "episode" || meta == null) return@filter true
+    val self = meta.versions.firstOrNull { it.guid == panel.id }
+    when {
+        self != null -> self.original
+        meta.versions.any { it.original } -> false
+        else -> !meta.isDubbed
+    }
+}.distinctBy { panel ->
+    val meta = panel.episodeMetadata
+    if (panel.type == "episode" && meta != null) "${meta.seriesId}|${meta.seasonNumber}|${meta.episode.ifBlank { meta.episodeNumber.toString() }}"
+    else panel.id
+}
 
 @Serializable
 data class CrSeriesMeta(

@@ -28,6 +28,7 @@ import com.dakyub.crunchymal.data.SeriesRef
 import androidx.compose.runtime.LaunchedEffect
 import com.dakyub.crunchymal.data.crunchyroll.CrPanel
 import com.dakyub.crunchymal.data.crunchyroll.best
+import com.dakyub.crunchymal.data.crunchyroll.originalEpisodesOnly
 import com.dakyub.crunchymal.ui.components.CenteredMessage
 import com.dakyub.crunchymal.ui.components.MediaCard
 import android.net.Uri
@@ -234,7 +235,11 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
                         title.ifBlank { "Parce que vous avez regardé" } to row { api.similarTo(id).map { it.toCard() } }
                     }
                     "browse", "recent_episodes" -> title to row {
-                        api.browseWith(feedParams(item)).map { it.toCard() }
+                        // Les doublages étant retirés, on demande plus d'épisodes pour garder une rangée bien remplie.
+                        val params = feedParams(item).let { p ->
+                            if (item.responseType == "recent_episodes" || p["type"] == "episode") p + ("n" to "60") else p
+                        }
+                        api.browseWith(params).originalEpisodesOnly().take(30).map { it.toCard() }
                     }
                     else -> null
                 }
