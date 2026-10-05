@@ -36,6 +36,11 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.joinAll
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
+import androidx.compose.foundation.layout.Row
+import androidx.compose.ui.Alignment
 import kotlinx.coroutines.launch
 
 data class HomeRow(val key: String, val title: String, val items: List<CardItem>)
@@ -79,8 +84,76 @@ fun CrPanel.toEpisodeCard(playhead: Long = 0, fullyWatched: Boolean = false, fal
 
 fun CrPanel.toCard(): CardItem = if (type == "episode") toEpisodeCard() else toSeriesCard()
 
+enum class HomeSort(val label: String) { DEFAULT("Par défaut"), MAL("Note MAL") }
+
+data class HomeFilters(
+    val sort: HomeSort = HomeSort.DEFAULT,
+    val status: StatusFilter = StatusFilter.ALL,
+    val minScore: Double? = null,
+) {
+    val needsMal: Boolean get() = sort == HomeSort.MAL || minScore != null
+}
+
+data class HomeVisible(val rows: List<HomeRow> = emptyList(), val progressKnown: Int = 0, val progressNeeded: Int = 0)
+
 class HomeViewModel(private val graph: Graph) : ViewModel() {
     val state = MutableStateFlow(HomeState())
+    val filters = MutableStateFlow(HomeFilters())
+    private var progressJob: Job? = null
+
+    /** Rangées après filtres (statut, note MAL) et tri ; les rangées vides disparaissent. */
+    val visible = combine(state, filters, graph.progress.summaries, graph.mal.records) { st, f, summaries, mal ->
+        fun statusOf(item: CardItem) =
+            if (item.series.provider == Provider.CRUNCHYROLL) summaries[item.series.id]?.status else null
+        val rows = st.rows.mapNotNull { row ->
+            val items = row.items
+                .filter { f.status.status == null || statusOf(it) == f.status.status }
+                .filter { item -> f.minScore == null || (mal[item.series.malKey]?.score ?: -1.0) >= f.minScore }
+                .let { list -> if (f.sort == HomeSort.MAL) list.sortedByDescending { mal[it.series.malKey]?.score ?: -1.0 } else list }
+            items.takeIf { it.isNotEmpty() }?.let { row.copy(items = it) }
+        }
+        val crIds = crSeriesIds(st)
+        HomeVisible(
+            rows = rows,
+            progressKnown = crIds.count { summaries.containsKey(it) },
+            progressNeeded = if (f.status == StatusFilter.ALL) 0 else crIds.size,
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeVisible())
+
+    private fun crSeriesIds(st: HomeState = state.value) = st.rows.flatMap { it.items }
+        .filter { it.series.provider == Provider.CRUNCHYROLL && it.series.id.isNotBlank() }
+        .map { it.series.id }.distinct()
+
+    fun nextSort() {
+        filters.value = filters.value.copy(sort = HomeSort.entries[(filters.value.sort.ordinal + 1) % HomeSort.entries.size])
+        applyFilterNeeds()
+    }
+
+    fun nextStatus() {
+        filters.value = filters.value.copy(status = filters.value.status.next())
+        applyFilterNeeds()
+    }
+
+    fun nextMinScore() {
+        filters.value = filters.value.copy(minScore = MinScores[(MinScores.indexOf(filters.value.minScore) + 1) % MinScores.size])
+        applyFilterNeeds()
+    }
+
+    /** Demande les notes MAL et/ou la progression de toutes les séries quand un filtre en a besoin. */
+    private fun applyFilterNeeds() {
+        val f = filters.value
+        if (f.needsMal) {
+            state.value.rows.flatMap { it.items }.distinctBy { it.series.malKey }
+                .forEach { graph.mal.request(it.series.malKey, it.series.malTitles) }
+        }
+        progressJob?.cancel()
+        if (f.status != StatusFilter.ALL) {
+            val ids = crSeriesIds()
+            progressJob = viewModelScope.launch {
+                ids.forEach { id -> launch { runCatching { graph.progress.ensureSummary(id) } } }
+            }
+        }
+    }
     private var job: Job? = null
 
     private var loadedFor: Set<Provider>? = null
@@ -128,6 +201,7 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
                 }
             }.joinAll()
             publish()
+            applyFilterNeeds()
         }
     }
 
@@ -205,6 +279,8 @@ fun HomeScreen(onOpenSeries: (SeriesRef) -> Unit) {
     val graph = LocalGraph.current
     val vm = viewModel { HomeViewModel(graph) }
     val state by vm.state.collectAsState()
+    val visible by vm.visible.collectAsState()
+    val filters by vm.filters.collectAsState()
     val providers by graph.providers.selected.collectAsState()
     LaunchedEffect(providers) { vm.ensure(providers) }
     val context = LocalContext.current
@@ -217,7 +293,33 @@ fun HomeScreen(onOpenSeries: (SeriesRef) -> Unit) {
             contentPadding = PaddingValues(vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(24.dp),
         ) {
-            items(state.rows, key = { it.key }) { row ->
+            item(key = "filters") {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.padding(horizontal = 48.dp),
+                ) {
+                    CycleButton("Tri", filters.sort.label, vm::nextSort)
+                    CycleButton("Statut", filters.status.label, vm::nextStatus)
+                    CycleButton("MAL ≥", filters.minScore?.toString() ?: "toutes", vm::nextMinScore)
+                    if (visible.progressNeeded > 0) {
+                        Text(
+                            "progression ${visible.progressKnown}/${visible.progressNeeded}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+            if (visible.rows.isEmpty() && !state.loading) {
+                item(key = "empty") {
+                    Text(
+                        if (visible.progressNeeded > visible.progressKnown) "Calcul de la progression…" else "Aucune série ne correspond à ces filtres.",
+                        modifier = Modifier.padding(horizontal = 48.dp),
+                    )
+                }
+            }
+            items(visible.rows, key = { it.key }) { row ->
                 Column {
                     Text(
                         row.title,
