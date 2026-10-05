@@ -79,7 +79,6 @@ object AppAnalyzer {
         if (s.startsWith("L") && s.endsWith(";")) {
             s.removePrefix("L").removeSuffix(";").replace('/', '.').removePrefix("com.crunchyroll.")
         } else s
-    }
 
     /** Parcourt la table des chaînes du .dex (format : https://source.android.com/docs/core/runtime/dex-format). */
     private fun scanDex(file: File, found: MutableSet<String>) {
