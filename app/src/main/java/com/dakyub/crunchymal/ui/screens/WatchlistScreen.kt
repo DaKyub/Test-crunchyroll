@@ -21,6 +21,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.tv.material3.OutlinedButtonDefaults
+import androidx.tv.material3.FilterChip
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.OutlinedButton
 import androidx.tv.material3.Text
@@ -42,19 +43,24 @@ import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-enum class StatusFilter(val label: String, val status: WatchStatus?) {
-    ALL("Toutes", null),
-    NOT_STARTED("Non commencées", WatchStatus.NOT_STARTED),
-    IN_PROGRESS("En cours", WatchStatus.IN_PROGRESS),
-    COMPLETED("Terminées / à jour", WatchStatus.COMPLETED),
-}
+/** Statuts proposés en cases à cocher (aucune case cochée = toutes les séries). */
+val StatusOptions = listOf(
+    WatchStatus.NOT_STARTED to "Non commencées",
+    WatchStatus.IN_PROGRESS to "En cours",
+    WatchStatus.UP_TO_DATE to "À jour",
+    WatchStatus.COMPLETED to "Tout vu",
+)
+
+fun Set<WatchStatus>.accepts(status: WatchStatus?): Boolean = isEmpty() || (status != null && status in this)
+
+fun Set<WatchStatus>.toggle(status: WatchStatus): Set<WatchStatus> = if (status in this) this - status else this + status
 
 enum class SortMode(val label: String) { RECENT("Récentes"), MAL("Note MAL"), TITLE("Titre A→Z") }
 
 val MinScores = listOf<Double?>(null, 7.0, 7.5, 8.0, 8.5)
 
 data class WatchlistFilters(
-    val status: StatusFilter = StatusFilter.ALL,
+    val statuses: Set<WatchStatus> = emptySet(),
     val sort: SortMode = SortMode.RECENT,
     val minScore: Double? = null,
 )
@@ -82,7 +88,7 @@ class WatchlistViewModel(private val graph: Graph) : ViewModel() {
             Triple(e, status, mal[e.series.malKey]?.score)
         }
         val filtered = rows
-            .filter { (_, status, _) -> f.status.status == null || status == f.status.status }
+            .filter { (_, status, _) -> f.statuses.accepts(status) }
             .filter { (_, _, score) -> f.minScore == null || (score != null && score >= f.minScore) }
         val sorted = when (f.sort) {
             SortMode.RECENT -> filtered.sortedBy { it.first.order }
@@ -103,6 +109,7 @@ class WatchlistViewModel(private val graph: Graph) : ViewModel() {
                     episodeId = summary?.nextEpisodeId ?: e.nextEpisodeId,
                     subtitle = when {
                         summary != null && status == WatchStatus.COMPLETED -> "✓ ${summary.watched}/${summary.total} ép."
+                        summary != null && status == WatchStatus.UP_TO_DATE -> "À jour · ${summary.watched}/${summary.total} ép."
                         summary != null -> "${summary.watched}/${summary.total} ép." + (summary.nextLabel?.let { " · suite : $it" } ?: "")
                         status == WatchStatus.NOT_STARTED -> "Non commencée"
                         else -> "Calcul de la progression…"
@@ -140,7 +147,7 @@ class WatchlistViewModel(private val graph: Graph) : ViewModel() {
         }
     }
 
-    fun setStatus(s: StatusFilter) { filters.value = filters.value.copy(status = s) }
+    fun toggleStatus(s: WatchStatus) { filters.value = filters.value.copy(statuses = filters.value.statuses.toggle(s)) }
     fun setSort(s: SortMode) { filters.value = filters.value.copy(sort = s) }
     fun setMinScore(m: Double?) { filters.value = filters.value.copy(minScore = m) }
 }
@@ -165,7 +172,6 @@ fun WatchlistScreen(onOpenSeries: (SeriesRef) -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.padding(vertical = 4.dp),
         ) {
-            CycleButton("Statut", ui.filters.status.label) { vm.setStatus(ui.filters.status.next()) }
             CycleButton("Tri", ui.filters.sort.label) { vm.setSort(ui.filters.sort.next()) }
             CycleButton("MAL ≥", ui.filters.minScore?.toString() ?: "toutes") {
                 vm.setMinScore(MinScores[(MinScores.indexOf(ui.filters.minScore) + 1) % MinScores.size])
@@ -179,6 +185,7 @@ fun WatchlistScreen(onOpenSeries: (SeriesRef) -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        StatusChips(ui.filters.statuses, vm::toggleStatus)
         malError?.let {
             Text(
                 "Notes MAL indisponibles : $it",
@@ -211,7 +218,6 @@ fun WatchlistScreen(onOpenSeries: (SeriesRef) -> Unit) {
     }
 }
 
-internal fun StatusFilter.next() = StatusFilter.entries[(ordinal + 1) % StatusFilter.entries.size]
 
 private fun SortMode.next() = SortMode.entries[(ordinal + 1) % SortMode.entries.size]
 
@@ -220,5 +226,26 @@ internal fun CycleButton(label: String, value: String, onClick: () -> Unit) {
     OutlinedButton(onClick = onClick, scale = OutlinedButtonDefaults.scale(focusedScale = 1.05f)) {
         Text("$label : ", style = MaterialTheme.typography.labelLarge)
         Text(value, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+    }
+}
+
+/** Cases à cocher de statut : plusieurs peuvent être cochées à la fois. */
+@Composable
+internal fun StatusChips(selected: Set<WatchStatus>, onToggle: (WatchStatus) -> Unit, modifier: Modifier = Modifier) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = modifier.padding(vertical = 2.dp),
+    ) {
+        Text("Statut", style = MaterialTheme.typography.labelLarge)
+        StatusOptions.forEach { (status, label) ->
+            val checked = status in selected
+            FilterChip(selected = checked, onClick = { onToggle(status) }) {
+                Text(if (checked) "✓ $label" else label, style = MaterialTheme.typography.labelMedium)
+            }
+        }
+        if (selected.isEmpty()) {
+            Text("(toutes)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }

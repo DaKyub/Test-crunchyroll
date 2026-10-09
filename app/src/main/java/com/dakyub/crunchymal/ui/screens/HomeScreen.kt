@@ -25,6 +25,7 @@ import com.dakyub.crunchymal.OfficialApp
 import com.dakyub.crunchymal.data.CardItem
 import com.dakyub.crunchymal.data.Provider
 import com.dakyub.crunchymal.data.SeriesRef
+import com.dakyub.crunchymal.data.progress.WatchStatus
 import androidx.compose.runtime.LaunchedEffect
 import com.dakyub.crunchymal.data.crunchyroll.CrPanel
 import com.dakyub.crunchymal.data.crunchyroll.best
@@ -91,7 +92,7 @@ enum class HomeSort(val label: String) { DEFAULT("Par défaut"), MAL("Note MAL")
 
 data class HomeFilters(
     val sort: HomeSort = HomeSort.DEFAULT,
-    val status: StatusFilter = StatusFilter.ALL,
+    val statuses: Set<WatchStatus> = emptySet(),
     val minScore: Double? = null,
 ) {
     val needsMal: Boolean get() = sort == HomeSort.MAL || minScore != null
@@ -110,7 +111,7 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
             if (item.series.provider == Provider.CRUNCHYROLL) summaries[item.series.id]?.status else null
         val rows = st.rows.mapNotNull { row ->
             val items = row.items
-                .filter { f.status.status == null || statusOf(it) == f.status.status }
+                .filter { f.statuses.accepts(statusOf(it)) }
                 .filter { item -> f.minScore == null || (mal[item.series.malKey]?.score ?: -1.0) >= f.minScore }
                 .let { list -> if (f.sort == HomeSort.MAL) list.sortedByDescending { mal[it.series.malKey]?.score ?: -1.0 } else list }
             items.takeIf { it.isNotEmpty() }?.let { row.copy(items = it) }
@@ -119,7 +120,7 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
         HomeVisible(
             rows = rows,
             progressKnown = crIds.count { summaries.containsKey(it) },
-            progressNeeded = if (f.status == StatusFilter.ALL) 0 else crIds.size,
+            progressNeeded = if (f.statuses.isEmpty()) 0 else crIds.size,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeVisible())
 
@@ -132,8 +133,8 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
         applyFilterNeeds()
     }
 
-    fun nextStatus() {
-        filters.value = filters.value.copy(status = filters.value.status.next())
+    fun toggleStatus(status: WatchStatus) {
+        filters.value = filters.value.copy(statuses = filters.value.statuses.toggle(status))
         applyFilterNeeds()
     }
 
@@ -150,7 +151,7 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
                 .forEach { graph.mal.request(it.series.malKey, it.series.malTitles) }
         }
         progressJob?.cancel()
-        if (f.status != StatusFilter.ALL) {
+        if (f.statuses.isNotEmpty()) {
             val ids = crSeriesIds()
             progressJob = viewModelScope.launch {
                 ids.forEach { id -> launch { runCatching { graph.progress.ensureSummary(id) } } }
@@ -339,21 +340,22 @@ fun HomeScreen(onOpenSeries: (SeriesRef) -> Unit) {
             verticalArrangement = Arrangement.spacedBy(24.dp),
         ) {
             item(key = "filters") {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.padding(horizontal = 48.dp),
-                ) {
-                    CycleButton("Tri", filters.sort.label, vm::nextSort)
-                    CycleButton("Statut", filters.status.label, vm::nextStatus)
-                    CycleButton("MAL ≥", filters.minScore?.toString() ?: "toutes", vm::nextMinScore)
-                    if (visible.progressNeeded > 0) {
-                        Text(
-                            "progression ${visible.progressKnown}/${visible.progressNeeded}",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                Column(Modifier.padding(horizontal = 48.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        CycleButton("Tri", filters.sort.label, vm::nextSort)
+                        CycleButton("MAL ≥", filters.minScore?.toString() ?: "toutes", vm::nextMinScore)
+                        if (visible.progressNeeded > 0) {
+                            Text(
+                                "progression ${visible.progressKnown}/${visible.progressNeeded}",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
+                    StatusChips(filters.statuses, vm::toggleStatus)
                 }
             }
             if (visible.rows.isEmpty() && !state.loading) {

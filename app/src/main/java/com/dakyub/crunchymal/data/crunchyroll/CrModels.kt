@@ -151,7 +151,13 @@ data class CrEpisode(
     @SerialName("duration_ms") val durationMs: Long = 0,
     val images: CrImages = CrImages(),
     val versions: List<CrVersion> = emptyList(),
+    @SerialName("availability_starts") val availabilityStarts: String = "",
+    @SerialName("premium_available_date") val premiumAvailableDate: String = "",
 ) {
+    /** Faux pour un épisode annoncé mais pas encore sorti (dates ISO UTC comparées comme du texte). */
+    fun isAvailable(nowIso: String): Boolean =
+        listOf(availabilityStarts, premiumAvailableDate).filter { it.length >= 19 }.all { it.take(19) <= nowIso }
+
     val label: String
         get() = "S$seasonNumber E${episode.ifBlank { episodeNumber?.toString() ?: "?" }}"
 }

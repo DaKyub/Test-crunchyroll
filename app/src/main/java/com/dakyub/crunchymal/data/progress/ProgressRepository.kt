@@ -21,7 +21,11 @@ import kotlinx.serialization.encodeToString
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
-enum class WatchStatus { NOT_STARTED, IN_PROGRESS, COMPLETED }
+/**
+ * NOT_STARTED : rien vu · IN_PROGRESS : commencée, dernier épisode pas vu ·
+ * UP_TO_DATE : dernier épisode disponible vu, avec des trous avant · COMPLETED : tous les épisodes vus.
+ */
+enum class WatchStatus { NOT_STARTED, IN_PROGRESS, UP_TO_DATE, COMPLETED }
 
 @Serializable
 data class ProgressSummary(
@@ -31,16 +35,19 @@ data class ProgressSummary(
     val nextEpisodeId: String? = null,
     val nextLabel: String? = null,
     val computedAt: Long = 0,
+    /** Dernier épisode disponible vu (null = résumé calculé par une ancienne version, à recalculer). */
+    val lastWatched: Boolean? = null,
 ) {
     val status: WatchStatus
         get() = when {
             watched == 0 && !started -> WatchStatus.NOT_STARTED
             total > 0 && watched >= total -> WatchStatus.COMPLETED
+            lastWatched == true -> WatchStatus.UP_TO_DATE
             else -> WatchStatus.IN_PROGRESS
         }
 }
 
-data class EpisodeNode(val episode: CrEpisode, val watched: Boolean, val playheadSec: Long) {
+data class EpisodeNode(val episode: CrEpisode, val watched: Boolean, val playheadSec: Long, val available: Boolean = true) {
     val progress: Float
         get() = if (watched) 1f else if (episode.durationMs > 0) {
             (playheadSec * 1000f / episode.durationMs).coerceIn(0f, 1f)
@@ -69,7 +76,7 @@ class ProgressRepository(context: Context, private val api: CrApi) {
         if (file.exists()) Http.json.decodeFromString<Map<String, ProgressSummary>>(file.readText()) else emptyMap()
     }.getOrElse { emptyMap() }
 
-    private fun isFresh(s: ProgressSummary) = System.currentTimeMillis() - s.computedAt < TTL
+    private fun isFresh(s: ProgressSummary) = s.lastWatched != null && System.currentTimeMillis() - s.computedAt < TTL
 
     /** S'assure qu'un résumé récent existe (utilisé par la watchlist pour les filtres). */
     suspend fun ensureSummary(seriesId: String, force: Boolean = false) {
@@ -97,6 +104,9 @@ class ProgressRepository(context: Context, private val api: CrApi) {
         val allIds = episodesBySeason.flatMap { (_, eps) -> eps.flatMap { ep -> listOf(ep.id) + ep.versions.map { it.guid } } }
         val playheads = api.playheads(allIds).associateBy { it.contentId }
 
+        val nowIso = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US)
+            .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+            .format(java.util.Date())
         val nodes = episodesBySeason.map { (season, eps) ->
             SeasonNode(
                 season = season,
@@ -107,14 +117,16 @@ class ProgressRepository(context: Context, private val api: CrApi) {
                         episode = ep,
                         watched = heads.any { it.fullyWatched },
                         playheadSec = heads.maxOfOrNull { it.playhead } ?: 0,
+                        available = ep.isAvailable(nowIso),
                     )
                 },
             )
         }
 
-        val flat = nodes.flatMap { it.episodes }
-        val lastWatched = flat.indexOfLast { it.watched }
-        val next = if (lastWatched >= 0) flat.getOrNull(lastWatched + 1)
+        // Les épisodes annoncés mais pas encore sortis ne comptent pas dans la progression.
+        val flat = nodes.flatMap { it.episodes }.filter { it.available }
+        val lastWatchedIndex = flat.indexOfLast { it.watched }
+        val next = if (lastWatchedIndex >= 0) flat.getOrNull(lastWatchedIndex + 1)
         else flat.firstOrNull { it.playheadSec > 0 } ?: flat.firstOrNull()
 
         SeriesTree(
@@ -127,6 +139,7 @@ class ProgressRepository(context: Context, private val api: CrApi) {
                 nextEpisodeId = next?.episode?.id,
                 nextLabel = next?.episode?.label,
                 computedAt = System.currentTimeMillis(),
+                lastWatched = flat.lastOrNull()?.watched == true,
             ),
         )
     }

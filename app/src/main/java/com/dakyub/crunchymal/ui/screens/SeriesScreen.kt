@@ -310,6 +310,7 @@ fun SeriesScreen(seriesId: String) {
                                                 item = CardItem(
                                                     series = SeriesRef(ep.id, "${if (node.watched) "✓ " else ""}${ep.label} · ${ep.title}", wideUrl = ep.images.thumbnail.best(400)),
                                                     subtitle = listOfNotNull(
+                                                        "à venir".takeIf { !node.available },
                                                         rating?.label,
                                                         if (ep.durationMs > 0) "${ep.durationMs / 60000} min" else null,
                                                     ).joinToString(" · ").ifBlank { null },

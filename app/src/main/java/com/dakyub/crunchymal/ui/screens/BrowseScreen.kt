@@ -31,6 +31,7 @@ import com.dakyub.crunchymal.LocalGraph
 import com.dakyub.crunchymal.data.CardItem
 import com.dakyub.crunchymal.data.Provider
 import com.dakyub.crunchymal.data.SeriesRef
+import com.dakyub.crunchymal.data.progress.WatchStatus
 import com.dakyub.crunchymal.data.adn.AdnGenres
 import com.dakyub.crunchymal.data.crunchyroll.CrCategory
 import com.dakyub.crunchymal.ui.components.CenteredMessage
@@ -51,7 +52,7 @@ data class BrowseUi(
     val crCategories: List<CrCategory> = emptyList(),
     val selection: BrowseSelection? = null,
     val sort: BrowseSort = BrowseSort.POPULAR,
-    val status: StatusFilter = StatusFilter.ALL,
+    val statuses: Set<WatchStatus> = emptySet(),
     val minScore: Double? = null,
     val loading: Boolean = false,
     val results: List<CardItem> = emptyList(),
@@ -77,17 +78,17 @@ class BrowseViewModel(private val graph: Graph) : ViewModel() {
             Triple(item, status, mal[item.series.malKey]?.score)
         }
         val filtered = rows
-            .filter { (_, status, _) -> u.status.status == null || status == u.status.status }
+            .filter { (_, status, _) -> u.statuses.accepts(status) }
             .filter { (_, _, score) -> u.minScore == null || (score != null && score >= u.minScore) }
         val sorted = if (u.sort == BrowseSort.MAL) filtered.sortedByDescending { it.third ?: -1.0 } else filtered
         val crItems = u.results.filter { it.series.provider == Provider.CRUNCHYROLL }
         BrowseVisible(
             items = sorted.map { (item, _, _) ->
                 val summary = if (item.series.provider == Provider.CRUNCHYROLL) summaries[item.series.id] else null
-                if (summary != null && u.status != StatusFilter.ALL) item.copy(subtitle = "${summary.watched}/${summary.total} ép.") else item
+                if (summary != null && u.statuses.isNotEmpty()) item.copy(subtitle = "${summary.watched}/${summary.total} ép.") else item
             },
             progressKnown = crItems.count { summaries.containsKey(it.series.id) },
-            progressNeeded = if (u.status == StatusFilter.ALL) 0 else crItems.size,
+            progressNeeded = if (u.statuses.isEmpty()) 0 else crItems.size,
             malKnown = u.results.count { mal.containsKey(it.series.malKey) },
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BrowseVisible())
@@ -121,8 +122,8 @@ class BrowseViewModel(private val graph: Graph) : ViewModel() {
         if (serverSortChanged) reload()
     }
 
-    fun nextStatus() {
-        ui.value = ui.value.copy(status = ui.value.status.next())
+    fun toggleStatus(status: WatchStatus) {
+        ui.value = ui.value.copy(statuses = ui.value.statuses.toggle(status))
         computeProgressIfNeeded()
     }
 
@@ -133,7 +134,7 @@ class BrowseViewModel(private val graph: Graph) : ViewModel() {
     /** La progression (coûteuse) n'est calculée que si un filtre de statut est actif. */
     private fun computeProgressIfNeeded() {
         progressJob?.cancel()
-        if (ui.value.status == StatusFilter.ALL) return
+        if (ui.value.statuses.isEmpty()) return
         val ids = ui.value.results.filter { it.series.provider == Provider.CRUNCHYROLL }.map { it.series.id }
         progressJob = viewModelScope.launch {
             ids.forEach { id -> launch { runCatching { graph.progress.ensureSummary(id) } } }
@@ -191,14 +192,14 @@ fun BrowseScreen(onOpenSeries: (SeriesRef) -> Unit) {
                 style = MaterialTheme.typography.titleMedium,
             )
             CycleButton("Tri", ui.sort.label, vm::nextSort)
-            CycleButton("Statut", ui.status.label, vm::nextStatus)
             CycleButton("MAL ≥", ui.minScore?.toString() ?: "toutes", vm::nextMinScore)
         }
+        StatusChips(ui.statuses, vm::toggleStatus)
         Text(
             buildString {
                 append("${visible.items.size}/${ui.results.size} séries · MAL ${visible.malKnown}/${ui.results.size}")
                 if (visible.progressNeeded > 0) append(" · progression ${visible.progressKnown}/${visible.progressNeeded}")
-                if (ui.status != StatusFilter.ALL && Provider.ADN in providers) append(" · statut ADN pas encore disponible")
+                if (ui.statuses.isNotEmpty() && Provider.ADN in providers) append(" · statut ADN pas encore disponible")
             },
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
