@@ -9,7 +9,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -19,7 +18,6 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.dakyub.crunchymal.LocalGraph
 import com.dakyub.crunchymal.update.UpdateState
-import kotlinx.coroutines.launch
 
 /** Libellé de l'état de mise à jour, ou null s'il n'y a rien à afficher. */
 fun UpdateState.label(): String? = when (this) {
@@ -35,7 +33,6 @@ fun UpdateState.label(): String? = when (this) {
 fun UpdateButton(text: String = "Mettre à jour") {
     val updates = LocalGraph.current.updates
     val state by updates.state.collectAsState()
-    val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val available = state as? UpdateState.Available ?: return
     Button(onClick = {
@@ -48,7 +45,7 @@ fun UpdateButton(text: String = "Mettre à jour") {
                 Toast.LENGTH_LONG,
             ).show()
         } else {
-            scope.launch { updates.downloadAndInstall(available) }
+            updates.startDownloadAndInstall(available)
         }
     }) { Text(text) }
 }

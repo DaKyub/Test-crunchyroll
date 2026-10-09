@@ -10,7 +10,10 @@ import android.provider.Settings
 import com.dakyub.crunchymal.BuildConfig
 import com.dakyub.crunchymal.data.Http
 import com.dakyub.crunchymal.data.fetch
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
@@ -41,6 +44,7 @@ private data class GhRelease(@SerialName("tag_name") val tag: String = "", val a
  * dernière Release du dépôt, télécharge l'APK et l'installe via PackageInstaller.
  */
 class UpdateManager(private val context: Context) {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow<UpdateState>(UpdateState.Idle)
     val state: StateFlow<UpdateState> = _state
 
@@ -75,6 +79,16 @@ class UpdateManager(private val context: Context) {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         )
     }.isSuccess
+
+    /**
+     * Lance le téléchargement dans la portée de l'app : le bouton qui le déclenche disparaît dès que
+     * l'état passe à "Téléchargement", il ne doit donc pas porter la coroutine.
+     */
+    fun startDownloadAndInstall(update: UpdateState.Available) {
+        if (_state.value is UpdateState.Downloading || _state.value is UpdateState.Installing) return
+        _state.value = UpdateState.Downloading(update.build, 0f)
+        scope.launch { downloadAndInstall(update) }
+    }
 
     suspend fun downloadAndInstall(update: UpdateState.Available) {
         try {
