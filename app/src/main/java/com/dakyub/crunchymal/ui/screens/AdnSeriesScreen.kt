@@ -199,6 +199,11 @@ fun AdnSeriesScreen(showId: String) {
                             }
                         }
                     }
+                    if (ratings.info.isNotBlank()) {
+                        item {
+                            Text(ratings.info, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
                 }
             }
         }

@@ -2,6 +2,7 @@ package com.dakyub.crunchymal.data.ratings
 
 import android.util.Log
 import com.dakyub.crunchymal.data.Http
+import com.dakyub.crunchymal.data.HttpException
 import com.dakyub.crunchymal.data.Settings
 import com.dakyub.crunchymal.data.fetch
 import com.dakyub.crunchymal.data.mal.TitleMatcher
@@ -19,7 +20,12 @@ data class EpisodeRating(val value: Double, val source: String) {
 }
 
 /** Notes d'une saison : par numéro d'épisode, et par position (si la numérotation diffère). */
-data class SeasonRatings(val byNumber: Map<Int, EpisodeRating>, val byPosition: List<EpisodeRating?>) {
+data class SeasonRatings(
+    val byNumber: Map<Int, EpisodeRating>,
+    val byPosition: List<EpisodeRating?>,
+    /** Ligne de diagnostic affichée sous les épisodes (sources trouvées, erreurs…). */
+    val info: String = "",
+) {
     fun find(number: Int?, position: Int): EpisodeRating? =
         number?.let { byNumber[it] } ?: byPosition.getOrNull(position)
 
@@ -75,33 +81,62 @@ class RatingsRepository(private val settings: Settings) {
     val configured: Boolean get() = settings.omdbKey.isNotBlank() || settings.tmdbKey.isNotBlank()
 
     suspend fun season(titles: List<String>, seasonNumber: Int): SeasonRatings {
-        if (!configured || titles.isEmpty()) return SeasonRatings.EMPTY
+        if (!configured) return SeasonRatings(emptyMap(), emptyList(), "Notes IMDb/TMDB : aucune clé (Paramètres → Notes des épisodes)")
+        if (titles.isEmpty()) return SeasonRatings.EMPTY
         val key = titles.joinToString("|").lowercase() + "#" + seasonNumber
         seasons[key]?.let { return it }
-        val result = runCatching {
-            val seriesIds = resolve(titles)
-            val imdb = seriesIds.imdb?.let { runCatching { omdbSeason(it, seasonNumber) }.getOrNull() }.orEmpty()
-            val tmdb = seriesIds.tmdb?.let { runCatching { tmdbSeason(it, seasonNumber) }.getOrNull() }.orEmpty()
-            val numbers = (imdb.map { it.first } + tmdb.map { it.first }).distinct().sorted()
-            val byNumber = numbers.associateWith { n ->
-                imdb.firstOrNull { it.first == n }?.second ?: tmdb.first { it.first == n }.second
-            }
-            SeasonRatings(byNumber, numbers.map { byNumber[it] })
-        }.onFailure { Log.w("Ratings", "Échec des notes pour $titles", it) }
-            .getOrDefault(SeasonRatings.EMPTY)
-        seasons[key] = result
+        val errors = mutableListOf<String>()
+        val seriesIds = resolve(titles, errors)
+        if (seriesIds.imdb == null && seriesIds.tmdb == null) {
+            return SeasonRatings(emptyMap(), emptyList(), (listOf("Notes : série introuvable sur IMDb/TMDB") + errors).joinToString(" · "))
+                .also { if (errors.isEmpty()) seasons[key] = it }
+        }
+
+        suspend fun load(season: Int): Pair<List<Pair<Int, EpisodeRating>>, List<Pair<Int, EpisodeRating>>> {
+            val imdb = seriesIds.imdb?.let { id ->
+                runCatching { omdbSeason(id, season) }.onFailure { errors += "OMDb : ${it.message?.take(80)}" }.getOrNull()
+            }.orEmpty()
+            val tmdb = seriesIds.tmdb?.let { id ->
+                runCatching { tmdbSeason(id, season) }.onFailure { if (it !is HttpException || it.code != 404) errors += "TMDB : ${it.message?.take(80)}" }.getOrNull()
+            }.orEmpty()
+            return imdb to tmdb
+        }
+
+        var (imdb, tmdb) = load(seasonNumber)
+        // IMDb range souvent tous les épisodes d'un anime en saison 1 (numérotation absolue).
+        var fallback = false
+        if (imdb.isEmpty() && tmdb.isEmpty() && seasonNumber > 1) {
+            load(1).let { imdb = it.first; tmdb = it.second }
+            fallback = imdb.isNotEmpty() || tmdb.isNotEmpty()
+        }
+        val numbers = (imdb.map { it.first } + tmdb.map { it.first }).distinct().sorted()
+        val byNumber = numbers.associateWith { n ->
+            imdb.firstOrNull { it.first == n }?.second ?: tmdb.first { it.first == n }.second
+        }
+        val info = buildList {
+            add("Notes : IMDb ${seriesIds.imdb ?: "—"} · TMDB ${seriesIds.tmdb ?: "—"} · ${byNumber.size} ép. notés" +
+                (if (fallback) " (saison 1 IMDb/TMDB)" else " (saison $seasonNumber)"))
+            addAll(errors.distinct())
+        }.joinToString(" · ")
+        val result = SeasonRatings(byNumber, if (fallback) emptyList() else numbers.map { byNumber[it] }, info)
+        if (errors.isEmpty()) seasons[key] = result
         return result
     }
 
-    private suspend fun resolve(titles: List<String>): Ids {
+    private suspend fun resolve(titles: List<String>, errors: MutableList<String>): Ids {
         val key = titles.joinToString("|").lowercase()
         ids[key]?.let { return it }
         var tmdbId: Int? = null
         var imdbId: String? = null
         if (settings.tmdbKey.isNotBlank()) {
             for (title in titles) {
-                val results = tmdb("search/tv") { addQueryParameter("query", title) }
-                    .let { Http.json.decodeFromString<TmdbSearch>(it).results }
+                val results = try {
+                    tmdb("search/tv") { addQueryParameter("query", title) }
+                        .let { Http.json.decodeFromString<TmdbSearch>(it).results }
+                } catch (e: Exception) {
+                    errors += "TMDB : ${e.message?.take(80)}"
+                    break
+                }
                 val best = results
                     .take(8)
                     .maxByOrNull { show ->
@@ -122,14 +157,19 @@ class RatingsRepository(private val settings: Settings) {
         }
         if (imdbId == null && settings.omdbKey.isNotBlank()) {
             for (title in titles) {
-                val found = Http.json.decodeFromString<OmdbSeries>(omdb { addQueryParameter("t", title); addQueryParameter("type", "series") })
+                val found = try {
+                    Http.json.decodeFromString<OmdbSeries>(omdb { addQueryParameter("t", title); addQueryParameter("type", "series") })
+                } catch (e: Exception) {
+                    errors += "OMDb : ${e.message?.take(80)}"
+                    break
+                }
                 if (found.response == "True" && !found.imdbId.isNullOrBlank()) {
                     imdbId = found.imdbId
                     break
                 }
             }
         }
-        return Ids(imdbId, tmdbId).also { ids[key] = it }
+        return Ids(imdbId, tmdbId).also { if (errors.isEmpty()) ids[key] = it }
     }
 
     private suspend fun omdbSeason(imdbId: String, season: Int): List<Pair<Int, EpisodeRating>> {

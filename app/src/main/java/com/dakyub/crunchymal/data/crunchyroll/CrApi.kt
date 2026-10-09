@@ -59,6 +59,13 @@ class CrApi(private val auth: CrAuth, private val settings: Settings) {
             mapOf("page_size" to pageSize.toString()),
         ).all
 
+    /** Liste « Continuer à regarder » de l'app officielle : épisode en cours ou suivant de chaque série. */
+    suspend fun continueWatching(n: Int = 30): List<CrWatchlistItem> =
+        get<CrListResponse<CrWatchlistItem>>(
+            "/content/v2/discover/$account/history",
+            mapOf("n" to n.toString(), "preferred_audio_language" to settings.preferredAudio),
+        ).all
+
     suspend fun browse(sortBy: String, n: Int = 30): List<CrPanel> =
         get<CrListResponse<CrPanel>>(
             "/content/v2/discover/browse",

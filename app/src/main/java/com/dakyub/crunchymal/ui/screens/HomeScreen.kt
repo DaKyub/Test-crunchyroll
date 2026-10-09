@@ -34,6 +34,8 @@ import com.dakyub.crunchymal.ui.components.MediaCard
 import android.net.Uri
 import com.dakyub.crunchymal.data.crunchyroll.CrFeedItem
 import kotlinx.coroutines.Job
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import kotlinx.coroutines.joinAll
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -164,35 +166,34 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
         if (providers != loadedFor) load()
     }
 
+    // Rangées courantes : conservées pour pouvoir rafraîchir « Reprendre » seule au retour de Crunchyroll.
+    private var loaders: List<Pair<String, suspend () -> List<CardItem>>> = emptyList()
+    private var results: Array<List<CardItem>?> = emptyArray()
+    private var done = BooleanArray(0)
+    private var firstError: String? = null
+    private var lastResumeRefresh = 0L
+    private val continueLoader = continueWatching()
+
     fun load() {
         val providers = graph.providers.selected.value
         loadedFor = providers
         job?.cancel()
         job = viewModelScope.launch {
             state.value = HomeState(loading = true)
-            val loaders = mutableListOf<Pair<String, suspend () -> List<CardItem>>>()
+            val list = mutableListOf<Pair<String, suspend () -> List<CardItem>>>()
             if (Provider.CRUNCHYROLL in providers) {
                 val feed = runCatching { graph.api.homeFeed() }.getOrNull()
-                loaders += feed?.let { feedLoaders(it) }?.takeIf { it.isNotEmpty() } ?: fallbackLoaders()
+                list += feed?.let { feedLoaders(it) }?.takeIf { it.isNotEmpty() } ?: fallbackLoaders()
             }
-            if (Provider.ADN in providers) loaders += adnLoaders()
+            if (Provider.ADN in providers) list += adnLoaders()
 
             // Les rangées s'affichent au fur et à mesure, dans l'ordre du fil officiel.
-            val results = arrayOfNulls<List<CardItem>>(loaders.size)
-            val done = BooleanArray(loaders.size)
-            var firstError: String? = null
-            fun publish() {
-                val rows = loaders.indices.mapNotNull { i ->
-                    results[i]?.takeIf { it.isNotEmpty() }?.let { HomeRow("$i", loaders[i].first, it) }
-                }
-                val finished = done.all { it }
-                state.value = HomeState(
-                    loading = !finished,
-                    rows = rows,
-                    error = if (finished && rows.isEmpty()) firstError ?: "Rien à afficher" else null,
-                )
-            }
-            loaders.mapIndexed { i, (_, loader) ->
+            loaders = list
+            results = arrayOfNulls<List<CardItem>>(list.size)
+            done = BooleanArray(list.size)
+            firstError = null
+            lastResumeRefresh = System.currentTimeMillis()
+            list.mapIndexed { i, (_, loader) ->
                 launch {
                     runCatching { loader() }
                         .onSuccess { results[i] = it }
@@ -206,14 +207,52 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
         }
     }
 
+    private fun publish() {
+        val rows = loaders.indices.mapNotNull { i ->
+            results.getOrNull(i)?.takeIf { it.isNotEmpty() }?.let { HomeRow("$i", loaders[i].first, it) }
+        }
+        val finished = done.all { it }
+        state.value = HomeState(
+            loading = !finished,
+            rows = rows,
+            error = if (finished && rows.isEmpty()) firstError ?: "Rien à afficher" else null,
+        )
+    }
+
+    /** Au retour dans l'app (après un épisode), seule la rangée « Reprendre » est rechargée. */
+    fun onResume() {
+        val index = loaders.indexOfFirst { it.second === continueLoader }
+        if (index < 0 || System.currentTimeMillis() - lastResumeRefresh < 20_000) return
+        lastResumeRefresh = System.currentTimeMillis()
+        viewModelScope.launch {
+            runCatching { continueLoader() }.onSuccess {
+                if (index < results.size && loaders.getOrNull(index)?.second === continueLoader) {
+                    results[index] = it
+                    publish()
+                }
+            }
+        }
+    }
+
     private fun row(block: suspend () -> List<CardItem>): suspend () -> List<CardItem> = block
 
     private fun continueWatching(): suspend () -> List<CardItem> = {
-        graph.api.watchHistory()
-            .filter { it.panel.type == "episode" }
-            .distinctBy { it.panel.episodeMetadata?.seriesId ?: it.parentId }
-            .take(20)
-            .map { it.panel.toEpisodeCard(it.playhead, it.fullyWatched, it.parentId) }
+        // Même source que la rangée « Reprendre » de l'app officielle ; repli sur l'historique.
+        val resume = runCatching { graph.api.continueWatching() }.getOrDefault(emptyList())
+            .filter { it.panel.type == "episode" && !it.fullyWatched }
+        if (resume.isNotEmpty()) {
+            resume.distinctBy { it.panel.episodeMetadata?.seriesId ?: it.panel.id }.take(20).map { item ->
+                val card = item.panel.toEpisodeCard(item.playhead, item.fullyWatched)
+                val prefix = if (item.playhead > 0) "Continuer" else "Suite"
+                card.copy(subtitle = "$prefix · ${card.subtitle.orEmpty()}")
+            }
+        } else {
+            graph.api.watchHistory()
+                .filter { it.panel.type == "episode" && !it.fullyWatched }
+                .distinctBy { it.panel.episodeMetadata?.seriesId ?: it.parentId }
+                .take(20)
+                .map { it.panel.toEpisodeCard(it.playhead, it.fullyWatched, it.parentId) }
+        }
     }
 
     private fun watchlistRow(): suspend () -> List<CardItem> = {
@@ -226,7 +265,7 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
             val title = item.title.ifBlank { item.sourceMediaTitle }
             when (item.resourceType) {
                 "dynamic_collection" -> when (item.responseType) {
-                    "history" -> title.ifBlank { "Continuer à regarder" } to continueWatching()
+                    "history" -> title.ifBlank { "Continuer à regarder" } to continueLoader
                     "watchlist" -> title.ifBlank { "Ma watchlist" } to watchlistRow()
                     "recommendations" -> title.ifBlank { "Recommandé pour vous" } to row {
                         api.recommendations().map { it.toCard() }
@@ -272,7 +311,7 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
     )
 
     private fun fallbackLoaders(): List<Pair<String, suspend () -> List<CardItem>>> = listOf(
-        "Continuer à regarder" to continueWatching(),
+        "Continuer à regarder" to continueLoader,
         "Ma watchlist" to watchlistRow(),
         "Populaires" to row { graph.api.browse("popularity").map { it.toSeriesCard() } },
         "Nouveautés" to row { graph.api.browse("newly_added").map { it.toSeriesCard() } },
@@ -288,6 +327,7 @@ fun HomeScreen(onOpenSeries: (SeriesRef) -> Unit) {
     val filters by vm.filters.collectAsState()
     val providers by graph.providers.selected.collectAsState()
     LaunchedEffect(providers) { vm.ensure(providers) }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.onResume() }
     val context = LocalContext.current
 
     when {

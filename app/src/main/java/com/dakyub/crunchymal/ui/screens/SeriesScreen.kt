@@ -246,6 +246,7 @@ fun SeriesScreen(seriesId: String) {
                                     }
                                 )
                             }
+                            OutlinedButton(onClick = { OfficialApp.openSeries(context, series.id) }) { Text("Fiche Crunchyroll") }
                             state.inWatchlist?.let { inList ->
                                 OutlinedButton(onClick = { vm.toggleWatchlist() }) {
                                     Text(if (inList) "✓ Dans la watchlist" else "+ Watchlist")
@@ -319,6 +320,9 @@ fun SeriesScreen(seriesId: String) {
                                                 showMal = false,
                                             )
                                         }
+                                    }
+                                    if (ratings.info.isNotBlank()) {
+                                        Text(ratings.info, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                 }
                             }
