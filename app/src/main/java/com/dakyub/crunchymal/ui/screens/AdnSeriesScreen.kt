@@ -49,6 +49,7 @@ import com.dakyub.crunchymal.LocalGraph
 import com.dakyub.crunchymal.data.CardItem
 import com.dakyub.crunchymal.data.Provider
 import com.dakyub.crunchymal.data.SeriesRef
+import com.dakyub.crunchymal.data.adn.AdnApi
 import com.dakyub.crunchymal.data.adn.AdnShow
 import com.dakyub.crunchymal.ui.components.CenteredMessage
 import com.dakyub.crunchymal.ui.components.GenresLine
@@ -140,14 +141,20 @@ class AdnSeriesViewModel(private val graph: Graph, private val showId: String) :
         val current = state.value.inWatchlist ?: return
         viewModelScope.launch {
             state.value = state.value.copy(watchlistBusy = true)
-            val error = runCatching { graph.adn.setInWatchlist(showId, add = !current) }.getOrElse { it.message ?: "erreur" }
+            val change = runCatching { graph.adn.setInWatchlist(showId, add = !current) }
+                .getOrElse { AdnApi.WatchlistChange(false, listOf("${it.javaClass.simpleName}: ${it.message}")) }
             val now = runCatching { graph.adn.inWatchlist(showId) }.getOrNull()
             graph.adnWatchlist.invalidate()
             state.value = state.value.copy(watchlistBusy = false, inWatchlist = now ?: current)
             onResult(
-                when (now) {
-                    !current -> if (now == true) "Ajoutée à ta watchlist ADN" else "Retirée de ta watchlist ADN"
-                    else -> "ADN n'a pas pris en compte la modification (${error ?: "statut inchangé"})"
+                when {
+                    change.ok -> if (current) "Retirée de ta watchlist ADN" else "Ajoutée à ta watchlist ADN"
+                    graph.diagnostics.configured -> {
+                        // Détail des essais envoyé sur GitHub pour trouver la bonne méthode.
+                        graph.diagnostics.launch("Watchlist ADN (${if (current) "retrait" else "ajout"})") { change.log }
+                        "ADN a refusé la modification : détails envoyés sur GitHub"
+                    }
+                    else -> "ADN a refusé la modification (${change.log.drop(1).joinToString(", ") { it.substringAfter("→ ").substringBefore(" ·") }})"
                 }
             )
         }

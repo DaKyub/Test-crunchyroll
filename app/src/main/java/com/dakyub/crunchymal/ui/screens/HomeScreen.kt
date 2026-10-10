@@ -313,7 +313,7 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
                 async {
                     val show = video.show!!
                     val user = video.user
-                    if (user != null && !user.isFullyWatched) {
+                    if (user != null && !video.watched) {
                         adnEpisodeCard(show, video, "Continuer", if (video.duration > 0) user.stoptime.toFloat() / video.duration else null)
                     } else {
                         val episodes = runCatching { graph.adnProgress.tree(show.id.toString()).episodes }.getOrDefault(emptyList())

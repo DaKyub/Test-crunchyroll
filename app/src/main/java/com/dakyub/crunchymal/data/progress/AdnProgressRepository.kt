@@ -72,9 +72,9 @@ class AdnProgressRepository(private val adn: AdnApi, private val store: Progress
             // Les épisodes annoncés mais pas encore sortis ne comptent pas dans la progression.
             val available = video.available && (video.releaseDate.isNullOrBlank() || video.releaseDate.take(19) <= nowIso)
             when {
-                exact -> AdnEpisodeNode(video, video.user?.isFullyWatched == true, video.user?.stoptime ?: 0, available)
+                exact -> AdnEpisodeNode(video, video.watched, video.user?.stoptime ?: 0, available)
                 i < lastIndex -> AdnEpisodeNode(video, watched = true, stoptime = 0, available = available)
-                i == lastIndex -> AdnEpisodeNode(video, last?.user?.isFullyWatched == true, last?.user?.stoptime ?: 0, available)
+                i == lastIndex -> AdnEpisodeNode(video, last?.watched == true, last?.user?.stoptime ?: 0, available)
                 else -> AdnEpisodeNode(video, watched = false, stoptime = 0, available = available)
             }
         }

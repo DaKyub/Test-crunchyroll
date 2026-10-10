@@ -67,9 +67,19 @@ data class AdnVideo(
     /** Libellé de saison : "1", "Saga 1 : East Blue", "Arc 1 : Bullet"… */
     val seasonKey: String get() = season?.takeIf { it.isNotBlank() } ?: "1"
     val seasonNumber: Int get() = Regex("\\d+").find(seasonKey)?.value?.toIntOrNull() ?: 1
+
+    /**
+     * Vu : marqué « fini » par ADN, ou regardé à 85 % au moins (ADN ne marque pas l'épisode quand on
+     * passe au suivant pendant le générique de fin).
+     */
+    val watched: Boolean
+        get() = user?.let { it.isFullyWatched || (duration > 0 && it.stoptime >= duration * WATCHED_RATIO) } == true
     val episodeNumber: Int? get() = shortNumber?.toIntOrNull()
     val label: String get() = listOfNotNull(number?.takeIf { it.isNotBlank() }, name?.takeIf { it.isNotBlank() }).joinToString(" · ")
 }
+
+/** Part d'un épisode à partir de laquelle il compte comme vu. */
+const val WATCHED_RATIO = 0.85
 
 @Serializable
 data class AdnUserProgress(

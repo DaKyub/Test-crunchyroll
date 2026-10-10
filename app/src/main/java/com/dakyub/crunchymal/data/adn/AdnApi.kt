@@ -11,7 +11,9 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.decodeFromString
 import okhttp3.FormBody
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 
 /**
  * API (non officielle) d'Animation Digital Network : https://gw.api.animationdigitalnetwork.fr
@@ -132,19 +134,77 @@ class AdnApi(context: Context) {
     suspend fun inWatchlist(showId: String): Boolean =
         Http.json.decodeFromString<AdnStatusResponse>(get("$BASE/watchlist/show/$showId/status")).status
 
-    /** Ajoute ou retire une série de la watchlist ; renvoie null si OK, sinon l'erreur. */
-    suspend fun setInWatchlist(showId: String, add: Boolean): String? = withContext(Dispatchers.IO) {
-        val url = "$BASE/watchlist/show/$showId"
-        fun send(): Int {
-            val builder = request(url)
-            val req = if (add) builder.post(FormBody.Builder().build()).build() else builder.delete().build()
-            return Http.client.newCall(req).execute().use { it.code }
+    /** Résultat d'un ajout / retrait : [ok] si le statut a bien changé ; [log] détaille chaque essai. */
+    data class WatchlistChange(val ok: Boolean, val log: List<String>)
+
+    private data class WriteVariant(val method: String, val path: String, val json: String?)
+
+    /** Façons plausibles d'écrire dans la watchlist (l'API n'est pas documentée). */
+    private fun watchlistVariants(showId: String, add: Boolean): List<WriteVariant> = if (add) listOf(
+        WriteVariant("POST", "/watchlist/show/$showId", null),
+        WriteVariant("PUT", "/watchlist/show/$showId", null),
+        WriteVariant("PUT", "/watchlist/show/$showId/status", """{"status":true}"""),
+        WriteVariant("POST", "/watchlist/show/$showId/status", """{"status":true}"""),
+        WriteVariant("POST", "/watchlist", """{"showId":$showId}"""),
+        WriteVariant("PUT", "/watchlist", """{"showId":$showId}"""),
+    ) else listOf(
+        WriteVariant("DELETE", "/watchlist/show/$showId", null),
+        WriteVariant("PUT", "/watchlist/show/$showId/status", """{"status":false}"""),
+        WriteVariant("POST", "/watchlist/show/$showId/status", """{"status":false}"""),
+        WriteVariant("DELETE", "/watchlist/show/$showId/status", null),
+        WriteVariant("DELETE", "/watchlist", """{"showId":$showId}"""),
+    )
+
+    /**
+     * Ajoute ou retire une série de la watchlist : essaie chaque variante jusqu'à ce que le statut
+     * relu change, et retient celle qui a marché pour la fois suivante.
+     */
+    suspend fun setInWatchlist(showId: String, add: Boolean): WatchlistChange {
+        val prefKey = if (add) "wl_add_variant" else "wl_remove_variant"
+        val variants = watchlistVariants(showId, add)
+        val remembered = prefs.getInt(prefKey, -1)
+        val order = (listOf(remembered) + variants.indices).filter { it in variants.indices }.distinct()
+        val profile = runCatching { profileId() }.getOrNull()
+        val log = mutableListOf("${if (add) "Ajout" else "Retrait"} de la série $showId · profil : ${profile ?: "inconnu"}")
+        for (i in order) {
+            val variant = variants[i]
+            val (code, body) = runCatching { write(variant, profile) }
+                .getOrElse { 0 to "${it.javaClass.simpleName}: ${it.message}" }
+            val now = if (code in 200..299) runCatching { inWatchlist(showId) }.getOrNull() else null
+            log += "${variant.method} ${variant.path}${variant.json?.let { " $it" }.orEmpty()} → HTTP $code · " +
+                "statut relu : ${now ?: "-"} · ${redact(body).take(300).ifBlank { "(vide)" }}"
+            if (now == add) {
+                prefs.edit().putInt(prefKey, i).apply()
+                return WatchlistChange(true, log)
+            }
         }
-        var code = send()
+        return WatchlistChange(false, log)
+    }
+
+    private suspend fun write(variant: WriteVariant, profile: String?): Pair<Int, String> {
+        suspend fun once(): Pair<Int, String> = withContext(Dispatchers.IO) {
+            val body = variant.json?.toRequestBody("application/json".toMediaType())
+                ?: if (variant.method == "DELETE") null else ByteArray(0).toRequestBody(null)
+            val request = request(BASE + variant.path)
+                .header("Origin", "https://animationdigitalnetwork.com")
+                .header("Referer", "https://animationdigitalnetwork.com/")
+                .apply { profile?.let { header("X-Profile-ID", it) } }
+                .method(variant.method, body)
+                .build()
+            Http.client.newCall(request).execute().use { it.code to (it.body?.string().orEmpty()) }
+        }
+        val first = once()
         val user = prefs.getString("username", null)
         val pass = prefs.getString("password", null)
-        if (code == 401 && user != null && pass != null && login(user, pass) == null) code = send()
-        if (code in 200..299) null else "HTTP $code"
+        return if (first.first == 401 && user != null && pass != null && login(user, pass) == null) once() else first
+    }
+
+    /** Identifiant du profil ADN actif (premier profil du compte), mis en cache. */
+    private suspend fun profileId(): String? {
+        prefs.getString("profile_id", null)?.let { return it }
+        val id = Regex(""""id"\s*:\s*(\d+)""").find(get("$BASE/profile"))?.groupValues?.get(1)
+        id?.let { prefs.edit().putString("profile_id", it).apply() }
+        return id
     }
 
     /** GET brut (code HTTP + corps), avec ou sans en-tête de profil, pour le diagnostic. */
@@ -169,7 +229,7 @@ class AdnApi(context: Context) {
         out += runCatching {
             val list = episodes(showId)
             "${list.count { it.user != null }}/${list.size} épisodes avec progression · dernier vu : " +
-                (lastWatched(showId)?.let { "${it.id} ${it.number} vu=${it.user?.isFullyWatched}" } ?: "aucun")
+                (lastWatched(showId)?.let { "${it.id} ${it.number} vu=${it.user?.isFullyWatched} (${it.user?.stoptime}/${it.duration} s)" } ?: "aucun")
         }.getOrElse { "${it.javaClass.simpleName}: ${it.message}" }
         val paths = listOf(
             "/watchlist",
