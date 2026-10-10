@@ -36,10 +36,10 @@ fun GenresLine(malGenres: List<String>?, fallback: List<String>, modifier: Modif
 
 /** Notes IMDb / TMDB d'une saison (vide tant que rien n'est chargé ou si aucune clé n'est configurée). */
 @Composable
-fun rememberSeasonRatings(titles: List<String>, seasonNumber: Int): SeasonRatings {
+fun rememberSeasonRatings(titles: List<String>, seasonNumber: Int, episodeCount: Int = 0, episodesBefore: Int = 0): SeasonRatings {
     val ratings = LocalGraph.current.ratings
-    val value = produceState(SeasonRatings.EMPTY, titles, seasonNumber) {
-        value = ratings.season(titles, seasonNumber)
+    val value = produceState(SeasonRatings.EMPTY, titles, seasonNumber, episodeCount, episodesBefore) {
+        value = ratings.season(titles, seasonNumber, episodeCount, episodesBefore)
     }
     return value.value
 }

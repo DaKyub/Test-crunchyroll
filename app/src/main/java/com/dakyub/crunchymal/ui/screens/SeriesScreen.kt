@@ -65,6 +65,7 @@ import com.dakyub.crunchymal.ui.components.GenresLine
 import com.dakyub.crunchymal.ui.components.MalEntryChoice
 import com.dakyub.crunchymal.ui.components.MalListDialog
 import com.dakyub.crunchymal.ui.components.rememberSeasonRatings
+import com.dakyub.crunchymal.data.ratings.firstEpisodeNumber
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -298,7 +299,13 @@ fun SeriesScreen(seriesId: String) {
                                 val seriesRecord = rememberMalRecord(ref.malKey, ref.malTitles)
                                 val ratingTitles = listOfNotNull(seriesRecord?.englishTitle, series.slugTitle.replace('-', ' '), series.title)
                                     .filter { it.isNotBlank() }.distinct()
-                                val ratings = rememberSeasonRatings(ratingTitles, season?.season?.seasonNumber ?: 1)
+                                val ratings = rememberSeasonRatings(
+                                    ratingTitles,
+                                    season?.season?.seasonNumber ?: 1,
+                                    episodeCount = season?.episodes?.size ?: 0,
+                                    episodesBefore = tree.seasons.take(state.selectedSeason).sumOf { it.episodes.size },
+                                )
+                                val firstNumber = firstEpisodeNumber(season?.episodes.orEmpty().map { it.episode.episodeNumber })
                                 if (season != null) {
                                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                         Text(season.season.title, style = MaterialTheme.typography.titleMedium)
@@ -310,7 +317,7 @@ fun SeriesScreen(seriesId: String) {
                                         LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                                             itemsIndexed(season.episodes, key = { _, n -> n.episode.id }) { index, node ->
                                                 val ep = node.episode
-                                                val rating = ratings.find(ep.episodeNumber, index)
+                                                val rating = ratings.find(ep.episodeNumber, index, firstNumber)
                                                 MediaCard(
                                                     item = CardItem(
                                                         series = SeriesRef(ep.id, "${if (node.watched) "✓ " else ""}${ep.label} · ${ep.title}", wideUrl = ep.images.thumbnail.best(400)),

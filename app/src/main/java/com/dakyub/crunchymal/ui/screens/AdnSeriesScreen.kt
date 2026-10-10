@@ -60,6 +60,7 @@ import com.dakyub.crunchymal.ui.theme.AdnBlue
 import com.dakyub.crunchymal.ui.components.MediaCard
 import com.dakyub.crunchymal.ui.components.rememberMalRecord
 import com.dakyub.crunchymal.ui.components.rememberSeasonRatings
+import com.dakyub.crunchymal.data.ratings.firstEpisodeNumber
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -192,7 +193,13 @@ fun AdnSeriesScreen(showId: String) {
             val season = seasons.getOrNull(state.selectedSeason)
             val ratingTitles = listOfNotNull(record?.englishTitle, show.originalTitle, show.title)
                 .filter { it.isNotBlank() }.distinct()
-            val ratings = rememberSeasonRatings(ratingTitles, season?.second?.firstOrNull()?.video?.seasonNumber ?: 1)
+            val ratings = rememberSeasonRatings(
+                ratingTitles,
+                season?.second?.firstOrNull()?.video?.seasonNumber ?: 1,
+                episodeCount = season?.second?.size ?: 0,
+                episodesBefore = seasons.take(state.selectedSeason).sumOf { it.second.size },
+            )
+            val firstNumber = firstEpisodeNumber(season?.second.orEmpty().map { it.video.episodeNumber })
             val summary = state.summary
             val next = summary?.nextEpisodeId?.let { id -> state.episodes.firstOrNull { it.video.id.toString() == id } }
 
@@ -286,7 +293,7 @@ fun AdnSeriesScreen(showId: String) {
                             LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                                 itemsIndexed(nodes, key = { _, n -> n.video.id }) { index, node ->
                                     val video = node.video
-                                    val rating = ratings.find(video.episodeNumber, index)
+                                    val rating = ratings.find(video.episodeNumber, index, firstNumber)
                                     MediaCard(
                                         item = CardItem(
                                             series = SeriesRef(

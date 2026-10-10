@@ -19,20 +19,32 @@ data class EpisodeRating(val value: Double, val source: String) {
     val label: String get() = "$source ${String.format(Locale.US, "%.1f", value)}"
 }
 
-/** Notes d'une saison : par numéro d'épisode, et par position (si la numérotation diffère). */
+/**
+ * Notes d'une saison, par numéro d'épisode relatif (1 = premier épisode de la saison), quelle que soit
+ * la numérotation des sources (par saison ou continue).
+ */
 data class SeasonRatings(
-    val byNumber: Map<Int, EpisodeRating>,
-    val byPosition: List<EpisodeRating?>,
+    val byRelative: Map<Int, EpisodeRating>,
     /** Ligne de diagnostic affichée sous les épisodes (sources trouvées, erreurs…). */
     val info: String = "",
 ) {
-    fun find(number: Int?, position: Int): EpisodeRating? =
-        number?.let { byNumber[it] } ?: byPosition.getOrNull(position)
+    /**
+     * [number] : numéro de l'épisode dans l'app (peut être continu : 23, 24… pour une saison 2) ;
+     * [firstNumber] : celui du premier épisode de la saison ; [position] sert si l'épisode n'a pas de numéro.
+     */
+    fun find(number: Int?, position: Int, firstNumber: Int = 1): EpisodeRating? =
+        if (number != null) byRelative[number - firstNumber + 1] else byRelative[position + 1]
 
     companion object {
-        val EMPTY = SeasonRatings(emptyMap(), emptyList())
+        val EMPTY = SeasonRatings(emptyMap())
     }
 }
+
+/** Premier numéro d'épisode (≥ 1) d'une saison, pour [SeasonRatings.find]. */
+fun firstEpisodeNumber(numbers: List<Int?>): Int = numbers.filterNotNull().filter { it >= 1 }.minOrNull() ?: 1
+
+/** Épisodes d'une saison chez une source : numéros listés (notés ou non) et notes. */
+private data class SourceSeason(val listed: List<Int>, val ratings: List<Pair<Int, EpisodeRating>>)
 
 @Serializable
 private data class OmdbSeries(@SerialName("imdbID") val imdbId: String? = null, @SerialName("Response") val response: String = "")
@@ -80,47 +92,81 @@ class RatingsRepository(private val settings: Settings) {
 
     val configured: Boolean get() = settings.omdbKey.isNotBlank() || settings.tmdbKey.isNotBlank()
 
-    suspend fun season(titles: List<String>, seasonNumber: Int): SeasonRatings {
-        if (!configured) return SeasonRatings(emptyMap(), emptyList(), "Notes IMDb/TMDB : aucune clé (Paramètres → Notes des épisodes)")
+    /**
+     * [episodeCount] : épisodes de la saison dans l'app ; [episodesBefore] : épisodes des saisons
+     * précédentes. Ils servent quand IMDb/TMDB rangent toute la série en « saison 1 » (numérotation continue).
+     */
+    suspend fun season(titles: List<String>, seasonNumber: Int, episodeCount: Int = 0, episodesBefore: Int = 0): SeasonRatings {
+        if (!configured) return SeasonRatings(emptyMap(), "Notes IMDb/TMDB : aucune clé (Paramètres → Notes des épisodes)")
         if (titles.isEmpty()) return SeasonRatings.EMPTY
-        val key = titles.joinToString("|").lowercase() + "#" + seasonNumber
+        val key = titles.joinToString("|").lowercase() + "#$seasonNumber#$episodeCount#$episodesBefore"
         seasons[key]?.let { return it }
         val errors = mutableListOf<String>()
         val seriesIds = resolve(titles, errors)
         if (seriesIds.imdb == null && seriesIds.tmdb == null) {
-            return SeasonRatings(emptyMap(), emptyList(), (listOf("Notes : série introuvable sur IMDb/TMDB") + errors).joinToString(" · "))
+            return SeasonRatings(emptyMap(), (listOf("Notes : série introuvable sur IMDb/TMDB") + errors).joinToString(" · "))
                 .also { if (errors.isEmpty()) seasons[key] = it }
         }
 
-        suspend fun load(season: Int): Pair<List<Pair<Int, EpisodeRating>>, List<Pair<Int, EpisodeRating>>> {
-            val imdb = seriesIds.imdb?.let { id ->
-                runCatching { omdbSeason(id, season) }.onFailure { errors += "OMDb : ${it.message?.take(80)}" }.getOrNull()
-            }.orEmpty()
-            val tmdb = seriesIds.tmdb?.let { id ->
-                runCatching { tmdbSeason(id, season) }.onFailure { if (it !is HttpException || it.code != 404) errors += "TMDB : ${it.message?.take(80)}" }.getOrNull()
-            }.orEmpty()
-            return imdb to tmdb
+        val imdb = seriesIds.imdb?.let { id ->
+            relative("IMDb", seasonNumber, episodeCount, episodesBefore, errors) { omdbSeason(id, it) }
         }
-
-        var (imdb, tmdb) = load(seasonNumber)
-        // IMDb range souvent tous les épisodes d'un anime en saison 1 (numérotation absolue).
-        var fallback = false
-        if (imdb.isEmpty() && tmdb.isEmpty() && seasonNumber > 1) {
-            load(1).let { imdb = it.first; tmdb = it.second }
-            fallback = imdb.isNotEmpty() || tmdb.isNotEmpty()
+        val tmdb = seriesIds.tmdb?.let { id ->
+            relative("TMDB", seasonNumber, episodeCount, episodesBefore, errors) { tmdbSeason(id, it) }
         }
-        val numbers = (imdb.map { it.first } + tmdb.map { it.first }).distinct().sorted()
-        val byNumber = numbers.associateWith { n ->
-            imdb.firstOrNull { it.first == n }?.second ?: tmdb.first { it.first == n }.second
-        }
+        // IMDb en priorité, TMDB pour les épisodes qu'IMDb ne note pas.
+        val byRelative = tmdb?.first.orEmpty() + imdb?.first.orEmpty()
         val info = buildList {
-            add("Notes : IMDb ${seriesIds.imdb ?: "—"} · TMDB ${seriesIds.tmdb ?: "—"} · ${byNumber.size} ép. notés" +
-                (if (fallback) " (saison 1 IMDb/TMDB)" else " (saison $seasonNumber)"))
+            add("Notes : ${byRelative.size}${if (episodeCount > 0) "/$episodeCount" else ""} ép. notés (saison $seasonNumber)")
+            add("IMDb ${seriesIds.imdb ?: "—"}${imdb?.second?.let { " $it" }.orEmpty()}")
+            add("TMDB ${seriesIds.tmdb ?: "—"}${tmdb?.second?.let { " $it" }.orEmpty()}")
             addAll(errors.distinct())
         }.joinToString(" · ")
-        val result = SeasonRatings(byNumber, if (fallback) emptyList() else numbers.map { byNumber[it] }, info)
+        val result = SeasonRatings(byRelative, info)
         if (errors.isEmpty()) seasons[key] = result
         return result
+    }
+
+    /**
+     * Notes d'une source en numérotation relative, avec le détail pour le diagnostic. Prend la saison
+     * demandée ; si elle manque ou est incomplète, essaie la saison 1 en numérotation continue
+     * (épisodes [before] + 1 à [before] + [count]) et garde celle qui a le plus de notes.
+     */
+    private suspend fun relative(
+        source: String,
+        seasonNumber: Int,
+        count: Int,
+        before: Int,
+        errors: MutableList<String>,
+        fetch: suspend (Int) -> SourceSeason,
+    ): Pair<Map<Int, EpisodeRating>, String> {
+        suspend fun load(season: Int): SourceSeason? = runCatching { fetch(season) }
+            .onFailure { if (it !is HttpException || it.code != 404) errors += "$source : ${it.message?.take(80)}" }
+            .getOrNull()
+
+        val direct = load(seasonNumber)
+        // Saison numérotée à partir de 13, 23… chez la source : ramenée à 1.
+        val directFirst = direct?.listed?.filter { it >= 1 }?.minOrNull() ?: 1
+        val directRel = direct?.ratings.orEmpty().associate { (n, r) -> (n - directFirst + 1) to r }
+        var best = directRel
+        var detail = "${directRel.size} notes / ${direct?.listed?.size ?: 0} ép."
+
+        val incomplete = direct == null || direct.listed.size < maxOf(1, count * 6 / 10)
+        if (seasonNumber > 1 && incomplete) {
+            val first = load(1)
+            if (first != null) {
+                val absolute = if (before > 0 && count > 0) {
+                    first.ratings.filter { it.first in (before + 1)..(before + count) }.associate { (n, r) -> (n - before) to r }
+                } else if (direct == null) {
+                    first.ratings.toMap()
+                } else emptyMap()
+                if (absolute.size > best.size) {
+                    best = absolute
+                    detail = "${absolute.size} notes (saison 1 en numérotation continue)"
+                }
+            }
+        }
+        return best to detail
     }
 
     private suspend fun resolve(titles: List<String>, errors: MutableList<String>): Ids {
@@ -172,21 +218,27 @@ class RatingsRepository(private val settings: Settings) {
         return Ids(imdbId, tmdbId).also { if (errors.isEmpty()) ids[key] = it }
     }
 
-    private suspend fun omdbSeason(imdbId: String, season: Int): List<Pair<Int, EpisodeRating>> {
-        if (settings.omdbKey.isBlank()) return emptyList()
+    private suspend fun omdbSeason(imdbId: String, season: Int): SourceSeason {
+        if (settings.omdbKey.isBlank()) return SourceSeason(emptyList(), emptyList())
         val json = omdb { addQueryParameter("i", imdbId); addQueryParameter("Season", season.toString()) }
-        return Http.json.decodeFromString<OmdbSeason>(json).episodes.mapNotNull { ep ->
-            val n = ep.episode.toIntOrNull() ?: return@mapNotNull null
-            val r = ep.rating.toDoubleOrNull() ?: return@mapNotNull null
-            n to EpisodeRating(r, "IMDb")
-        }
+        val episodes = Http.json.decodeFromString<OmdbSeason>(json).episodes
+        return SourceSeason(
+            listed = episodes.mapNotNull { it.episode.toIntOrNull() },
+            ratings = episodes.mapNotNull { ep ->
+                val n = ep.episode.toIntOrNull() ?: return@mapNotNull null
+                val r = ep.rating.toDoubleOrNull() ?: return@mapNotNull null
+                n to EpisodeRating(r, "IMDb")
+            },
+        )
     }
 
-    private suspend fun tmdbSeason(tmdbId: Int, season: Int): List<Pair<Int, EpisodeRating>> {
+    private suspend fun tmdbSeason(tmdbId: Int, season: Int): SourceSeason {
         val json = tmdb("tv/$tmdbId/season/$season") {}
-        return Http.json.decodeFromString<TmdbSeason>(json).episodes
-            .filter { it.count > 0 && it.average > 0 }
-            .map { it.number to EpisodeRating(it.average, "TMDB") }
+        val episodes = Http.json.decodeFromString<TmdbSeason>(json).episodes
+        return SourceSeason(
+            listed = episodes.map { it.number },
+            ratings = episodes.filter { it.count > 0 && it.average > 0 }.map { it.number to EpisodeRating(it.average, "TMDB") },
+        )
     }
 
     private suspend fun omdb(params: HttpUrl.Builder.() -> Unit): String {
