@@ -55,6 +55,9 @@ import com.dakyub.crunchymal.data.mal.MalAnime
 import com.dakyub.crunchymal.data.progress.SeriesTree
 import com.dakyub.crunchymal.ui.components.CenteredMessage
 import com.dakyub.crunchymal.ui.components.MalBadge
+import com.dakyub.crunchymal.ui.theme.CrunchyOrange
+import com.dakyub.crunchymal.ui.components.MinimalFocusScroll
+import com.dakyub.crunchymal.ui.components.seasonChipColors
 import com.dakyub.crunchymal.ui.components.MediaCard
 import com.dakyub.crunchymal.ui.components.TvTextField
 import com.dakyub.crunchymal.ui.components.rememberMalRecord
@@ -197,133 +200,136 @@ fun SeriesScreen(seriesId: String) {
                             )
                         )
                 )
-                LazyColumn(
-                    contentPadding = PaddingValues(horizontal = 48.dp, vertical = 32.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                    modifier = Modifier.fillMaxSize(),
-                ) {
-                    item {
-                        Text(series.title, style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
-                    }
-                    item {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            MalBadge(ref.malKey, ref.malTitles, large = true)
+                MinimalFocusScroll {
+                    LazyColumn(
+                        contentPadding = PaddingValues(horizontal = 48.dp, vertical = 20.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        item {
+                            Text(series.title, style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
+                        }
+                        item {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                                MalBadge(ref.malKey, ref.malTitles, large = true)
+                                val record = rememberMalRecord(ref.malKey, ref.malTitles)
+                                val info = listOfNotNull(
+                                    record?.scoredBy?.let { String.format(Locale.FRANCE, "%,d votes", it) },
+                                    record?.title?.takeIf { it != series.title }?.let { "MAL : $it" },
+                                    series.launchYear?.toString(),
+                                    summary?.let { "${it.watched}/${it.total} épisodes vus" },
+                                ).joinToString(" · ")
+                                Text(info, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        item {
                             val record = rememberMalRecord(ref.malKey, ref.malTitles)
-                            val info = listOfNotNull(
-                                record?.scoredBy?.let { String.format(Locale.FRANCE, "%,d votes", it) },
-                                record?.title?.takeIf { it != series.title }?.let { "MAL : $it" },
-                                series.launchYear?.toString(),
-                                summary?.let { "${it.watched}/${it.total} épisodes vus" },
-                            ).joinToString(" · ")
-                            Text(info, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            GenresLine(record?.genres, state.categories)
                         }
-                    }
-                    item {
-                        val record = rememberMalRecord(ref.malKey, ref.malTitles)
-                        GenresLine(record?.genres, state.categories)
-                    }
-                    item {
-                        Text(
-                            series.description,
-                            style = MaterialTheme.typography.bodyMedium,
-                            maxLines = 4,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.fillMaxWidth(0.6f),
-                        )
-                    }
-                    item {
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            val nextId = summary?.nextEpisodeId
-                            Button(onClick = {
-                                if (nextId != null) OfficialApp.openEpisode(context, nextId, series.id) else OfficialApp.openSeries(context, series.id)
-                            }) {
-                                Text(
-                                    when {
-                                        summary == null -> "▶ Ouvrir dans Crunchyroll"
-                                        nextId == null -> "▶ Revoir"
-                                        summary.started -> "▶ Reprendre ${summary.nextLabel ?: ""}"
-                                        else -> "▶ Commencer"
-                                    }
-                                )
-                            }
-                            OutlinedButton(onClick = { OfficialApp.openSeries(context, series.id) }) { Text("Fiche Crunchyroll") }
-                            state.inWatchlist?.let { inList ->
-                                OutlinedButton(onClick = { vm.toggleWatchlist() }) {
-                                    Text(if (inList) "✓ Dans la watchlist" else "+ Watchlist")
-                                }
-                            }
-                            OutlinedButton(onClick = { malListOpen = true }) { Text("Ma liste MAL") }
-                            OutlinedButton(onClick = { correcting = ref.malKey to (ref.malTitles.firstOrNull() ?: series.title) }) {
-                                Text("Corriger MAL")
-                            }
-                            OutlinedButton(onClick = { vm.refreshProgress(force = true) }) { Text("↻") }
-                        }
-                    }
-
-                    if (tree == null) {
                         item {
                             Text(
-                                state.treeError?.let { "Progression indisponible : $it" } ?: "Chargement des épisodes…",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                series.description,
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 3,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.fillMaxWidth(0.6f),
                             )
                         }
-                    } else if (tree.seasons.isNotEmpty()) {
                         item {
-                            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                itemsIndexed(tree.seasons) { index, node ->
-                                    val s = node.season
-                                    val key = "season:${s.id}"
-                                    val titles = seasonMalTitles(series.slugTitle, s.title, s.slugTitle, s.seasonNumber)
-                                    val watched = node.episodes.count { it.watched }
-                                    FilterChip(
-                                        selected = index == state.selectedSeason,
-                                        onClick = { vm.selectSeason(index) },
-                                        onLongClick = { correcting = key to (titles.firstOrNull() ?: s.title) },
-                                    ) {
-                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            Text("S${s.seasonNumber} · $watched/${node.episodes.size}")
-                                            MalBadge(key, titles)
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                val nextId = summary?.nextEpisodeId
+                                Button(onClick = {
+                                    if (nextId != null) OfficialApp.openEpisode(context, nextId, series.id) else OfficialApp.openSeries(context, series.id)
+                                }) {
+                                    Text(
+                                        when {
+                                            summary == null -> "▶ Ouvrir dans Crunchyroll"
+                                            nextId == null -> "▶ Revoir"
+                                            summary.started -> "▶ Reprendre ${summary.nextLabel ?: ""}"
+                                            else -> "▶ Commencer"
+                                        }
+                                    )
+                                }
+                                OutlinedButton(onClick = { OfficialApp.openSeries(context, series.id) }) { Text("Fiche Crunchyroll") }
+                                state.inWatchlist?.let { inList ->
+                                    OutlinedButton(onClick = { vm.toggleWatchlist() }) {
+                                        Text(if (inList) "✓ Dans la watchlist" else "+ Watchlist")
+                                    }
+                                }
+                                OutlinedButton(onClick = { malListOpen = true }) { Text("Ma liste MAL") }
+                                OutlinedButton(onClick = { correcting = ref.malKey to (ref.malTitles.firstOrNull() ?: series.title) }) {
+                                    Text("Corriger MAL")
+                                }
+                                OutlinedButton(onClick = { vm.refreshProgress(force = true) }) { Text("↻") }
+                            }
+                        }
+
+                        if (tree == null) {
+                            item {
+                                Text(
+                                    state.treeError?.let { "Progression indisponible : $it" } ?: "Chargement des épisodes…",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        } else if (tree.seasons.isNotEmpty()) {
+                            item {
+                                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    itemsIndexed(tree.seasons) { index, node ->
+                                        val s = node.season
+                                        val key = "season:${s.id}"
+                                        val titles = seasonMalTitles(series.slugTitle, s.title, s.slugTitle, s.seasonNumber)
+                                        val watched = node.episodes.count { it.watched }
+                                        FilterChip(
+                                            selected = index == state.selectedSeason,
+                                            onClick = { vm.selectSeason(index) },
+                                            onLongClick = { correcting = key to (titles.firstOrNull() ?: s.title) },
+                                            colors = seasonChipColors(CrunchyOrange),
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                Text("S${s.seasonNumber} · $watched/${node.episodes.size}")
+                                                MalBadge(key, titles)
+                                            }
                                         }
                                     }
                                 }
                             }
-                        }
-                        item {
-                            val season = tree.seasons.getOrNull(state.selectedSeason)
-                            val seriesRecord = rememberMalRecord(ref.malKey, ref.malTitles)
-                            val ratingTitles = listOfNotNull(seriesRecord?.englishTitle, series.slugTitle.replace('-', ' '), series.title)
-                                .filter { it.isNotBlank() }.distinct()
-                            val ratings = rememberSeasonRatings(ratingTitles, season?.season?.seasonNumber ?: 1)
-                            if (season != null) {
-                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Text(season.season.title, style = MaterialTheme.typography.titleMedium)
-                                    Text(
-                                        "Appui long sur une saison pour corriger sa correspondance MAL.",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                    LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                                        itemsIndexed(season.episodes, key = { _, n -> n.episode.id }) { index, node ->
-                                            val ep = node.episode
-                                            val rating = ratings.find(ep.episodeNumber, index)
-                                            MediaCard(
-                                                item = CardItem(
-                                                    series = SeriesRef(ep.id, "${if (node.watched) "✓ " else ""}${ep.label} · ${ep.title}", wideUrl = ep.images.thumbnail.best(400)),
-                                                    subtitle = listOfNotNull(
-                                                        "à venir".takeIf { !node.available },
-                                                        rating?.label,
-                                                        if (ep.durationMs > 0) "${ep.durationMs / 60000} min" else null,
-                                                    ).joinToString(" · ").ifBlank { null },
-                                                    progress = node.progress.takeIf { it > 0f },
-                                                    wide = true,
-                                                ),
-                                                onClick = { OfficialApp.openEpisode(context, ep.id, series.id) },
-                                                showMal = false,
-                                            )
+                            item {
+                                val season = tree.seasons.getOrNull(state.selectedSeason)
+                                val seriesRecord = rememberMalRecord(ref.malKey, ref.malTitles)
+                                val ratingTitles = listOfNotNull(seriesRecord?.englishTitle, series.slugTitle.replace('-', ' '), series.title)
+                                    .filter { it.isNotBlank() }.distinct()
+                                val ratings = rememberSeasonRatings(ratingTitles, season?.season?.seasonNumber ?: 1)
+                                if (season != null) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Text(season.season.title, style = MaterialTheme.typography.titleMedium)
+                                        Text(
+                                            "Appui long sur une saison pour corriger sa correspondance MAL.",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                        LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                                            itemsIndexed(season.episodes, key = { _, n -> n.episode.id }) { index, node ->
+                                                val ep = node.episode
+                                                val rating = ratings.find(ep.episodeNumber, index)
+                                                MediaCard(
+                                                    item = CardItem(
+                                                        series = SeriesRef(ep.id, "${if (node.watched) "✓ " else ""}${ep.label} · ${ep.title}", wideUrl = ep.images.thumbnail.best(400)),
+                                                        subtitle = listOfNotNull(
+                                                            "à venir".takeIf { !node.available },
+                                                            rating?.label,
+                                                            if (ep.durationMs > 0) "${ep.durationMs / 60000} min" else null,
+                                                        ).joinToString(" · ").ifBlank { null },
+                                                        progress = node.progress.takeIf { it > 0f },
+                                                        wide = true,
+                                                    ),
+                                                    onClick = { OfficialApp.openEpisode(context, ep.id, series.id) },
+                                                    showMal = false,
+                                                )
+                                            }
                                         }
-                                    }
-                                    if (ratings.info.isNotBlank()) {
-                                        Text(ratings.info, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        if (ratings.info.isNotBlank()) {
+                                            Text(ratings.info, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
                                     }
                                 }
                             }

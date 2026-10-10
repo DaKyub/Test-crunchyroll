@@ -1,6 +1,14 @@
 package com.dakyub.crunchymal.ui.components
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.gestures.BringIntoViewSpec
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.graphics.Color
+import androidx.tv.material3.FilterChipDefaults
+import androidx.tv.material3.SelectableChipColors
+import kotlin.math.abs
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -92,6 +100,39 @@ fun <T> PosterGrid(
         }
     }
 }
+
+/**
+ * Défilement « au plus juste ». Sur Android TV, Compose place l'élément qui reçoit le focus à 30 % du
+ * haut de l'écran, ce qui cache le haut des fiches (titre, note MAL) dès leur ouverture : ici on ne
+ * défile que si l'élément sort de l'écran.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+private val MinimalBringIntoViewSpec = object : BringIntoViewSpec {
+    override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
+        val trailing = offset + size
+        return when {
+            offset >= 0f && trailing <= containerSize -> 0f
+            offset < 0f && trailing > containerSize -> 0f
+            abs(offset) < abs(trailing - containerSize) -> offset
+            else -> trailing - containerSize
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun MinimalFocusScroll(content: @Composable () -> Unit) {
+    CompositionLocalProvider(LocalBringIntoViewSpec provides MinimalBringIntoViewSpec, content = content)
+}
+
+/** Puce de saison : la saison affichée prend la couleur du service ([accent]). */
+@Composable
+fun seasonChipColors(accent: Color): SelectableChipColors = FilterChipDefaults.colors(
+    selectedContainerColor = accent,
+    selectedContentColor = Color.White,
+    focusedSelectedContainerColor = Color.White,
+    focusedSelectedContentColor = accent,
+)
 
 /** Champ texte utilisable à la télécommande (le clavier système s'ouvre sur OK). */
 @Composable
