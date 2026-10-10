@@ -12,6 +12,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
@@ -107,6 +112,15 @@ private val Tabs = listOf("Accueil", "Parcourir", "Calendrier", "Watchlist", "Li
 @Composable
 private fun MainTabs(onOpenSeries: (SeriesRef) -> Unit) {
     var selected by rememberSaveable { mutableIntStateOf(0) }
+    // Au retour d'une fiche, Android redonne le focus au premier onglet (Accueil), qui serait alors
+    // sélectionné : pendant ce retour, le focus est redirigé vers l'onglet où l'on était.
+    val tabRequesters = remember { List(Tabs.size) { FocusRequester() } }
+    var restoring by remember { mutableStateOf(true) }
+    LaunchedEffect(Unit) {
+        runCatching { tabRequesters[selected].requestFocus() }
+        delay(1500)
+        restoring = false
+    }
     val graph = LocalGraph.current
     val providers by graph.providers.selected.collectAsState()
     LaunchedEffect(Unit) { graph.updates.check() }
@@ -118,7 +132,18 @@ private fun MainTabs(onOpenSeries: (SeriesRef) -> Unit) {
         ) {
             TabRow(selectedTabIndex = selected, modifier = Modifier.weight(1f, fill = false)) {
                 Tabs.forEachIndexed { index, title ->
-                    Tab(selected = index == selected, onFocus = { selected = index }) {
+                    Tab(
+                        selected = index == selected,
+                        onFocus = {
+                            if (restoring && index != selected) {
+                                runCatching { tabRequesters[selected].requestFocus() }
+                            } else {
+                                selected = index
+                                restoring = false
+                            }
+                        },
+                        modifier = Modifier.focusRequester(tabRequesters[index]),
+                    ) {
                         Text(title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
                     }
                 }
