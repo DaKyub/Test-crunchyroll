@@ -41,11 +41,14 @@ import com.dakyub.crunchymal.data.mal.MalAnime
 import com.dakyub.crunchymal.ui.components.CenteredMessage
 import com.dakyub.crunchymal.ui.components.GenresLine
 import com.dakyub.crunchymal.ui.components.MalBadge
-import com.dakyub.crunchymal.ui.components.MinimalFocusScroll
 import com.dakyub.crunchymal.ui.components.MalEntryChoice
 import com.dakyub.crunchymal.ui.components.MalListDialog
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.foundation.lazy.rememberLazyListState
+import com.dakyub.crunchymal.ui.components.ExpandableSynopsis
+import kotlinx.coroutines.delay
 import java.util.Locale
 
 data class MalSeriesUi(val loading: Boolean = true, val error: String? = null, val anime: MalAnime? = null)
@@ -96,64 +99,66 @@ fun MalSeriesScreen(malId: Int, onOpenSeries: (SeriesRef) -> Unit) {
             val target = availability[malId]?.refFor(providers, crunchyrollUsable = crLoggedIn)
             val found = platforms[malId]
             val others = found?.names.orEmpty().filter { it != "Crunchyroll" && it != "ADN" }
-            MinimalFocusScroll {
-                LazyColumn(
-                    contentPadding = PaddingValues(horizontal = 48.dp, vertical = 20.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                    modifier = Modifier.fillMaxSize(),
-                ) {
-                    item {
-                        Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                            AsyncImage(
-                                model = anime.pictureUrl,
-                                contentDescription = anime.title,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .width(150.dp)
-                                    .aspectRatio(0.7f)
-                                    .clip(RoundedCornerShape(8.dp)),
-                            )
-                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                Text(anime.titleEnglish ?: anime.title, style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
-                                if (anime.titleEnglish != null && anime.titleEnglish != anime.title) {
-                                    Text(anime.title, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                                    MalBadge("mal:$malId", anime.allTitles, large = true)
-                                    Text(
-                                        listOfNotNull(
-                                            anime.scoredBy?.let { String.format(Locale.FRANCE, "%,d votes", it) },
-                                            anime.type?.uppercase(),
-                                            anime.episodes?.let { "$it ép." },
-                                            anime.startYear?.toString(),
-                                        ).joinToString(" · "),
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                                GenresLine(anime.genres, emptyList())
-                                anime.synopsis?.let {
-                                    Text(it, style = MaterialTheme.typography.bodyMedium, maxLines = 4, overflow = TextOverflow.Ellipsis)
-                                }
+            val listState = rememberLazyListState()
+            val scope = rememberCoroutineScope()
+            LazyColumn(
+                state = listState,
+                contentPadding = PaddingValues(horizontal = 48.dp, vertical = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                item {
+                    Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                        AsyncImage(
+                            model = anime.pictureUrl,
+                            contentDescription = anime.title,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .width(150.dp)
+                                .aspectRatio(0.7f)
+                                .clip(RoundedCornerShape(8.dp)),
+                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Text(anime.titleEnglish ?: anime.title, style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
+                            if (anime.titleEnglish != null && anime.titleEnglish != anime.title) {
+                                Text(anime.title, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                                MalBadge("mal:$malId", anime.allTitles, large = true)
                                 Text(
-                                    when {
-                                        found == null -> "Recherche des plateformes…"
-                                        others.isEmpty() && target == null -> "Aucune plateforme trouvée en France."
-                                        found.source == "MAL" -> "Plateformes d'après MAL (liste mondiale, pas forcément en France) :"
-                                        else -> "Disponible en France sur :"
-                                    },
-                                    style = MaterialTheme.typography.labelLarge,
+                                    listOfNotNull(
+                                        anime.scoredBy?.let { String.format(Locale.FRANCE, "%,d votes", it) },
+                                        anime.type?.uppercase(),
+                                        anime.episodes?.let { "$it ép." },
+                                        anime.startYear?.toString(),
+                                    ).joinToString(" · "),
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
-                                // Boutons dans une rangée défilante : la télécommande atteint aussi ceux hors écran.
-                                LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    target?.let { ref ->
-                                        item { Button(onClick = { onOpenSeries(ref) }) { Text("Fiche ${ref.provider.label}") } }
-                                    }
-                                    items(others) { platform ->
-                                        OutlinedButton(onClick = { PlatformApps.open(context, platform) }) { Text("▶ $platform") }
-                                    }
-                                    item { OutlinedButton(onClick = { malListOpen = true }) { Text("Ma liste MAL") } }
+                            }
+                            GenresLine(anime.genres, emptyList())
+                            anime.synopsis?.let {
+                                // Focus sur le résumé : la fiche remonte tout en haut (titre, note MAL).
+                                ExpandableSynopsis(it, onFocused = { scope.launch { delay(150); listState.animateScrollToItem(0) } }, collapsedLines = 4)
+                            }
+                            Text(
+                                when {
+                                    found == null -> "Recherche des plateformes…"
+                                    others.isEmpty() && target == null -> "Aucune plateforme trouvée en France."
+                                    found.source == "MAL" -> "Plateformes d'après MAL (liste mondiale, pas forcément en France) :"
+                                    else -> "Disponible en France sur :"
+                                },
+                                style = MaterialTheme.typography.labelLarge,
+                            )
+                            // Boutons dans une rangée défilante : la télécommande atteint aussi ceux hors écran.
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                target?.let { ref ->
+                                    item { Button(onClick = { onOpenSeries(ref) }) { Text("Fiche ${ref.provider.label}") } }
                                 }
+                                items(others) { platform ->
+                                    OutlinedButton(onClick = { PlatformApps.open(context, platform) }) { Text("▶ $platform") }
+                                }
+                                item { OutlinedButton(onClick = { malListOpen = true }) { Text("Ma liste MAL") } }
                             }
                         }
                     }

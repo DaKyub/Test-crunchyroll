@@ -54,7 +54,6 @@ import com.dakyub.crunchymal.data.adn.AdnShow
 import com.dakyub.crunchymal.ui.components.CenteredMessage
 import com.dakyub.crunchymal.ui.components.GenresLine
 import com.dakyub.crunchymal.ui.components.MalBadge
-import com.dakyub.crunchymal.ui.components.MinimalFocusScroll
 import com.dakyub.crunchymal.ui.components.seasonChipColors
 import com.dakyub.crunchymal.ui.theme.AdnBlue
 import com.dakyub.crunchymal.ui.components.MediaCard
@@ -64,6 +63,10 @@ import com.dakyub.crunchymal.data.ratings.firstEpisodeNumber
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.foundation.lazy.rememberLazyListState
+import com.dakyub.crunchymal.ui.components.ExpandableSynopsis
+import kotlinx.coroutines.delay
 import java.util.Locale
 
 data class AdnSeriesUi(
@@ -201,126 +204,128 @@ fun AdnSeriesScreen(showId: String) {
             )
             val firstNumber = firstEpisodeNumber(season?.second.orEmpty().map { it.video.episodeNumber })
             val summary = state.summary
+            val listState = rememberLazyListState()
+            val scope = rememberCoroutineScope()
             val next = summary?.nextEpisodeId?.let { id -> state.episodes.firstOrNull { it.video.id.toString() == id } }
 
-            MinimalFocusScroll {
-                LazyColumn(
-                    contentPadding = PaddingValues(horizontal = 48.dp, vertical = 20.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                    modifier = Modifier.fillMaxSize(),
-                ) {
-                    item {
-                        Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                            AsyncImage(
-                                model = show.image2x ?: show.image,
-                                contentDescription = show.title,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .width(150.dp)
-                                    .aspectRatio(0.7f)
-                                    .clip(RoundedCornerShape(8.dp)),
-                            )
-                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                Text(show.title, style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                                    MalBadge(ref.malKey, ref.malTitles, large = true)
-                                    Text(
-                                        listOfNotNull(
-                                            record?.scoredBy?.let { String.format(Locale.FRANCE, "%,d votes", it) },
-                                            record?.title?.takeIf { it != show.title }?.let { "MAL : $it" },
-                                            "${state.episodes.size} épisodes".takeIf { state.episodes.isNotEmpty() },
-                                            summary?.let { s ->
-                                                when (s.status) {
-                                                    WatchStatus.NOT_STARTED -> "non commencée"
-                                                    WatchStatus.COMPLETED -> "✓ tout vu"
-                                                    WatchStatus.UP_TO_DATE -> "à jour (${s.watched}/${s.total})"
-                                                    WatchStatus.IN_PROGRESS -> "${s.watched}/${s.total} vus"
-                                                }
-                                            },
-                                            "ADN",
-                                        ).joinToString(" · "),
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                                GenresLine(record?.genres, show.genres)
-                                show.summary?.let {
-                                    Text(it, style = MaterialTheme.typography.bodyMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
-                                }
-                                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    Button(onClick = { if (next != null) AdnApp.open(context, show, next.video) else AdnApp.openShow(context, show) }) {
-                                        val episode = next?.video?.let { v -> v.number?.takeIf { it.isNotBlank() } ?: v.label }
-                                        Text(
-                                            when {
-                                                next == null -> "▶ Ouvrir dans ADN"
-                                                summary?.started == true -> "▶ Reprendre ${episode.orEmpty()}"
-                                                else -> "▶ Regarder ${episode.orEmpty()}"
+            LazyColumn(
+                state = listState,
+                contentPadding = PaddingValues(horizontal = 48.dp, vertical = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                item {
+                    Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                        AsyncImage(
+                            model = show.image2x ?: show.image,
+                            contentDescription = show.title,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .width(150.dp)
+                                .aspectRatio(0.7f)
+                                .clip(RoundedCornerShape(8.dp)),
+                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Text(show.title, style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                                MalBadge(ref.malKey, ref.malTitles, large = true)
+                                Text(
+                                    listOfNotNull(
+                                        record?.scoredBy?.let { String.format(Locale.FRANCE, "%,d votes", it) },
+                                        record?.title?.takeIf { it != show.title }?.let { "MAL : $it" },
+                                        "${state.episodes.size} épisodes".takeIf { state.episodes.isNotEmpty() },
+                                        summary?.let { s ->
+                                            when (s.status) {
+                                                WatchStatus.NOT_STARTED -> "non commencée"
+                                                WatchStatus.COMPLETED -> "✓ tout vu"
+                                                WatchStatus.UP_TO_DATE -> "à jour (${s.watched}/${s.total})"
+                                                WatchStatus.IN_PROGRESS -> "${s.watched}/${s.total} vus"
                                             }
-                                        )
-                                    }
-                                    if (next != null) {
-                                        OutlinedButton(onClick = { AdnApp.openShow(context, show) }) { Text("Fiche ADN") }
-                                    }
-                                    state.inWatchlist?.let { inList ->
-                                        OutlinedButton(
-                                            onClick = {
-                                                vm.toggleWatchlist { message -> Toast.makeText(context, message, Toast.LENGTH_LONG).show() }
-                                            },
-                                            enabled = !state.watchlistBusy,
-                                        ) { Text(if (inList) "✓ Watchlist ADN" else "+ Watchlist ADN") }
-                                    }
-                                    OutlinedButton(onClick = { malListOpen = true }) { Text("Ma liste MAL") }
-                                    if (adnLoggedIn) {
-                                        OutlinedButton(onClick = { vm.refreshProgress() }) { Text("↻") }
-                                    }
-                                }
+                                        },
+                                        "ADN",
+                                    ).joinToString(" · "),
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
                             }
-                        }
-                    }
-                    if (seasons.size > 1) {
-                        item {
-                            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                itemsIndexed(seasons) { index, (name, videos) ->
-                                    FilterChip(selected = index == state.selectedSeason, onClick = { vm.selectSeason(index) }, colors = seasonChipColors(AdnBlue)) {
-                                        Text("${if (name.all { it.isDigit() }) "Saison $name" else name} · ${videos.size} ép.")
-                                    }
-                                }
+                            GenresLine(record?.genres, show.genres)
+                            show.summary?.takeIf { it.isNotBlank() }?.let {
+                                // Focus sur le résumé : la fiche remonte tout en haut (titre, note MAL).
+                                ExpandableSynopsis(it, onFocused = { scope.launch { delay(150); listState.animateScrollToItem(0) } })
                             }
-                        }
-                    }
-                    season?.let { (_, nodes) ->
-                        item {
-                            LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                                itemsIndexed(nodes, key = { _, n -> n.video.id }) { index, node ->
-                                    val video = node.video
-                                    val rating = ratings.find(video.episodeNumber, index, firstNumber)
-                                    MediaCard(
-                                        item = CardItem(
-                                            series = SeriesRef(
-                                                id = video.id.toString(),
-                                                title = video.label.ifBlank { "Épisode ${index + 1}" },
-                                                wideUrl = video.image2x ?: video.image,
-                                                provider = Provider.ADN,
-                                            ),
-                                            subtitle = listOfNotNull(
-                                                "✓ vu".takeIf { node.watched },
-                                                rating?.label,
-                                                if (video.duration > 0) "${video.duration / 60} min" else null,
-                                                "à venir".takeIf { !node.available },
-                                            ).joinToString(" · ").ifBlank { null },
-                                            progress = node.progress.takeIf { it > 0f },
-                                            wide = true,
-                                        ),
-                                        onClick = { AdnApp.open(context, show, video) },
-                                        showMal = false,
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Button(onClick = { if (next != null) AdnApp.open(context, show, next.video) else AdnApp.openShow(context, show) }) {
+                                    val episode = next?.video?.let { v -> v.number?.takeIf { it.isNotBlank() } ?: v.label }
+                                    Text(
+                                        when {
+                                            next == null -> "▶ Ouvrir dans ADN"
+                                            summary?.started == true -> "▶ Reprendre ${episode.orEmpty()}"
+                                            else -> "▶ Regarder ${episode.orEmpty()}"
+                                        }
                                     )
                                 }
+                                if (next != null) {
+                                    OutlinedButton(onClick = { AdnApp.openShow(context, show) }) { Text("Fiche ADN") }
+                                }
+                                state.inWatchlist?.let { inList ->
+                                    OutlinedButton(
+                                        onClick = {
+                                            vm.toggleWatchlist { message -> Toast.makeText(context, message, Toast.LENGTH_LONG).show() }
+                                        },
+                                        enabled = !state.watchlistBusy,
+                                    ) { Text(if (inList) "✓ Watchlist ADN" else "+ Watchlist ADN") }
+                                }
+                                OutlinedButton(onClick = { malListOpen = true }) { Text("Ma liste MAL") }
+                                if (adnLoggedIn) {
+                                    OutlinedButton(onClick = { vm.refreshProgress() }) { Text("↻") }
+                                }
                             }
                         }
-                        if (ratings.info.isNotBlank()) {
-                            item {
-                                Text(ratings.info, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                if (seasons.size > 1) {
+                    item {
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            itemsIndexed(seasons) { index, (name, videos) ->
+                                FilterChip(selected = index == state.selectedSeason, onClick = { vm.selectSeason(index) }, colors = seasonChipColors(AdnBlue)) {
+                                    Text("${if (name.all { it.isDigit() }) "Saison $name" else name} · ${videos.size} ép.")
+                                }
                             }
+                        }
+                    }
+                }
+                season?.let { (_, nodes) ->
+                    item {
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            itemsIndexed(nodes, key = { _, n -> n.video.id }) { index, node ->
+                                val video = node.video
+                                val rating = ratings.find(video.episodeNumber, index, firstNumber)
+                                MediaCard(
+                                    item = CardItem(
+                                        series = SeriesRef(
+                                            id = video.id.toString(),
+                                            title = video.label.ifBlank { "Épisode ${index + 1}" },
+                                            wideUrl = video.image2x ?: video.image,
+                                            provider = Provider.ADN,
+                                        ),
+                                        subtitle = listOfNotNull(
+                                            "✓ vu".takeIf { node.watched },
+                                            rating?.label,
+                                            if (video.duration > 0) "${video.duration / 60} min" else null,
+                                            "à venir".takeIf { !node.available },
+                                        ).joinToString(" · ").ifBlank { null },
+                                        progress = node.progress.takeIf { it > 0f },
+                                        wide = true,
+                                    ),
+                                    onClick = { AdnApp.open(context, show, video) },
+                                    showMal = false,
+                                )
+                            }
+                        }
+                    }
+                    if (ratings.info.isNotBlank()) {
+                        item {
+                            Text(ratings.info, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }

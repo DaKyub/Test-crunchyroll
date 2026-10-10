@@ -1,14 +1,9 @@
 package com.dakyub.crunchymal.ui.components
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.gestures.BringIntoViewSpec
-import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.Color
 import androidx.tv.material3.FilterChipDefaults
 import androidx.tv.material3.SelectableChipColors
-import kotlin.math.abs
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -31,14 +26,20 @@ import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Button
+import androidx.tv.material3.ClickableSurfaceDefaults
+import androidx.tv.material3.Surface
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 
@@ -102,27 +103,44 @@ fun <T> PosterGrid(
 }
 
 /**
- * Défilement « au plus juste ». Sur Android TV, Compose place l'élément qui reçoit le focus à 30 % du
- * haut de l'écran, ce qui cache le haut des fiches (titre, note MAL) dès leur ouverture : ici on ne
- * défile que si l'élément sort de l'écran.
+ * Résumé dépliable (OK l'affiche en entier ou le réduit). Quand il reçoit le focus, [onFocused] sert à
+ * remonter la fiche tout en haut (titre, note MAL) ; plus bas, la fiche défile pour montrer les épisodes.
  */
-@OptIn(ExperimentalFoundationApi::class)
-private val MinimalBringIntoViewSpec = object : BringIntoViewSpec {
-    override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
-        val trailing = offset + size
-        return when {
-            offset >= 0f && trailing <= containerSize -> 0f
-            offset < 0f && trailing > containerSize -> 0f
-            abs(offset) < abs(trailing - containerSize) -> offset
-            else -> trailing - containerSize
+@Composable
+fun ExpandableSynopsis(text: String, onFocused: () -> Unit, modifier: Modifier = Modifier, collapsedLines: Int = 3) {
+    var expanded by remember(text) { mutableStateOf(false) }
+    var focused by remember { mutableStateOf(false) }
+    Surface(
+        onClick = { expanded = !expanded },
+        modifier = modifier.onFocusChanged {
+            focused = it.isFocused
+            if (it.isFocused) onFocused()
+        },
+        colors = ClickableSurfaceDefaults.colors(
+            containerColor = Color.Transparent,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+            focusedContentColor = MaterialTheme.colorScheme.onSurface,
+        ),
+        scale = ClickableSurfaceDefaults.scale(focusedScale = 1f),
+        shape = ClickableSurfaceDefaults.shape(shape = RoundedCornerShape(8.dp)),
+    ) {
+        Column(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+            Text(
+                text,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = if (expanded) Int.MAX_VALUE else collapsedLines,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (focused) {
+                Text(
+                    if (expanded) "OK : réduire le résumé" else "OK : lire tout le résumé",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-fun MinimalFocusScroll(content: @Composable () -> Unit) {
-    CompositionLocalProvider(LocalBringIntoViewSpec provides MinimalBringIntoViewSpec, content = content)
 }
 
 /** Puce de saison : la saison affichée prend la couleur du service ([accent]). */
