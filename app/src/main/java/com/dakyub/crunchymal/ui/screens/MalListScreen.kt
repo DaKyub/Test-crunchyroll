@@ -67,13 +67,12 @@ class MalListViewModel(private val graph: Graph) : ViewModel() {
             val availability: Availability? = found[entry.anime.malId]
             val elsewhere = platforms[entry.anime.malId]
             val target = availability?.refFor(providers)
-            // Crunchyroll / ADN trouvés par l'app, puis les plateformes TMDB (France) ou MAL (monde).
-            val badges = (
-                listOfNotNull(
-                    "Crunchyroll".takeIf { availability?.crunchyroll != null },
-                    "ADN".takeIf { availability?.adn != null },
-                ) + elsewhere?.names.orEmpty()
-                ).distinct()
+            // Crunchyroll / ADN seulement s'ils sont trouvés par l'app (lien garanti), puis les autres
+            // plateformes TMDB (France) ou MAL (monde).
+            val badges = listOfNotNull(
+                "Crunchyroll".takeIf { availability?.crunchyroll != null },
+                "ADN".takeIf { availability?.adn != null },
+            ) + elsewhere?.names.orEmpty().filter { it != "Crunchyroll" && it != "ADN" }
             val where = when {
                 availability == null && elsewhere == null -> "Recherche…"
                 badges.isEmpty() -> "Indisponible"

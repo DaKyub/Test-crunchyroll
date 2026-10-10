@@ -62,13 +62,26 @@ private data class TmdbCountry(
 @Serializable
 private data class TmdbProviders(val results: Map<String, TmdbCountry> = emptyMap())
 
+@Serializable
+private data class TmdbSeasonInfo(
+    @SerialName("season_number") val number: Int = 0,
+    val name: String = "",
+    @SerialName("air_date") val airDate: String? = null,
+)
+
+@Serializable
+private data class TmdbTvDetails(val seasons: List<TmdbSeasonInfo> = emptyList())
+
 /**
  * Où regarder une série de la liste MAL : rubrique « Où regarder » de TMDB pour la France (données
  * JustWatch, clé TMDB nécessaire) ; si TMDB ne trouve pas la série, section « Streaming Platforms »
  * de la page MAL (liste mondiale). Recherches en arrière-plan, cache disque d'une semaine.
  */
 class WatchPlatformsRepository(context: Context, private val settings: Settings) {
-    private val file = File(context.filesDir, "watch_platforms_cache.json")
+    // v2 : plateformes par saison (l'ancien cache donnait celles de toute la franchise).
+    private val file = File(context.filesDir, "watch_platforms_cache_v2.json").also {
+        File(context.filesDir, "watch_platforms_cache.json").delete()
+    }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val pending = ConcurrentHashMap.newKeySet<Int>()
     private val semaphore = Semaphore(3)
@@ -120,10 +133,44 @@ class WatchPlatformsRepository(context: Context, private val settings: Settings)
                 similarity(hit) + (if (16 in hit.genreIds) 0.2 else 0.0) + (if ("JP" in hit.originCountry) 0.1 else 0.0)
             } ?: continue
             if (similarity(best) < 0.5) continue
+            // Titre MAL ≠ titre TMDB : la fiche MAL est sans doute une saison d'une série TMDB plus large
+            // (Steel Ball Run dans JoJo) ; on prend alors les plateformes de cette saison.
+            val showSimilarity = best.names.maxOfOrNull { n -> titles.maxOf { TitleMatcher.similarity(it, n) } } ?: 0.0
+            if (kind == "tv" && showSimilarity < 0.9) seasonPlatforms(best.id, anime, titles)?.let { return it }
             val france = Http.json.decodeFromString<TmdbProviders>(tmdb("$kind/${best.id}/watch/providers") {}).results["FR"]
-            return france?.let { (it.flatrate + it.free + it.ads).map { p -> normalize(p.name) } }.orEmpty().distinct()
+            return france?.platforms().orEmpty()
         }
         return null
+    }
+
+    private fun TmdbCountry.platforms() = (flatrate + free + ads).map { normalize(it.name) }.distinct()
+
+    /** Plateformes en France de la saison TMDB qui correspond à la fiche MAL, ou null (on garde celles de la série). */
+    private suspend fun seasonPlatforms(tvId: Int, anime: MalAnime, titles: List<String>): List<String>? {
+        val seasons = runCatching { Http.json.decodeFromString<TmdbTvDetails>(tmdb("tv/$tvId") {}).seasons }.getOrNull() ?: return null
+        val season = matchSeason(anime, titles, seasons) ?: return null
+        val france = runCatching {
+            Http.json.decodeFromString<TmdbProviders>(tmdb("tv/$tvId/season/${season.number}/watch/providers") {}).results["FR"]
+        }.getOrNull()
+        return france?.platforms()?.takeIf { it.isNotEmpty() }
+    }
+
+    /** Saison par son nom ("Steel Ball Run", "Season 3"…) contenu dans un titre MAL, sinon par l'année de diffusion. */
+    private fun matchSeason(anime: MalAnime, titles: List<String>, seasons: List<TmdbSeasonInfo>): TmdbSeasonInfo? {
+        val candidates = seasons.filter { it.number > 0 }
+        fun words(text: String) = text.lowercase().split(Regex("[^\\p{L}\\p{N}]+")).filter { it.isNotBlank() }
+        val titleWords = (titles + anime.allTitles).map { words(it).toSet() }
+        val parts = titles.flatMap { listOf(it, it.substringAfter(':', ""), it.substringBefore(':')) }
+            .map { it.trim() }.filter { it.length >= 3 }
+        val byName = candidates.map { season ->
+            val seasonWords = words(season.name)
+            val contained = seasonWords.isNotEmpty() && titleWords.any { it.containsAll(seasonWords) }
+            val similarity = parts.maxOfOrNull { TitleMatcher.similarity(it, season.name) } ?: 0.0
+            season to (if (contained) maxOf(similarity, 0.9) else similarity)
+        }.maxByOrNull { it.second }
+        if (byName != null && byName.second >= 0.6) return byName.first
+        val year = anime.startYear ?: return null
+        return candidates.firstOrNull { it.airDate?.take(4)?.toIntOrNull() == year }
     }
 
     /** Section « Streaming Platforms » de la page MAL ; null si la page n'a pas pu être lue. */
