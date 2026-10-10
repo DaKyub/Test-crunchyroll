@@ -106,6 +106,12 @@ class AdnApi(context: Context) {
         return Http.json.decodeFromString<AdnVideosResponse>(get(url)).videos
     }
 
+    /** Épisodes sortis (ou prévus) un jour donné, date au format yyyy-MM-dd. */
+    suspend fun calendar(date: String): List<AdnVideo> {
+        val url = "$BASE/video/calendar".toHttpUrl().newBuilder().addQueryParameter("date", date).build().toString()
+        return Http.json.decodeFromString<AdnVideosResponse>(get(url)).videos
+    }
+
     companion object {
         const val BASE = "https://gw.api.animationdigitalnetwork.fr"
     }

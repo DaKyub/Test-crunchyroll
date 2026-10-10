@@ -2,6 +2,7 @@ package com.dakyub.crunchymal
 
 import android.content.Context
 import androidx.compose.runtime.staticCompositionLocalOf
+import com.dakyub.crunchymal.data.AvailabilityRepository
 import com.dakyub.crunchymal.data.ProviderSelection
 import com.dakyub.crunchymal.data.Settings
 import com.dakyub.crunchymal.data.adn.AdnApi
@@ -27,6 +28,7 @@ class Graph(context: Context) {
     val providers = ProviderSelection(settings)
     val adn = AdnApi(context)
     val ratings = RatingsRepository(settings)
+    val availability = AvailabilityRepository(context, api, adn)
 }
 
 val LocalGraph = staticCompositionLocalOf<Graph> { error("Graph non fourni") }

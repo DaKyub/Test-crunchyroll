@@ -44,7 +44,13 @@ data class CrEpisodeMeta(
     @SerialName("audio_locale") val audioLocale: String = "",
     @SerialName("is_dubbed") val isDubbed: Boolean = false,
     val versions: List<CrVersion> = emptyList(),
-)
+    @SerialName("premium_available_date") val premiumAvailableDate: String = "",
+    @SerialName("availability_starts") val availabilityStarts: String = "",
+    @SerialName("episode_air_date") val episodeAirDate: String = "",
+) {
+    /** Date de mise en ligne sur Crunchyroll (abonnés), sinon diffusion d'origine. */
+    val releaseDate: String get() = premiumAvailableDate.ifBlank { availabilityStarts }.ifBlank { episodeAirDate }
+}
 
 /**
  * Garde uniquement la version originale de chaque épisode (pas les doublages) et une seule carte
@@ -153,7 +159,10 @@ data class CrEpisode(
     val versions: List<CrVersion> = emptyList(),
     @SerialName("availability_starts") val availabilityStarts: String = "",
     @SerialName("premium_available_date") val premiumAvailableDate: String = "",
+    @SerialName("episode_air_date") val episodeAirDate: String = "",
 ) {
+    val releaseDate: String get() = premiumAvailableDate.ifBlank { availabilityStarts }.ifBlank { episodeAirDate }
+
     /** Faux pour un épisode annoncé mais pas encore sorti (dates ISO UTC comparées comme du texte). */
     fun isAvailable(nowIso: String): Boolean =
         listOf(availabilityStarts, premiumAvailableDate).filter { it.length >= 19 }.all { it.take(19) <= nowIso }

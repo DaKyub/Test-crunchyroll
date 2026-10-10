@@ -38,6 +38,8 @@ import com.dakyub.crunchymal.data.ProviderSelection
 import com.dakyub.crunchymal.data.SeriesRef
 import com.dakyub.crunchymal.ui.screens.AdnSeriesScreen
 import com.dakyub.crunchymal.ui.screens.BrowseScreen
+import com.dakyub.crunchymal.ui.screens.CalendarScreen
+import com.dakyub.crunchymal.ui.screens.MalListScreen
 import com.dakyub.crunchymal.ui.screens.HomeScreen
 import com.dakyub.crunchymal.ui.screens.LoginScreen
 import com.dakyub.crunchymal.ui.screens.SearchScreen
@@ -100,7 +102,7 @@ private fun AppRoot() {
     }
 }
 
-private val Tabs = listOf("Accueil", "Parcourir", "Watchlist", "Recherche", "Paramètres")
+private val Tabs = listOf("Accueil", "Parcourir", "Calendrier", "Watchlist", "Liste MAL", "Recherche", "Réglages")
 
 @Composable
 private fun MainTabs(onOpenSeries: (SeriesRef) -> Unit) {
@@ -111,27 +113,29 @@ private fun MainTabs(onOpenSeries: (SeriesRef) -> Unit) {
     Column(Modifier.fillMaxSize()) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            modifier = Modifier.padding(start = 48.dp, end = 48.dp, top = 16.dp, bottom = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.padding(start = 40.dp, end = 40.dp, top = 16.dp, bottom = 4.dp),
         ) {
             TabRow(selectedTabIndex = selected, modifier = Modifier.weight(1f, fill = false)) {
                 Tabs.forEachIndexed { index, title ->
                     Tab(selected = index == selected, onFocus = { selected = index }) {
-                        Text(title, modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp))
+                        Text(title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
                     }
                 }
             }
             // Sélecteur de services : Crunchyroll → ADN → les deux.
             OutlinedButton(onClick = { graph.providers.next() }) {
-                Text("Service : ${ProviderSelection.label(providers)}", style = MaterialTheme.typography.labelLarge)
+                Text(ProviderSelection.label(providers), style = MaterialTheme.typography.labelLarge)
             }
             UpdateBanner()
         }
         when (selected) {
             0 -> HomeScreen(onOpenSeries)
             1 -> BrowseScreen(onOpenSeries)
-            2 -> WatchlistScreen(onOpenSeries)
-            3 -> SearchScreen(onOpenSeries)
+            2 -> CalendarScreen(onOpenSeries)
+            3 -> WatchlistScreen(onOpenSeries)
+            4 -> MalListScreen(onOpenSeries)
+            5 -> SearchScreen(onOpenSeries)
             else -> SettingsScreen()
         }
     }

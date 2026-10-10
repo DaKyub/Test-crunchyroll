@@ -43,6 +43,7 @@ fun MediaCard(
     onLongClick: (() -> Unit)? = null,
     width: Dp = if (item.wide) WideWidth else PosterWidth,
     showMal: Boolean = true,
+    showProviderBadge: Boolean = true,
 ) {
     Column(modifier.width(width)) {
         Card(
@@ -74,7 +75,7 @@ fun MediaCard(
                 }
                 // Badge du service, seulement quand plusieurs services sont affichés.
                 val providers by LocalGraph.current.providers.selected.collectAsState()
-                if (showMal && providers.size > 1 && item.series.id.isNotBlank()) {
+                if (showMal && showProviderBadge && providers.size > 1 && item.series.id.isNotBlank()) {
                     Text(
                         (listOf(item.series.provider) + item.series.alsoOn).distinct().joinToString("+") { it.badge },
                         style = MaterialTheme.typography.labelSmall,

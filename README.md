@@ -8,6 +8,10 @@ Application Android TV (Kotlin + Compose for TV) qui affiche ton catalogue et ta
 - **Crunchyroll et ADN** : bouton « Service » en haut (Crunchyroll → ADN → les deux). En mode « les deux »,
   accueil, Parcourir et Recherche mélangent les catalogues avec un badge CR / ADN ; une série présente
   sur les deux n'apparaît qu'une fois.
+- **Accueil** : rangées « Nouveaux épisodes pour toi » (séries où tu étais à jour, nouvel épisode depuis
+  moins de 3 semaines) et « Pépites non vues » (populaires, MAL 8+, jamais commencées).
+- **Calendrier** : sorties des 7 derniers jours et estimation des 7 prochains (Crunchyroll), calendrier ADN.
+- **Liste MAL** : ta liste MyAnimeList avec la disponibilité sur Crunchyroll / ADN et l'accès direct aux fiches.
 - **Parcourir** : catégories Crunchyroll et genres ADN, tri par popularité ou alphabétique.
 - **Genres** sur la fiche série : ceux de MyAnimeList, sinon ceux du service.
 - **Ma liste MAL** : après connexion du compte MAL (QR code dans les paramètres), statut et note 1-10

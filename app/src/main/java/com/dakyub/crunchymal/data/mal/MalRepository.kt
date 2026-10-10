@@ -118,6 +118,15 @@ class MalRepository(context: Context, clientId: () -> String, val auth: MalAuth)
     suspend fun updateMyStatus(malId: Int, status: String, score: Int, episodesWatched: Int?) =
         api.updateStatus(malId, auth.accessToken(), status, score, episodesWatched)
 
+    suspend fun myList(): List<MalListEntry> = api.userList(auth.accessToken())
+
+    /** Enregistre une fiche déjà connue (ex. liste MAL) pour que les badges l'affichent sans recherche. */
+    suspend fun seed(key: String, anime: MalAnime) {
+        val existing = _records.value[key]
+        if (existing != null && !isStale(existing)) return
+        put(key, anime.toRecord(System.currentTimeMillis(), manual = true))
+    }
+
     suspend fun candidates(query: String): List<MalAnime> = api.search(query, limit = 15)
 
     /** Correction manuelle ; [anime] null = "pas sur MAL". */

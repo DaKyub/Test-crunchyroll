@@ -25,6 +25,7 @@ data class MalAnime(
     val episodes: Int?,
     val startYear: Int?,
     val genres: List<String> = emptyList(),
+    val pictureUrl: String? = null,
 ) {
     val url: String get() = "https://myanimelist.net/anime/$malId"
 
@@ -44,6 +45,9 @@ private data class AltTitles(
 private data class Genre(val name: String = "")
 
 @Serializable
+private data class Picture(val medium: String? = null, val large: String? = null)
+
+@Serializable
 private data class Node(
     val id: Int = 0,
     val title: String = "",
@@ -54,6 +58,7 @@ private data class Node(
     @SerialName("num_episodes") val numEpisodes: Int? = null,
     @SerialName("start_date") val startDate: String? = null,
     val genres: List<Genre> = emptyList(),
+    @SerialName("main_picture") val mainPicture: Picture? = null,
 ) {
     fun toAnime() = MalAnime(
         malId = id,
@@ -67,6 +72,7 @@ private data class Node(
         episodes = numEpisodes?.takeIf { it > 0 },
         startYear = startDate?.take(4)?.toIntOrNull(),
         genres = genres.map { it.name }.filter { it.isNotBlank() },
+        pictureUrl = mainPicture?.large ?: mainPicture?.medium,
     )
 }
 
@@ -82,6 +88,7 @@ data class MalListStatus(
     val status: String? = null,
     val score: Int = 0,
     @SerialName("num_episodes_watched") val episodesWatched: Int = 0,
+    @SerialName("updated_at") val updatedAt: String? = null,
 )
 
 @Serializable
@@ -89,6 +96,26 @@ private data class MyStatusNode(
     @SerialName("my_list_status") val myListStatus: MalListStatus? = null,
     @SerialName("num_episodes") val numEpisodes: Int = 0,
 )
+
+/** Entrée de la liste MAL de l'utilisateur. */
+data class MalListEntry(val anime: MalAnime, val status: MalListStatus)
+
+@Serializable
+private data class ListStatusFull(
+    val status: String? = null,
+    val score: Int = 0,
+    @SerialName("num_episodes_watched") val episodesWatched: Int = 0,
+    @SerialName("updated_at") val updatedAt: String? = null,
+)
+
+@Serializable
+private data class UserListItem(val node: Node = Node(), @SerialName("list_status") val listStatus: ListStatusFull? = null)
+
+@Serializable
+private data class Paging(val next: String? = null)
+
+@Serializable
+private data class UserListResponse(val data: List<UserListItem> = emptyList(), val paging: Paging? = null)
 
 /** Statuts MAL (valeur API → libellé). */
 val MalStatuses = listOf(
@@ -157,6 +184,26 @@ class MalApi(private val clientId: () -> String) {
         val request = Request.Builder().url(url).header("Authorization", "Bearer $accessToken").build()
         val node = Http.json.decodeFromString<MyStatusNode>(Http.client.fetch(request))
         return node.myListStatus to node.numEpisodes
+    }
+
+    /** Liste MAL complète de l'utilisateur connecté (toutes pages). */
+    suspend fun userList(accessToken: String): List<MalListEntry> {
+        val out = mutableListOf<MalListEntry>()
+        var url: String? = "$BASE/users/@me/animelist".toHttpUrl().newBuilder()
+            .addQueryParameter("limit", "1000")
+            .addQueryParameter("nsfw", "true")
+            .addQueryParameter("fields", "list_status,$FIELDS,main_picture")
+            .build().toString()
+        while (url != null) {
+            val request = Request.Builder().url(url).header("Authorization", "Bearer $accessToken").build()
+            val page = Http.json.decodeFromString<UserListResponse>(Http.client.fetch(request))
+            page.data.forEach { item ->
+                val st = item.listStatus ?: return@forEach
+                out += MalListEntry(item.node.toAnime(), MalListStatus(st.status, st.score, st.episodesWatched, st.updatedAt))
+            }
+            url = page.paging?.next
+        }
+        return out
     }
 
     /** Met à jour la liste de l'utilisateur (score 0 = pas de note). */

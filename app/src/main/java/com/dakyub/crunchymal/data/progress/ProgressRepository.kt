@@ -37,6 +37,10 @@ data class ProgressSummary(
     val computedAt: Long = 0,
     /** Dernier épisode disponible vu (null = résumé calculé par une ancienne version, à recalculer). */
     val lastWatched: Boolean? = null,
+    /** Épisodes disponibles après le dernier vu (null = ancienne version du cache). */
+    val remainingAfterLast: Int? = null,
+    /** Date de sortie (ISO) de l'épisode suivant. */
+    val nextReleased: String? = null,
 ) {
     val status: WatchStatus
         get() = when {
@@ -76,7 +80,8 @@ class ProgressRepository(context: Context, private val api: CrApi) {
         if (file.exists()) Http.json.decodeFromString<Map<String, ProgressSummary>>(file.readText()) else emptyMap()
     }.getOrElse { emptyMap() }
 
-    private fun isFresh(s: ProgressSummary) = s.lastWatched != null && System.currentTimeMillis() - s.computedAt < TTL
+    private fun isFresh(s: ProgressSummary) =
+        s.remainingAfterLast != null && System.currentTimeMillis() - s.computedAt < TTL
 
     /** S'assure qu'un résumé récent existe (utilisé par la watchlist pour les filtres). */
     suspend fun ensureSummary(seriesId: String, force: Boolean = false) {
@@ -140,6 +145,8 @@ class ProgressRepository(context: Context, private val api: CrApi) {
                 nextLabel = next?.episode?.label,
                 computedAt = System.currentTimeMillis(),
                 lastWatched = flat.lastOrNull()?.watched == true,
+                remainingAfterLast = if (lastWatchedIndex >= 0) flat.size - lastWatchedIndex - 1 else flat.size,
+                nextReleased = next?.episode?.releaseDate?.takeIf { it.isNotBlank() },
             ),
         )
     }

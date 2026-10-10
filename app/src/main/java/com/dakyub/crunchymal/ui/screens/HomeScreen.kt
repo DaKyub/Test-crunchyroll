@@ -35,6 +35,10 @@ import com.dakyub.crunchymal.ui.components.MediaCard
 import android.net.Uri
 import com.dakyub.crunchymal.data.crunchyroll.CrFeedItem
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import com.dakyub.crunchymal.data.DateUtils
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import kotlinx.coroutines.joinAll
@@ -47,7 +51,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.ui.Alignment
 import kotlinx.coroutines.launch
 
-data class HomeRow(val key: String, val title: String, val items: List<CardItem>)
+/** [minMal] : rangée filtrée dynamiquement sur la note MAL (ex. « Pépites non vues »). */
+data class HomeRow(val key: String, val title: String, val items: List<CardItem>, val minMal: Double? = null)
 
 data class HomeState(val loading: Boolean = true, val rows: List<HomeRow> = emptyList(), val error: String? = null)
 
@@ -113,7 +118,11 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
             val items = row.items
                 .filter { f.statuses.accepts(statusOf(it)) }
                 .filter { item -> f.minScore == null || (mal[item.series.malKey]?.score ?: -1.0) >= f.minScore }
-                .let { list -> if (f.sort == HomeSort.MAL) list.sortedByDescending { mal[it.series.malKey]?.score ?: -1.0 } else list }
+                .filter { item -> row.minMal == null || (mal[item.series.malKey]?.score ?: -1.0) >= row.minMal }
+                .let { list ->
+                    if (f.sort == HomeSort.MAL || row.minMal != null) list.sortedByDescending { mal[it.series.malKey]?.score ?: -1.0 }
+                    else list
+                }
             items.takeIf { it.isNotEmpty() }?.let { row.copy(items = it) }
         }
         val crIds = crSeriesIds(st)
@@ -174,6 +183,8 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
     private var firstError: String? = null
     private var lastResumeRefresh = 0L
     private val continueLoader = continueWatching()
+    private val newEpisodesLoader = newEpisodesRow()
+    private val gemsLoader = gemsRow()
 
     fun load() {
         val providers = graph.providers.selected.value
@@ -184,7 +195,12 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
             val list = mutableListOf<Pair<String, suspend () -> List<CardItem>>>()
             if (Provider.CRUNCHYROLL in providers) {
                 val feed = runCatching { graph.api.homeFeed() }.getOrNull()
-                list += feed?.let { feedLoaders(it) }?.takeIf { it.isNotEmpty() } ?: fallbackLoaders()
+                val official = feed?.let { feedLoaders(it) }?.takeIf { it.isNotEmpty() } ?: fallbackLoaders()
+                // « Nouveaux épisodes pour toi » en tête, « Pépites non vues » après les premières rangées.
+                list += "Nouveaux épisodes pour toi" to newEpisodesLoader
+                list += official.take(2)
+                list += "Pépites non vues (MAL 8+)" to gemsLoader
+                list += official.drop(2)
             }
             if (Provider.ADN in providers) list += adnLoaders()
 
@@ -197,7 +213,11 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
             list.mapIndexed { i, (_, loader) ->
                 launch {
                     runCatching { loader() }
-                        .onSuccess { results[i] = it }
+                        .onSuccess { items ->
+                            results[i] = items
+                            // Les pépites sont filtrées sur la note MAL : on la demande pour toutes.
+                            if (loader === gemsLoader) items.forEach { graph.mal.request(it.series.malKey, it.series.malTitles) }
+                        }
                         .onFailure { if (firstError == null) firstError = it.message }
                     done[i] = true
                     publish()
@@ -210,7 +230,9 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
 
     private fun publish() {
         val rows = loaders.indices.mapNotNull { i ->
-            results.getOrNull(i)?.takeIf { it.isNotEmpty() }?.let { HomeRow("$i", loaders[i].first, it) }
+            results.getOrNull(i)?.takeIf { it.isNotEmpty() }?.let {
+                HomeRow("$i", loaders[i].first, it, minMal = if (loaders[i].second === gemsLoader) 8.0 else null)
+            }
         }
         val finished = done.all { it }
         state.value = HomeState(
@@ -253,6 +275,44 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
                 .distinctBy { it.panel.episodeMetadata?.seriesId ?: it.parentId }
                 .take(20)
                 .map { it.panel.toEpisodeCard(it.playhead, it.fullyWatched, it.parentId) }
+        }
+    }
+
+    /**
+     * Séries de la watchlist où l'utilisateur était à jour et qui ont reçu 1 à 3 épisodes
+     * sortis depuis moins de 3 semaines.
+     */
+    private fun newEpisodesRow(): suspend () -> List<CardItem> = {
+        val entries = graph.watchlist.get()
+        coroutineScope {
+            entries.map { e -> async { runCatching { graph.progress.ensureSummary(e.series.id) } } }.awaitAll()
+        }
+        val summaries = graph.progress.summaries.value
+        val cutoff = DateUtils.isoDaysAgo(21)
+        entries.mapNotNull { e ->
+            val s = summaries[e.series.id] ?: return@mapNotNull null
+            val remaining = s.remainingAfterLast ?: return@mapNotNull null
+            val released = s.nextReleased?.take(19) ?: return@mapNotNull null
+            if (s.watched > 0 && remaining in 1..3 && released >= cutoff && s.nextEpisodeId != null) Triple(e, s, released) else null
+        }.sortedByDescending { it.third }.map { (e, s, _) ->
+            val more = (s.remainingAfterLast ?: 1) - 1
+            CardItem(
+                series = e.series,
+                episodeId = s.nextEpisodeId,
+                subtitle = "Nouveau : ${s.nextLabel.orEmpty()}" + (if (more > 0) " (+$more)" else ""),
+            )
+        }
+    }
+
+    /** Séries populaires jamais commencées ; la rangée ne garde que celles notées 8+ sur MAL. */
+    private fun gemsRow(): suspend () -> List<CardItem> = {
+        coroutineScope {
+            val popular = async { graph.api.browse("popularity", n = 100) }
+            val history = async { runCatching { graph.api.watchHistory(pageSize = 100) }.getOrDefault(emptyList()) }
+            val watchlist = async { runCatching { graph.watchlist.get() }.getOrDefault(emptyList()) }
+            val started = history.await().map { it.panel.episodeMetadata?.seriesId?.ifBlank { null } ?: it.parentId }.toSet() +
+                watchlist.await().filter { !it.neverWatched }.map { it.series.id }
+            popular.await().filter { it.id !in started }.map { it.toSeriesCard() }
         }
     }
 

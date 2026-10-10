@@ -18,13 +18,15 @@ data class SeriesRef(
     val altTitles: List<String> = emptyList(),
     /** Autres services proposant la même série (fusion "Les deux"). */
     val alsoOn: Set<Provider> = emptySet(),
+    /** Clé MAL imposée (fiche déjà connue, ex. liste MAL de l'utilisateur). */
+    val malKeyOverride: String? = null,
 ) {
     /** Titres utilisés pour chercher sur MAL : le slug est en anglais quelle que soit la langue choisie. */
     val malTitles: List<String>
         get() = (listOf(slug.replace('-', ' ')) + altTitles + title).filter { it.isNotBlank() }.distinct()
 
     val malKey: String
-        get() = when (provider) {
+        get() = malKeyOverride ?: when (provider) {
             Provider.CRUNCHYROLL -> "series:$id"
             Provider.ADN -> "adn:$id"
         }
