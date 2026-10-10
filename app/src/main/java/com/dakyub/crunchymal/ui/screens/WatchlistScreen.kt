@@ -36,6 +36,7 @@ import com.dakyub.crunchymal.data.WatchlistEntry
 import com.dakyub.crunchymal.data.progress.WatchStatus
 import com.dakyub.crunchymal.ui.components.CenteredMessage
 import com.dakyub.crunchymal.ui.components.MediaCard
+import com.dakyub.crunchymal.ui.components.PosterGrid
 import com.dakyub.crunchymal.ui.components.GridPosterWidth
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -182,66 +183,64 @@ fun WatchlistScreen(onOpenSeries: (SeriesRef) -> Unit) {
     val malError by graph.mal.lastError.collectAsState()
     val context = LocalContext.current
 
-    Column(Modifier.fillMaxSize().padding(horizontal = 48.dp)) {
-        // Une seule ligne de filtres : chaque bouton passe à la valeur suivante.
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.padding(vertical = 4.dp),
-        ) {
-            CycleButton("Tri", ui.filters.sort.label) { vm.setSort(ui.filters.sort.next()) }
-            CycleButton("MAL ≥", ui.filters.minScore?.toString() ?: "toutes") {
-                vm.setMinScore(MinScores[(MinScores.indexOf(ui.filters.minScore) + 1) % MinScores.size])
-            }
-            OutlinedButton(onClick = { vm.load(force = true) }, scale = OutlinedButtonDefaults.scale(focusedScale = 1.05f)) {
-                Text("Actualiser", style = MaterialTheme.typography.labelLarge)
-            }
-            Text(
-                "${ui.items.size}/${ui.total} séries · progression ${ui.progressKnown}/${ui.total} · MAL ${ui.malKnown}/${ui.total}",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        StatusChips(ui.filters.statuses, vm::toggleStatus)
-        malError?.let {
-            Text(
-                "Notes MAL indisponibles : $it",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.error,
-            )
-        }
-        if (Provider.ADN in providers && !adnLoggedIn) {
-            Text(
-                "Watchlist ADN : connecte ton compte ADN dans Réglages.",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        if (ui.error != null && ui.total > 0) {
-            Text(ui.error!!, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
-        }
-
-        when {
-            ui.loading && ui.total == 0 -> CenteredMessage("Chargement de la watchlist…")
-            ui.error != null && ui.total == 0 -> CenteredMessage(ui.error!!, "Réessayer") { vm.load(force = true) }
-            ui.items.isEmpty() -> CenteredMessage("Aucune série ne correspond à ces filtres.")
-            else -> LazyVerticalGrid(
-                columns = GridCells.Adaptive(GridPosterWidth + 12.dp),
-                contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
+    val message = when {
+        ui.loading && ui.total == 0 -> "Chargement de la watchlist…"
+        ui.error != null && ui.total == 0 -> ui.error
+        ui.items.isEmpty() -> "Aucune série ne correspond à ces filtres."
+        else -> null
+    }
+    PosterGrid(
+        items = ui.items,
+        message = message,
+        key = { it.series.progressKey },
+        actionLabel = "Réessayer".takeIf { ui.error != null && ui.total == 0 },
+        onAction = { vm.load(force = true) },
+        header = {
+            // Une seule ligne de filtres : chaque bouton passe à la valeur suivante.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.padding(vertical = 4.dp),
             ) {
-                items(ui.items, key = { it.series.progressKey }) { item ->
-                    MediaCard(
-                        item = item,
-                        width = GridPosterWidth,
-                        onClick = { onOpenSeries(item.series) },
-                        onLongClick = item.episodeId?.let { id -> { playEpisode(context, item.series, id) } },
-                    )
+                CycleButton("Tri", ui.filters.sort.label) { vm.setSort(ui.filters.sort.next()) }
+                CycleButton("MAL ≥", ui.filters.minScore?.toString() ?: "toutes") {
+                    vm.setMinScore(MinScores[(MinScores.indexOf(ui.filters.minScore) + 1) % MinScores.size])
                 }
+                OutlinedButton(onClick = { vm.load(force = true) }, scale = OutlinedButtonDefaults.scale(focusedScale = 1.05f)) {
+                    Text("Actualiser", style = MaterialTheme.typography.labelLarge)
+                }
+                Text(
+                    "${ui.items.size}/${ui.total} séries · progression ${ui.progressKnown}/${ui.total} · MAL ${ui.malKnown}/${ui.total}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
-        }
+            StatusChips(ui.filters.statuses, vm::toggleStatus)
+            malError?.let {
+                Text(
+                    "Notes MAL indisponibles : $it",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            if (Provider.ADN in providers && !adnLoggedIn) {
+                Text(
+                    "Watchlist ADN : connecte ton compte ADN dans Réglages.",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (ui.error != null && ui.total > 0) {
+                Text(ui.error!!, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
+            }
+        },
+    ) { item ->
+        MediaCard(
+            item = item,
+            width = GridPosterWidth,
+            onClick = { onOpenSeries(item.series) },
+            onLongClick = item.episodeId?.let { id -> { playEpisode(context, item.series, id) } },
+        )
     }
 }
 

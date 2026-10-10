@@ -38,6 +38,7 @@ import com.dakyub.crunchymal.data.crunchyroll.CrCategory
 import com.dakyub.crunchymal.ui.components.CenteredMessage
 import com.dakyub.crunchymal.ui.components.GridPosterWidth
 import com.dakyub.crunchymal.ui.components.MediaCard
+import com.dakyub.crunchymal.ui.components.PosterGrid
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -183,55 +184,50 @@ fun BrowseScreen(onOpenSeries: (SeriesRef) -> Unit) {
     val adnLoggedIn by graph.adn.loggedIn.collectAsState()
     LaunchedEffect(providers) { vm.ensure(providers) }
 
-    Column(Modifier.fillMaxSize().padding(horizontal = 48.dp)) {
-        if (Provider.CRUNCHYROLL in providers && ui.crCategories.isNotEmpty()) {
-            CategoryRow("Crunchyroll", ui.crCategories.map { BrowseSelection(Provider.CRUNCHYROLL, it.slug.ifBlank { it.id }, it.title) }, ui.selection, vm::select)
-        }
-        if (Provider.ADN in providers && ui.adnGenres.isNotEmpty()) {
-            CategoryRow("ADN", ui.adnGenres.map { BrowseSelection(Provider.ADN, it, adnGenreLabel(it)) }, ui.selection, vm::select)
-        }
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            modifier = Modifier.padding(vertical = 4.dp),
-        ) {
-            Text(
-                ui.selection?.let { "${it.title} · ${it.provider.label}" } ?: "",
-                style = MaterialTheme.typography.titleMedium,
-            )
-            CycleButton("Tri", ui.sort.label, vm::nextSort)
-            CycleButton("MAL ≥", ui.minScore?.toString() ?: "toutes", vm::nextMinScore)
-        }
-        StatusChips(ui.statuses, vm::toggleStatus)
-        Text(
-            buildString {
-                append("${visible.items.size}/${ui.results.size} séries · MAL ${visible.malKnown}/${ui.results.size}")
-                if (visible.progressNeeded > 0) append(" · progression ${visible.progressKnown}/${visible.progressNeeded}")
-                if (ui.statuses.isNotEmpty() && Provider.ADN in providers && !adnLoggedIn) append(" · statut ADN : connecte ADN dans Réglages")
-            },
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        when {
-            ui.loading && ui.results.isEmpty() -> CenteredMessage("Chargement…")
-            ui.error != null -> CenteredMessage("Erreur : ${ui.error}")
-            ui.selection == null -> CenteredMessage("Aucune catégorie disponible.")
-            ui.results.isEmpty() -> CenteredMessage("Aucune série dans cette catégorie.")
-            visible.items.isEmpty() -> CenteredMessage(
-                if (visible.progressNeeded > visible.progressKnown) "Calcul de la progression…" else "Aucune série ne correspond à ces filtres."
-            )
-            else -> LazyVerticalGrid(
-                columns = GridCells.Adaptive(GridPosterWidth + 12.dp),
-                contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                items(visible.items) { item ->
-                    MediaCard(item = item, width = GridPosterWidth, onClick = { onOpenSeries(item.series) })
-                }
+    val message = when {
+        ui.loading && ui.results.isEmpty() -> "Chargement…"
+        ui.error != null -> "Erreur : ${ui.error}"
+        ui.selection == null -> "Aucune catégorie disponible."
+        ui.results.isEmpty() -> "Aucune série dans cette catégorie."
+        visible.items.isEmpty() ->
+            if (visible.progressNeeded > visible.progressKnown) "Calcul de la progression…" else "Aucune série ne correspond à ces filtres."
+        else -> null
+    }
+    PosterGrid(
+        items = visible.items,
+        message = message,
+        header = {
+            if (Provider.CRUNCHYROLL in providers && ui.crCategories.isNotEmpty()) {
+                CategoryRow("Crunchyroll", ui.crCategories.map { BrowseSelection(Provider.CRUNCHYROLL, it.slug.ifBlank { it.id }, it.title) }, ui.selection, vm::select)
             }
-        }
+            if (Provider.ADN in providers && ui.adnGenres.isNotEmpty()) {
+                CategoryRow("ADN", ui.adnGenres.map { BrowseSelection(Provider.ADN, it, adnGenreLabel(it)) }, ui.selection, vm::select)
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier.padding(vertical = 4.dp),
+            ) {
+                Text(
+                    ui.selection?.let { "${it.title} · ${it.provider.label}" } ?: "",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                CycleButton("Tri", ui.sort.label, vm::nextSort)
+                CycleButton("MAL ≥", ui.minScore?.toString() ?: "toutes", vm::nextMinScore)
+            }
+            StatusChips(ui.statuses, vm::toggleStatus)
+            Text(
+                buildString {
+                    append("${visible.items.size}/${ui.results.size} séries · MAL ${visible.malKnown}/${ui.results.size}")
+                    if (visible.progressNeeded > 0) append(" · progression ${visible.progressKnown}/${visible.progressNeeded}")
+                    if (ui.statuses.isNotEmpty() && Provider.ADN in providers && !adnLoggedIn) append(" · statut ADN : connecte ADN dans Réglages")
+                },
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
+    ) { item ->
+        MediaCard(item = item, width = GridPosterWidth, onClick = { onOpenSeries(item.series) })
     }
 }
 

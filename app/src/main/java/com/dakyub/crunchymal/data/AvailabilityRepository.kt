@@ -36,12 +36,19 @@ data class Availability(
     /** Version de la recherche (2 : essaie aussi le titre sans numéro de saison). */
     val version: Int = 0,
 ) {
-    fun refFor(providers: Set<Provider>): SeriesRef? = when {
-        Provider.CRUNCHYROLL in providers && crunchyroll != null ->
-            SeriesRef(crunchyroll.id, crunchyroll.title, crunchyroll.slug, crunchyroll.posterUrl, provider = Provider.CRUNCHYROLL)
-        Provider.ADN in providers && adn != null ->
-            SeriesRef(adn.id, adn.title, posterUrl = adn.posterUrl, provider = Provider.ADN)
-        else -> null
+    /**
+     * Fiche à ouvrir : sur un service affiché de préférence, sinon sur celui où la série a été trouvée
+     * (Crunchyroll seulement si le compte est connecté : [crunchyrollUsable]).
+     */
+    fun refFor(providers: Set<Provider>, crunchyrollUsable: Boolean): SeriesRef? {
+        val cr = crunchyroll?.takeIf { crunchyrollUsable }
+            ?.let { SeriesRef(it.id, it.title, it.slug, it.posterUrl, provider = Provider.CRUNCHYROLL) }
+        val adnRef = adn?.let { SeriesRef(it.id, it.title, posterUrl = it.posterUrl, provider = Provider.ADN) }
+        return when {
+            Provider.CRUNCHYROLL in providers && cr != null -> cr
+            Provider.ADN in providers && adnRef != null -> adnRef
+            else -> cr ?: adnRef
+        }
     }
 }
 

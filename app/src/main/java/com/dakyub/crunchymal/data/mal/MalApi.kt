@@ -26,6 +26,7 @@ data class MalAnime(
     val startYear: Int?,
     val genres: List<String> = emptyList(),
     val pictureUrl: String? = null,
+    val synopsis: String? = null,
 ) {
     val url: String get() = "https://myanimelist.net/anime/$malId"
 
@@ -59,6 +60,7 @@ private data class Node(
     @SerialName("start_date") val startDate: String? = null,
     val genres: List<Genre> = emptyList(),
     @SerialName("main_picture") val mainPicture: Picture? = null,
+    val synopsis: String? = null,
 ) {
     fun toAnime() = MalAnime(
         malId = id,
@@ -73,6 +75,7 @@ private data class Node(
         startYear = startDate?.take(4)?.toIntOrNull(),
         genres = genres.map { it.name }.filter { it.isNotBlank() },
         pictureUrl = mainPicture?.large ?: mainPicture?.medium,
+        synopsis = synopsis?.takeIf { it.isNotBlank() },
     )
 }
 
@@ -172,6 +175,14 @@ class MalApi(private val clientId: () -> String) {
     suspend fun anime(malId: Int): MalAnime {
         val url = "$BASE/anime/$malId".toHttpUrl().newBuilder()
             .addQueryParameter("fields", FIELDS)
+            .build().toString()
+        return Http.json.decodeFromString<Node>(get(url)).toAnime()
+    }
+
+    /** Fiche complète (avec affiche et résumé) pour l'écran de détail. */
+    suspend fun details(malId: Int): MalAnime {
+        val url = "$BASE/anime/$malId".toHttpUrl().newBuilder()
+            .addQueryParameter("fields", "$FIELDS,main_picture,synopsis")
             .build().toString()
         return Http.json.decodeFromString<Node>(get(url)).toAnime()
     }

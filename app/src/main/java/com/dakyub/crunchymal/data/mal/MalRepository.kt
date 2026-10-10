@@ -144,6 +144,8 @@ class MalRepository(context: Context, clientId: () -> String, val auth: MalAuth)
 
     suspend fun candidates(query: String): List<MalAnime> = api.search(query, limit = 15)
 
+    suspend fun details(malId: Int): MalAnime = api.details(malId)
+
     /** Correction manuelle ; [anime] null = "pas sur MAL". */
     suspend fun setManual(key: String, anime: MalAnime?) {
         val now = System.currentTimeMillis()

@@ -36,6 +36,7 @@ import com.dakyub.crunchymal.data.mal.MalStatuses
 import com.dakyub.crunchymal.ui.components.CenteredMessage
 import com.dakyub.crunchymal.ui.components.GridPosterWidth
 import com.dakyub.crunchymal.ui.components.MediaCard
+import com.dakyub.crunchymal.ui.components.PosterGrid
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
@@ -54,7 +55,7 @@ data class MalListUi(
 )
 
 /** Carte de la liste MAL + série correspondante sur Crunchyroll / ADN (si trouvée). */
-data class MalListRow(val card: CardItem, val target: SeriesRef?)
+data class MalListRow(val malId: Int, val card: CardItem, val target: SeriesRef?)
 
 data class MalListVisible(val rows: List<MalListRow> = emptyList(), val checked: Int = 0, val total: Int = 0)
 
@@ -66,7 +67,7 @@ class MalListViewModel(private val graph: Graph) : ViewModel() {
         val rows = entries.map { entry ->
             val availability: Availability? = found[entry.anime.malId]
             val elsewhere = platforms[entry.anime.malId]
-            val target = availability?.refFor(providers)
+            val target = availability?.refFor(providers, crunchyrollUsable = graph.auth.loggedIn.value)
             // Crunchyroll / ADN seulement s'ils sont trouvés par l'app (lien garanti), puis les autres
             // plateformes TMDB (France) ou MAL (monde).
             val badges = listOfNotNull(
@@ -81,6 +82,7 @@ class MalListViewModel(private val graph: Graph) : ViewModel() {
             }
             val statusLabel = MalStatuses.firstOrNull { it.first == entry.status.status }?.second.orEmpty()
             entry to MalListRow(
+                malId = entry.anime.malId,
                 card = CardItem(
                     series = SeriesRef(
                         id = "mal-${entry.anime.malId}",
@@ -141,7 +143,7 @@ class MalListViewModel(private val graph: Graph) : ViewModel() {
 }
 
 @Composable
-fun MalListScreen(onOpenSeries: (SeriesRef) -> Unit) {
+fun MalListScreen(onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (Int) -> Unit) {
     val graph = LocalGraph.current
     val loggedIn by graph.malAuth.loggedIn.collectAsState()
     if (!loggedIn) {
@@ -151,68 +153,58 @@ fun MalListScreen(onOpenSeries: (SeriesRef) -> Unit) {
     val vm = viewModel { MalListViewModel(graph) }
     val ui by vm.ui.collectAsState()
     val visible by vm.visible.collectAsState()
-    val context = LocalContext.current
     LaunchedEffect(Unit) { if (ui.entries.isEmpty()) vm.load() }
 
-    Column(Modifier.fillMaxSize().padding(horizontal = 48.dp)) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.padding(vertical = 2.dp),
-        ) {
-            Text("Statut", style = MaterialTheme.typography.labelLarge)
-            MalStatuses.forEach { (value, label) ->
-                val checked = value in ui.statuses
-                FilterChip(selected = checked, onClick = { vm.toggleStatus(value) }) {
-                    Text(if (checked) "✓ $label" else label, style = MaterialTheme.typography.labelMedium)
-                }
-            }
-        }
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.padding(vertical = 2.dp),
-        ) {
-            CycleButton("Tri", ui.sort.label, vm::nextSort)
-            FilterChip(selected = ui.availableOnly, onClick = vm::toggleAvailableOnly) {
-                Text(if (ui.availableOnly) "✓ Disponibles seulement" else "Disponibles seulement", style = MaterialTheme.typography.labelMedium)
-            }
-            OutlinedButton(onClick = vm::load) { Text("Actualiser", style = MaterialTheme.typography.labelLarge) }
-            Text(
-                "${visible.rows.size} séries · disponibilité vérifiée ${visible.checked}/${visible.total}",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        when {
-            ui.loading && ui.entries.isEmpty() -> CenteredMessage("Chargement de ta liste MAL…")
-            ui.error != null -> CenteredMessage("Erreur : ${ui.error}", "Réessayer") { vm.load() }
-            visible.rows.isEmpty() -> CenteredMessage("Aucune série ne correspond à ces filtres.")
-            else -> LazyVerticalGrid(
-                columns = GridCells.Adaptive(GridPosterWidth + 12.dp),
-                contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxSize(),
+    val message = when {
+        ui.loading && ui.entries.isEmpty() -> "Chargement de ta liste MAL…"
+        ui.error != null -> "Erreur : ${ui.error}"
+        visible.rows.isEmpty() -> "Aucune série ne correspond à ces filtres."
+        else -> null
+    }
+    PosterGrid(
+        items = visible.rows,
+        message = message,
+        key = { it.card.series.id },
+        actionLabel = "Réessayer".takeIf { ui.error != null },
+        onAction = vm::load,
+        header = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(vertical = 2.dp),
             ) {
-                items(visible.rows, key = { it.card.series.id }) { row ->
-                    MediaCard(
-                        item = row.card,
-                        width = GridPosterWidth,
-                        showProviderBadge = false,
-                        onClick = {
-                            val target = row.target
-                            if (target != null) onOpenSeries(target)
-                            else Toast.makeText(
-                                context,
-                                row.card.badges.takeIf { it.isNotEmpty() }?.let { "Disponible sur : ${it.joinToString(", ")}" }
-                                    ?: "Pas disponible sur les services affichés",
-                                Toast.LENGTH_LONG,
-                            ).show()
-                        },
-                    )
+                Text("Statut", style = MaterialTheme.typography.labelLarge)
+                MalStatuses.forEach { (value, label) ->
+                    val checked = value in ui.statuses
+                    FilterChip(selected = checked, onClick = { vm.toggleStatus(value) }) {
+                        Text(if (checked) "✓ $label" else label, style = MaterialTheme.typography.labelMedium)
+                    }
                 }
             }
-        }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.padding(vertical = 2.dp),
+            ) {
+                CycleButton("Tri", ui.sort.label, vm::nextSort)
+                FilterChip(selected = ui.availableOnly, onClick = vm::toggleAvailableOnly) {
+                    Text(if (ui.availableOnly) "✓ Disponibles seulement" else "Disponibles seulement", style = MaterialTheme.typography.labelMedium)
+                }
+                OutlinedButton(onClick = vm::load) { Text("Actualiser", style = MaterialTheme.typography.labelLarge) }
+                Text(
+                    "${visible.rows.size} séries · disponibilité vérifiée ${visible.checked}/${visible.total}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+    ) { row ->
+        MediaCard(
+            item = row.card,
+            width = GridPosterWidth,
+            showProviderBadge = false,
+            // Fiche Crunchyroll / ADN si la série y est, sinon fiche MAL (avec les autres plateformes).
+            onClick = { row.target?.let(onOpenSeries) ?: onOpenMal(row.malId) },
+        )
     }
 }

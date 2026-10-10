@@ -45,6 +45,7 @@ import com.dakyub.crunchymal.ui.screens.AdnSeriesScreen
 import com.dakyub.crunchymal.ui.screens.BrowseScreen
 import com.dakyub.crunchymal.ui.screens.CalendarScreen
 import com.dakyub.crunchymal.ui.screens.MalListScreen
+import com.dakyub.crunchymal.ui.screens.MalSeriesScreen
 import com.dakyub.crunchymal.ui.screens.HomeScreen
 import com.dakyub.crunchymal.ui.screens.LoginScreen
 import com.dakyub.crunchymal.ui.screens.SearchScreen
@@ -89,7 +90,16 @@ private fun AppRoot() {
     val nav = rememberNavController()
     NavHost(navController = nav, startDestination = "main") {
         composable("main") {
-            MainTabs(onOpenSeries = { ref -> if (ref.id.isNotBlank()) nav.navigate(ref.route) })
+            MainTabs(
+                onOpenSeries = { ref -> if (ref.id.isNotBlank()) nav.navigate(ref.route) },
+                onOpenMal = { malId -> nav.navigate("mal/$malId") },
+            )
+        }
+        composable("mal/{id}", arguments = listOf(navArgument("id") { type = NavType.IntType })) { entry ->
+            MalSeriesScreen(
+                malId = entry.arguments?.getInt("id") ?: 0,
+                onOpenSeries = { ref -> if (ref.id.isNotBlank()) nav.navigate(ref.route) },
+            )
         }
         composable(
             "series/{provider}/{id}",
@@ -110,7 +120,7 @@ private fun AppRoot() {
 private val Tabs = listOf("Accueil", "Parcourir", "Calendrier", "Watchlist", "Liste MAL", "Recherche", "Réglages")
 
 @Composable
-private fun MainTabs(onOpenSeries: (SeriesRef) -> Unit) {
+private fun MainTabs(onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (Int) -> Unit) {
     var selected by rememberSaveable { mutableIntStateOf(0) }
     // Au retour d'une fiche, Android redonne le focus au premier onglet (Accueil), qui serait alors
     // sélectionné : pendant ce retour, le focus est redirigé vers l'onglet où l'on était.
@@ -159,7 +169,7 @@ private fun MainTabs(onOpenSeries: (SeriesRef) -> Unit) {
             1 -> BrowseScreen(onOpenSeries)
             2 -> CalendarScreen(onOpenSeries)
             3 -> WatchlistScreen(onOpenSeries)
-            4 -> MalListScreen(onOpenSeries)
+            4 -> MalListScreen(onOpenSeries, onOpenMal)
             5 -> SearchScreen(onOpenSeries)
             else -> SettingsScreen()
         }
