@@ -9,6 +9,7 @@ import com.dakyub.crunchymal.data.Provider
 import com.dakyub.crunchymal.data.ProviderSelection
 import com.dakyub.crunchymal.data.SeriesRef
 import com.dakyub.crunchymal.data.Settings
+import com.dakyub.crunchymal.data.WatchPlatformsRepository
 import com.dakyub.crunchymal.data.adn.AdnApi
 import com.dakyub.crunchymal.data.adn.AdnWatchlistRepository
 import com.dakyub.crunchymal.data.ratings.RatingsRepository
@@ -37,6 +38,7 @@ class Graph(context: Context) {
     val adnWatchlist = AdnWatchlistRepository(adn)
     val ratings = RatingsRepository(settings)
     val availability = AvailabilityRepository(context, api, adn)
+    val watchPlatforms = WatchPlatformsRepository(context, settings)
     val diagnostics = DiagnosticsUploader(context, settings)
     val history = HistoryRepository(context, api)
 

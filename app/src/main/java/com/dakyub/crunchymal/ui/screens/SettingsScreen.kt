@@ -226,7 +226,8 @@ fun SettingsScreen() {
         item {
             Text(
                 "IMDb via une clé OMDb (omdbapi.com → API Key → FREE) et TMDB en secours (themoviedb.org → Paramètres → API). " +
-                    "Une seule clé suffit, les deux donnent le meilleur résultat.",
+                    "Une seule clé suffit, les deux donnent le meilleur résultat. La clé TMDB sert aussi aux badges " +
+                    "« où regarder en France » (Netflix, Disney+…) de la liste MAL.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -235,9 +236,12 @@ fun SettingsScreen() {
         item { TvTextField(tmdb, { tmdb = it }, "Clé API TMDB (v3) ou jeton de lecture (v4)") }
         item {
             Button(onClick = {
+                val tmdbChanged = settings.tmdbKey != tmdb
                 settings.omdbKey = omdb
                 settings.tmdbKey = tmdb
                 graph.ratings.clear()
+                // Les plateformes « où regarder » dépendent aussi de la clé TMDB.
+                if (tmdbChanged) scope.launch { graph.watchPlatforms.clear() }
                 toast("Clés enregistrées")
             }) { Text("Enregistrer les clés") }
         }

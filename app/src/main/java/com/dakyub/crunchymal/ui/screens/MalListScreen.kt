@@ -61,17 +61,24 @@ data class MalListVisible(val rows: List<MalListRow> = emptyList(), val checked:
 class MalListViewModel(private val graph: Graph) : ViewModel() {
     val ui = MutableStateFlow(MalListUi())
 
-    val visible = combine(ui, graph.availability.found, graph.providers.selected) { u, found, providers ->
+    val visible = combine(ui, graph.availability.found, graph.providers.selected, graph.watchPlatforms.found) { u, found, providers, platforms ->
         val entries = u.entries.filter { entry -> entry.status.status?.let { it in u.statuses } == true }
         val rows = entries.map { entry ->
             val availability: Availability? = found[entry.anime.malId]
+            val elsewhere = platforms[entry.anime.malId]
             val target = availability?.refFor(providers)
+            // Crunchyroll / ADN trouvés par l'app, puis les plateformes TMDB (France) ou MAL (monde).
+            val badges = (
+                listOfNotNull(
+                    "Crunchyroll".takeIf { availability?.crunchyroll != null },
+                    "ADN".takeIf { availability?.adn != null },
+                ) + elsewhere?.names.orEmpty()
+                ).distinct()
             val where = when {
-                availability == null -> "Recherche…"
-                else -> listOfNotNull(
-                    "CR".takeIf { Provider.CRUNCHYROLL in providers && availability.crunchyroll != null },
-                    "ADN".takeIf { Provider.ADN in providers && availability.adn != null },
-                ).joinToString(" + ").ifBlank { "Indisponible" }
+                availability == null && elsewhere == null -> "Recherche…"
+                badges.isEmpty() -> "Indisponible"
+                elsewhere?.source == "MAL" -> "plateformes MAL (monde)"
+                else -> null
             }
             val statusLabel = MalStatuses.firstOrNull { it.first == entry.status.status }?.second.orEmpty()
             entry to MalListRow(
@@ -82,7 +89,8 @@ class MalListViewModel(private val graph: Graph) : ViewModel() {
                         posterUrl = entry.anime.pictureUrl,
                         malKeyOverride = "mal:${entry.anime.malId}",
                     ),
-                    subtitle = "$statusLabel · $where",
+                    subtitle = listOfNotNull(statusLabel.ifBlank { null }, where).joinToString(" · "),
+                    badges = badges,
                 ),
                 target = target,
             )
@@ -112,6 +120,7 @@ class MalListViewModel(private val graph: Graph) : ViewModel() {
                     entries.forEach { entry ->
                         graph.mal.seed("mal:${entry.anime.malId}", entry.anime)
                         graph.availability.request(entry.anime, crEnabled)
+                        graph.watchPlatforms.request(entry.anime)
                     }
                 }
                 .onFailure { ui.value = ui.value.copy(loading = false, error = it.message ?: "Erreur") }
@@ -195,7 +204,12 @@ fun MalListScreen(onOpenSeries: (SeriesRef) -> Unit) {
                         onClick = {
                             val target = row.target
                             if (target != null) onOpenSeries(target)
-                            else Toast.makeText(context, "Pas disponible sur les services affichés", Toast.LENGTH_SHORT).show()
+                            else Toast.makeText(
+                                context,
+                                row.card.badges.takeIf { it.isNotEmpty() }?.let { "Disponible sur : ${it.joinToString(", ")}" }
+                                    ?: "Pas disponible sur les services affichés",
+                                Toast.LENGTH_LONG,
+                            ).show()
                         },
                     )
                 }

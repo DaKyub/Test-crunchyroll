@@ -1,6 +1,7 @@
 package com.dakyub.crunchymal.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -73,9 +74,11 @@ fun MediaCard(
                             .padding(6.dp),
                     )
                 }
-                // Badge du service, seulement quand plusieurs services sont affichés.
+                // Badges de plateformes (liste MAL), sinon badge du service quand plusieurs sont affichés.
                 val providers by LocalGraph.current.providers.selected.collectAsState()
-                if (showMal && showProviderBadge && providers.size > 1 && item.series.id.isNotBlank()) {
+                if (item.badges.isNotEmpty()) {
+                    PlatformBadges(item.badges, Modifier.align(Alignment.TopStart).padding(6.dp))
+                } else if (showMal && showProviderBadge && providers.size > 1 && item.series.id.isNotBlank()) {
                     Text(
                         (listOf(item.series.provider) + item.series.alsoOn).distinct().joinToString("+") { it.badge },
                         style = MaterialTheme.typography.labelSmall,
@@ -125,4 +128,44 @@ fun MediaCard(
             )
         }
     }
+}
+
+/** Libellé court et couleur du badge d'une plateforme. */
+fun platformBadge(name: String): Pair<String, Color> = when (name) {
+    "Crunchyroll" -> "CR" to CrunchyOrange
+    "ADN" -> "ADN" to AdnBlue
+    "Netflix" -> "Netflix" to Color(0xFFE50914)
+    "Disney+" -> "Disney+" to Color(0xFF113CCF)
+    "Prime Video" -> "Prime" to Color(0xFF00A8E1)
+    "Apple TV+" -> "Apple TV+" to Color(0xFF3A3A3C)
+    "Canal+" -> "Canal+" to Color(0xFF1B1B1B)
+    "Max" -> "Max" to Color(0xFF002BE7)
+    "HIDIVE" -> "HIDIVE" to Color(0xFF00A3E0)
+    else -> name.take(10) to Color(0xFF5A5A5A)
+}
+
+/** Badges empilés (3 au plus, puis « +n »). */
+@Composable
+fun PlatformBadges(names: List<String>, modifier: Modifier = Modifier) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        val shown = if (names.size > 3) names.take(2) else names
+        shown.forEach { name ->
+            val (label, color) = platformBadge(name)
+            BadgeText(label, color)
+        }
+        if (names.size > 3) BadgeText("+${names.size - 2}", Color(0xFF5A5A5A))
+    }
+}
+
+@Composable
+private fun BadgeText(label: String, color: Color) {
+    Text(
+        label,
+        style = MaterialTheme.typography.labelSmall,
+        color = Color.White,
+        maxLines = 1,
+        modifier = Modifier
+            .background(color, RoundedCornerShape(4.dp))
+            .padding(horizontal = 5.dp, vertical = 1.dp),
+    )
 }

@@ -49,6 +49,8 @@ data class CardItem(
     val episodeId: String? = null,
     val progress: Float? = null,
     val wide: Boolean = false,
+    /** Plateformes affichées en badges sur l'affiche ("Crunchyroll", "ADN", "Netflix"…). */
+    val badges: List<String> = emptyList(),
 ) {
     val imageUrl: String? get() = if (wide) series.wideUrl ?: series.posterUrl else series.posterUrl ?: series.wideUrl
 }
