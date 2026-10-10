@@ -51,12 +51,20 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import androidx.compose.foundation.layout.Row
 import androidx.compose.ui.Alignment
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** [minMal] : rangée filtrée dynamiquement sur la note MAL (ex. « Pépites non vues »). */
 data class HomeRow(val key: String, val title: String, val items: List<CardItem>, val minMal: Double? = null)
 
-data class HomeState(val loading: Boolean = true, val rows: List<HomeRow> = emptyList(), val error: String? = null)
+/** [rowErrors] : rangées qui n'ont pas pu être chargées (titre : erreur), affichées pour le diagnostic. */
+data class HomeState(
+    val loading: Boolean = true,
+    val rows: List<HomeRow> = emptyList(),
+    val error: String? = null,
+    val rowErrors: List<String> = emptyList(),
+)
 
 fun CrPanel.toSeriesCard(): CardItem = CardItem(
     series = SeriesRef(
@@ -196,6 +204,10 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
     private val adnContinueLoader = adnContinueWatching()
     private val newEpisodesLoader = newEpisodesRow()
     private val gemsLoader = gemsRow()
+    private val adnGemsLoader = adnGemsRow()
+    /** Rangées filtrées sur la note MAL (8+) : la note est demandée pour toutes leurs séries. */
+    private val gemLoaders get() = listOf(gemsLoader, adnGemsLoader)
+    private var errors: Array<String?> = emptyArray()
 
     fun load() {
         val providers = graph.providers.selected.value
@@ -225,21 +237,27 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
             }
 
             // Les rangées s'affichent au fur et à mesure, dans l'ordre du fil officiel.
+            // Tableaux locaux : une rangée d'un chargement annulé n'écrit pas dans ceux du suivant.
             loaders = list
-            results = arrayOfNulls<List<CardItem>>(list.size)
-            done = BooleanArray(list.size)
+            val res = arrayOfNulls<List<CardItem>>(list.size).also { results = it }
+            val errs = arrayOfNulls<String>(list.size).also { errors = it }
+            val dn = BooleanArray(list.size).also { done = it }
             firstError = null
             lastResumeRefresh = System.currentTimeMillis()
             list.mapIndexed { i, (_, loader) ->
                 launch {
                     runCatching { loader() }
                         .onSuccess { items ->
-                            results[i] = items
+                            res[i] = items
                             // Les pépites sont filtrées sur la note MAL : on la demande pour toutes.
-                            if (loader === gemsLoader) items.forEach { graph.mal.request(it.series.malKey, it.series.malTitles) }
+                            if (gemLoaders.any { it === loader }) items.forEach { graph.mal.request(it.series.malKey, it.series.malTitles) }
                         }
-                        .onFailure { if (firstError == null) firstError = it.message }
-                    done[i] = true
+                        .onFailure {
+                            if (it is CancellationException) return@onFailure
+                            if (firstError == null) firstError = it.message
+                            errs[i] = it.message ?: it.javaClass.simpleName
+                        }
+                    dn[i] = true
                     publish()
                 }
             }.joinAll()
@@ -251,7 +269,7 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
     private fun publish() {
         val rows = loaders.indices.mapNotNull { i ->
             results.getOrNull(i)?.takeIf { it.isNotEmpty() }?.let {
-                HomeRow("$i", loaders[i].first, it, minMal = if (loaders[i].second === gemsLoader) 8.0 else null)
+                HomeRow("$i", loaders[i].first, it, minMal = if (gemLoaders.any { g -> g === loaders[i].second }) 8.0 else null)
             }
         }
         val finished = done.all { it }
@@ -259,6 +277,7 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
             loading = !finished,
             rows = rows,
             error = if (finished && rows.isEmpty()) firstError ?: "Rien à afficher" else null,
+            rowErrors = loaders.indices.mapNotNull { i -> errors.getOrNull(i)?.let { "${loaders[i].first} : ${it.take(120)}" } },
         )
     }
 
@@ -316,7 +335,12 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
                     if (user != null && !video.watched) {
                         adnEpisodeCard(show, video, "Continuer", if (video.duration > 0) user.stoptime.toFloat() / video.duration else null)
                     } else {
-                        val episodes = runCatching { graph.adnProgress.tree(show.id.toString()).episodes }.getOrDefault(emptyList())
+                        // Épisode suivant : il faut la liste des épisodes, parfois très longue (One Piece). Le calcul
+                        // continue en arrière-plan (et reste en cache) mais la rangée ne l'attend que 8 s.
+                        val pending = viewModelScope.async {
+                            runCatching { graph.adnProgress.tree(show.id.toString()).episodes }.getOrNull()
+                        }
+                        val episodes = withTimeoutOrNull(8_000) { pending.await() }.orEmpty()
                         val index = episodes.indexOfFirst { it.video.id == video.id }
                         val next = if (index >= 0) episodes.drop(index + 1).firstOrNull { it.available } else null
                         next?.let { adnEpisodeCard(show, it.video, "Suite", null) }
@@ -428,10 +452,70 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
         }
     }
 
-    private fun adnLoaders(): List<Pair<String, suspend () -> List<CardItem>>> = listOf(
+    private fun adnLoaders(): List<Pair<String, suspend () -> List<CardItem>>> = listOfNotNull(
+        ("ADN · Ma watchlist" to adnWatchlistRow()).takeIf { graph.adn.loggedIn.value },
+        "ADN · Derniers épisodes" to adnLatestRow(),
         "ADN · Simulcasts" to row { graph.adn.catalog(order = "popular", simulcastOnly = true, limit = 40).map { it.toCard() } },
+        "ADN · Pépites non vues (MAL 8+)" to adnGemsLoader,
         "ADN · Populaires" to row { graph.adn.catalog(order = "popular", limit = 40).map { it.toCard() } },
     )
+
+    /** Watchlist ADN, avec la progression déjà connue de chaque série. */
+    private fun adnWatchlistRow(): suspend () -> List<CardItem> = {
+        val summaries = graph.progress.summaries.value
+        graph.adnWatchlist.get().take(30).map { e ->
+            val s = summaries[e.series.progressKey]
+            CardItem(
+                series = e.series,
+                episodeId = s?.nextEpisodeId ?: e.nextEpisodeId,
+                subtitle = when {
+                    s == null -> null
+                    s.status == WatchStatus.COMPLETED -> "✓ ${s.watched}/${s.total} ép."
+                    s.status == WatchStatus.NOT_STARTED -> "Non commencée"
+                    else -> "${s.watched}/${s.total} ép." + (s.nextLabel?.let { " · suite : $it" } ?: "")
+                },
+                progress = s?.takeIf { it.total > 0 && it.watched > 0 }?.let { it.watched.toFloat() / it.total },
+            )
+        }
+    }
+
+    /** Épisodes sortis sur ADN ces 7 derniers jours (calendrier), les plus récents d'abord. */
+    private fun adnLatestRow(): suspend () -> List<CardItem> = {
+        val format = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+        val dayLabel = java.text.SimpleDateFormat("EEE d", java.util.Locale.FRANCE)
+        val now = System.currentTimeMillis()
+        coroutineScope {
+            (0..6).map { daysAgo ->
+                async {
+                    val day = java.util.Date(now - daysAgo * 86_400_000L)
+                    runCatching { graph.adn.calendar(format.format(day)) }.getOrDefault(emptyList())
+                }
+            }.awaitAll()
+        }.flatten()
+            .distinctBy { it.id }
+            .mapNotNull { video ->
+                val time = DateUtils.parse(video.releaseDate) ?: return@mapNotNull null
+                val show = video.show ?: return@mapNotNull null
+                if (time.time > now) null else Triple(video, show, time)
+            }
+            .sortedByDescending { it.third }
+            .take(30)
+            .map { (video, show, time) -> adnEpisodeCard(show, video, dayLabel.format(time), null) }
+    }
+
+    /** Séries populaires d'ADN jamais commencées ; la rangée ne garde que celles notées 8+ sur MAL. */
+    private fun adnGemsRow(): suspend () -> List<CardItem> = {
+        coroutineScope {
+            val popular = async { graph.adn.catalog(order = "popular", limit = 100) }
+            val loggedIn = graph.adn.loggedIn.value
+            val history = async { if (loggedIn) runCatching { graph.adn.viewingHistory() }.getOrDefault(emptyList()) else emptyList() }
+            val watchlist = async { runCatching { graph.adnWatchlist.get() }.getOrDefault(emptyList()) }
+            launch { graph.mal.refreshMyListSeenIds() }
+            val started = history.await().mapNotNull { it.show?.id?.toString() }.toSet() +
+                watchlist.await().filter { !it.neverWatched }.map { it.series.id }
+            popular.await().filter { it.id.toString() !in started }.map { it.toCard() }
+        }
+    }
 
     private fun fallbackLoaders(): List<Pair<String, suspend () -> List<CardItem>>> = listOf(
         "Continuer à regarder" to continueLoader,
@@ -479,6 +563,14 @@ fun HomeScreen(onOpenSeries: (SeriesRef) -> Unit) {
                         }
                     }
                     StatusChips(filters.statuses, vm::toggleStatus)
+                    state.rowErrors.forEach { message ->
+                        Text(
+                            "Rangée non chargée · $message",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error,
+                            maxLines = 1,
+                        )
+                    }
                 }
             }
             if (visible.rows.isEmpty() && !state.loading) {
