@@ -46,7 +46,16 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-data class BrowseSelection(val provider: Provider, val id: String, val title: String)
+data class BrowseSelection(val provider: Provider, val id: String, val title: String) {
+    val isAll: Boolean get() = id == ALL
+
+    companion object {
+        /** Identifiant de la puce « Tout » (aucun filtre de genre). */
+        const val ALL = "__all__"
+
+        fun all(provider: Provider) = BrowseSelection(provider, ALL, "Tout")
+    }
+}
 
 enum class BrowseSort(val label: String) { POPULAR("Popularité"), ALPHA("A → Z"), MAL("Note MAL") }
 
@@ -75,11 +84,13 @@ class BrowseViewModel(private val graph: Graph) : ViewModel() {
     val ui = MutableStateFlow(BrowseUi())
     private var job: Job? = null
     private var progressJob: Job? = null
+    /** Séries de l'historique Crunchyroll : les autres sont « non commencées » sans rien calculer. */
+    private val crWatched = MutableStateFlow<Set<String>?>(null)
 
-    val visible = combine(ui, graph.progress.summaries, graph.mal.records, graph.adn.loggedIn) { u, summaries, mal, _ ->
-        val rows = u.results.map { item ->
-            Triple(item, summaries[item.series.progressKey]?.status, mal[item.series.malKey]?.score)
-        }
+    val visible = combine(ui, graph.progress.summaries, graph.mal.records, graph.adn.loggedIn, crWatched) { u, summaries, mal, _, watched ->
+        fun statusOf(item: CardItem): WatchStatus? = summaries[item.series.progressKey]?.status
+            ?: if (item.series.provider == Provider.CRUNCHYROLL && watched != null && item.series.id !in watched) WatchStatus.NOT_STARTED else null
+        val rows = u.results.map { item -> Triple(item, statusOf(item), mal[item.series.malKey]?.score) }
         val filtered = rows
             .filter { (_, status, _) -> u.statuses.accepts(status) }
             .filter { (_, _, score) -> u.minScore == null || (score != null && score >= u.minScore) }
@@ -90,7 +101,7 @@ class BrowseViewModel(private val graph: Graph) : ViewModel() {
                 val summary = summaries[item.series.progressKey]
                 if (summary != null && u.statuses.isNotEmpty()) item.copy(subtitle = "${summary.watched}/${summary.total} ép.") else item
             },
-            progressKnown = trackable.count { summaries.containsKey(it.series.progressKey) },
+            progressKnown = trackable.count { statusOf(it) != null },
             progressNeeded = if (u.statuses.isEmpty()) 0 else trackable.size,
             malKnown = u.results.count { mal.containsKey(it.series.malKey) },
         )
@@ -109,10 +120,9 @@ class BrowseViewModel(private val graph: Graph) : ViewModel() {
             } else emptyList()
             // Une sélection ADN qui n'existe plus (genres renommés par ADN) est abandonnée.
             val current = ui.value.selection?.takeIf { it.provider in providers }
-                ?.takeIf { it.provider != Provider.ADN || it.id in adnGenres }
-            val first = current
-                ?: categories.firstOrNull()?.let { BrowseSelection(Provider.CRUNCHYROLL, it.slug.ifBlank { it.id }, it.title) }
-                ?: adnGenres.firstOrNull()?.let { BrowseSelection(Provider.ADN, it, adnGenreLabel(it)) }
+                ?.takeIf { it.provider != Provider.ADN || it.isAll || it.id in adnGenres }
+            // Par défaut : « Tout » (catalogue sans filtre de genre).
+            val first = current ?: BrowseSelection.all(if (Provider.CRUNCHYROLL in providers) Provider.CRUNCHYROLL else Provider.ADN)
             ui.value = ui.value.copy(crCategories = categories, adnGenres = adnGenres)
             first?.let { select(it) }
         }
@@ -145,7 +155,12 @@ class BrowseViewModel(private val graph: Graph) : ViewModel() {
         if (ui.value.statuses.isEmpty()) return
         val refs = ui.value.results.map { it.series }.filter { graph.progressAvailable(it) }
         progressJob = viewModelScope.launch {
-            refs.forEach { ref -> launch { runCatching { graph.ensureProgress(ref) } } }
+            // Crunchyroll : seules les séries de l'historique ont une progression à calculer.
+            val watched = if (refs.any { it.provider == Provider.CRUNCHYROLL }) {
+                runCatching { graph.history.watchedSeriesIds() }.getOrNull()?.also { crWatched.value = it }
+            } else null
+            refs.filter { it.provider != Provider.CRUNCHYROLL || watched == null || it.id in watched }
+                .forEach { ref -> launch { runCatching { graph.ensureProgress(ref) } } }
         }
     }
 
@@ -156,12 +171,21 @@ class BrowseViewModel(private val graph: Graph) : ViewModel() {
         job = viewModelScope.launch {
             ui.value = ui.value.copy(loading = true, error = null)
             ui.value = runCatching {
-                when (selection.provider) {
-                    Provider.CRUNCHYROLL -> graph.api
-                        .browseCategory(selection.id, sortBy = if (alpha) "alphabetical" else "popularity")
+                val sortBy = if (alpha) "alphabetical" else "popularity"
+                val order = if (alpha) "alpha" else "popular"
+                when {
+                    // « Tout » : deux pages de 100 séries, tous genres confondus.
+                    selection.provider == Provider.CRUNCHYROLL && selection.isAll -> listOf(0, 100).flatMap { start ->
+                        graph.api.browseWith(mapOf("type" to "series", "sort_by" to sortBy, "n" to "100", "start" to start.toString()))
+                    }.distinctBy { it.id }.map { it.toSeriesCard() }
+                    selection.provider == Provider.CRUNCHYROLL -> graph.api
+                        .browseCategory(selection.id, sortBy = sortBy)
                         .map { it.toSeriesCard() }
-                    Provider.ADN -> graph.adn
-                        .catalog(order = if (alpha) "alpha" else "popular", genre = selection.id, limit = 100)
+                    selection.isAll -> listOf(0, 100).flatMap { offset ->
+                        graph.adn.catalog(order = order, limit = 100, offset = offset)
+                    }.distinctBy { it.id }.map { it.toCard() }
+                    else -> graph.adn
+                        .catalog(order = order, genre = selection.id, limit = 100)
                         .map { it.toCard() }
                 }
             }.fold(
@@ -197,11 +221,22 @@ fun BrowseScreen(onOpenSeries: (SeriesRef) -> Unit) {
         items = visible.items,
         message = message,
         header = {
-            if (Provider.CRUNCHYROLL in providers && ui.crCategories.isNotEmpty()) {
-                CategoryRow("Crunchyroll", ui.crCategories.map { BrowseSelection(Provider.CRUNCHYROLL, it.slug.ifBlank { it.id }, it.title) }, ui.selection, vm::select)
+            if (Provider.CRUNCHYROLL in providers) {
+                CategoryRow(
+                    "Crunchyroll",
+                    listOf(BrowseSelection.all(Provider.CRUNCHYROLL)) +
+                        ui.crCategories.map { BrowseSelection(Provider.CRUNCHYROLL, it.slug.ifBlank { it.id }, it.title) },
+                    ui.selection,
+                    vm::select,
+                )
             }
-            if (Provider.ADN in providers && ui.adnGenres.isNotEmpty()) {
-                CategoryRow("ADN", ui.adnGenres.map { BrowseSelection(Provider.ADN, it, adnGenreLabel(it)) }, ui.selection, vm::select)
+            if (Provider.ADN in providers) {
+                CategoryRow(
+                    "ADN",
+                    listOf(BrowseSelection.all(Provider.ADN)) + ui.adnGenres.map { BrowseSelection(Provider.ADN, it, adnGenreLabel(it)) },
+                    ui.selection,
+                    vm::select,
+                )
             }
             Row(
                 verticalAlignment = Alignment.CenterVertically,

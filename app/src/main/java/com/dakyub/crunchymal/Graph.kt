@@ -8,6 +8,7 @@ import com.dakyub.crunchymal.data.HistoryRepository
 import com.dakyub.crunchymal.data.Provider
 import com.dakyub.crunchymal.data.ProviderSelection
 import com.dakyub.crunchymal.data.SeriesRef
+import com.dakyub.crunchymal.data.StartedSeriesRepository
 import com.dakyub.crunchymal.data.Settings
 import com.dakyub.crunchymal.data.WatchPlatformsRepository
 import com.dakyub.crunchymal.data.adn.AdnApi
@@ -41,6 +42,7 @@ class Graph(context: Context) {
     val watchPlatforms = WatchPlatformsRepository(context, settings)
     val diagnostics = DiagnosticsUploader(context, settings)
     val history = HistoryRepository(context, api)
+    val started = StartedSeriesRepository(api, history, adn, adnWatchlist)
 
     /** Calcule (si besoin) la progression d'une série, quel que soit son service. */
     suspend fun ensureProgress(ref: SeriesRef, force: Boolean = false) = when (ref.provider) {

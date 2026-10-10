@@ -51,6 +51,7 @@ import com.dakyub.crunchymal.ui.screens.LoginScreen
 import com.dakyub.crunchymal.ui.screens.SearchScreen
 import com.dakyub.crunchymal.ui.screens.SeriesScreen
 import com.dakyub.crunchymal.ui.screens.SettingsScreen
+import com.dakyub.crunchymal.ui.screens.SeriesListSource
 import com.dakyub.crunchymal.ui.screens.WatchlistScreen
 import com.dakyub.crunchymal.ui.theme.CrunchyMalTheme
 
@@ -117,7 +118,7 @@ private fun AppRoot() {
     }
 }
 
-private val Tabs = listOf("Accueil", "Parcourir", "Calendrier", "Watchlist", "Liste MAL", "Recherche", "Réglages")
+private val Tabs = listOf("Accueil", "En cours", "Parcourir", "Calendrier", "Watchlist", "Liste MAL", "Recherche", "Réglages")
 
 @Composable
 private fun MainTabs(onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (Int) -> Unit) {
@@ -166,11 +167,12 @@ private fun MainTabs(onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (Int) -> Unit
         }
         when (selected) {
             0 -> HomeScreen(onOpenSeries)
-            1 -> BrowseScreen(onOpenSeries)
-            2 -> CalendarScreen(onOpenSeries)
-            3 -> WatchlistScreen(onOpenSeries)
-            4 -> MalListScreen(onOpenSeries, onOpenMal)
-            5 -> SearchScreen(onOpenSeries)
+            1 -> WatchlistScreen(onOpenSeries, SeriesListSource.STARTED)
+            2 -> BrowseScreen(onOpenSeries)
+            3 -> CalendarScreen(onOpenSeries)
+            4 -> WatchlistScreen(onOpenSeries)
+            5 -> MalListScreen(onOpenSeries, onOpenMal)
+            6 -> SearchScreen(onOpenSeries)
             else -> SettingsScreen()
         }
     }

@@ -78,11 +78,17 @@ data class WatchlistUi(
     val filters: WatchlistFilters = WatchlistFilters(),
 )
 
+/** Watchlist (CR + ADN) ou toutes les séries commencées (onglet « En cours »). */
+enum class SeriesListSource { WATCHLIST, STARTED }
+
 internal data class Loaded(val loading: Boolean = true, val error: String? = null, val entries: List<WatchlistEntry> = emptyList())
 
-class WatchlistViewModel(private val graph: Graph) : ViewModel() {
+class WatchlistViewModel(private val graph: Graph, private val source: SeriesListSource) : ViewModel() {
     private val loaded = MutableStateFlow(Loaded())
-    private val filters = MutableStateFlow(WatchlistFilters())
+    // « En cours » s'ouvre sur les séries à reprendre ; les autres statuts restent à cocher.
+    private val filters = MutableStateFlow(
+        WatchlistFilters(statuses = if (source == SeriesListSource.STARTED) setOf(WatchStatus.IN_PROGRESS) else emptySet())
+    )
     private var loadedFor: Pair<Set<Provider>, Boolean>? = null
 
     val ui = combine(loaded, filters, graph.progress.summaries, graph.mal.records) { l, f, summaries, mal ->
@@ -144,16 +150,21 @@ class WatchlistViewModel(private val graph: Graph) : ViewModel() {
         loadedFor = providers to graph.adn.loggedIn.value
         viewModelScope.launch {
             loaded.value = loaded.value.copy(loading = true, error = null)
-            val cr = async {
-                if (Provider.CRUNCHYROLL in providers) runCatching { graph.watchlist.get(force) } else Result.success(emptyList<WatchlistEntry>())
+            val results = if (source == SeriesListSource.STARTED) {
+                listOf(runCatching { graph.started.get(providers, crunchyrollUsable = graph.auth.loggedIn.value, force = force) })
+            } else {
+                val cr = async {
+                    if (Provider.CRUNCHYROLL in providers) runCatching { graph.watchlist.get(force) } else Result.success(emptyList<WatchlistEntry>())
+                }
+                val adn = async {
+                    if (Provider.ADN in providers) runCatching { graph.adnWatchlist.get(force) } else Result.success(emptyList<WatchlistEntry>())
+                }
+                listOf(cr.await(), adn.await())
             }
-            val adn = async {
-                if (Provider.ADN in providers) runCatching { graph.adnWatchlist.get(force) } else Result.success(emptyList<WatchlistEntry>())
-            }
-            val results = listOf(cr.await(), adn.await())
             val entries = results.flatMap { it.getOrDefault(emptyList()) }
-            val errors = results.zip(listOf(Provider.CRUNCHYROLL, Provider.ADN)).mapNotNull { (result, provider) ->
-                result.exceptionOrNull()?.let { "${provider.label} : ${it.message ?: "erreur de chargement"}" }
+            val labels = if (source == SeriesListSource.STARTED) listOf("Historique") else listOf(Provider.CRUNCHYROLL.label, Provider.ADN.label)
+            val errors = results.zip(labels).mapNotNull { (result, label) ->
+                result.exceptionOrNull()?.let { "$label : ${it.message ?: "erreur de chargement"}" }
             }
             loaded.value = Loaded(loading = false, entries = entries, error = errors.joinToString(" · ").ifBlank { null })
             entries.forEach { graph.mal.request(it.series.malKey, it.series.malTitles) }
@@ -169,22 +180,26 @@ class WatchlistViewModel(private val graph: Graph) : ViewModel() {
 }
 
 @Composable
-fun WatchlistScreen(onOpenSeries: (SeriesRef) -> Unit) {
+fun WatchlistScreen(onOpenSeries: (SeriesRef) -> Unit, source: SeriesListSource = SeriesListSource.WATCHLIST) {
     val graph = LocalGraph.current
     val providers by graph.providers.selected.collectAsState()
     val adnLoggedIn by graph.adn.loggedIn.collectAsState()
+    val started = source == SeriesListSource.STARTED
     if (providers == setOf(Provider.ADN) && !adnLoggedIn) {
-        CenteredMessage("Connecte ton compte ADN dans Réglages pour afficher ta watchlist ADN.")
+        CenteredMessage(
+            if (started) "Connecte ton compte ADN dans Réglages pour afficher tes séries ADN en cours."
+            else "Connecte ton compte ADN dans Réglages pour afficher ta watchlist ADN."
+        )
         return
     }
-    val vm = viewModel { WatchlistViewModel(graph) }
+    val vm = viewModel(key = source.name) { WatchlistViewModel(graph, source) }
     LaunchedEffect(providers, adnLoggedIn) { vm.ensure(providers, adnLoggedIn) }
     val ui by vm.ui.collectAsState()
     val malError by graph.mal.lastError.collectAsState()
     val context = LocalContext.current
 
     val message = when {
-        ui.loading && ui.total == 0 -> "Chargement de la watchlist…"
+        ui.loading && ui.total == 0 -> if (started) "Lecture de ton historique…" else "Chargement de la watchlist…"
         ui.error != null && ui.total == 0 -> ui.error
         ui.items.isEmpty() -> "Aucune série ne correspond à ces filtres."
         else -> null
@@ -225,7 +240,7 @@ fun WatchlistScreen(onOpenSeries: (SeriesRef) -> Unit) {
             }
             if (Provider.ADN in providers && !adnLoggedIn) {
                 Text(
-                    "Watchlist ADN : connecte ton compte ADN dans Réglages.",
+                    if (started) "Séries ADN : connecte ton compte ADN dans Réglages." else "Watchlist ADN : connecte ton compte ADN dans Réglages.",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
