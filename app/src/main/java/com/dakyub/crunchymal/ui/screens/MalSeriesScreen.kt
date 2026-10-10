@@ -41,6 +41,7 @@ import com.dakyub.crunchymal.data.mal.MalAnime
 import com.dakyub.crunchymal.ui.components.CenteredMessage
 import com.dakyub.crunchymal.ui.components.GenresLine
 import com.dakyub.crunchymal.ui.components.MalBadge
+import com.dakyub.crunchymal.ui.components.airingLabel
 import com.dakyub.crunchymal.ui.components.MalEntryChoice
 import com.dakyub.crunchymal.ui.components.MalListDialog
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -129,6 +130,7 @@ fun MalSeriesScreen(malId: Int, onOpenSeries: (SeriesRef) -> Unit) {
                                     listOfNotNull(
                                         anime.scoredBy?.let { String.format(Locale.FRANCE, "%,d votes", it) },
                                         anime.type?.uppercase(),
+                                        airingLabel(anime.airing),
                                         anime.episodes?.let { "$it ép." },
                                         anime.startYear?.toString(),
                                     ).joinToString(" · "),

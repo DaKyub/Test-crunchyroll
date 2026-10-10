@@ -54,6 +54,7 @@ import com.dakyub.crunchymal.data.adn.AdnShow
 import com.dakyub.crunchymal.ui.components.CenteredMessage
 import com.dakyub.crunchymal.ui.components.GenresLine
 import com.dakyub.crunchymal.ui.components.MalBadge
+import com.dakyub.crunchymal.ui.components.airingLabel
 import com.dakyub.crunchymal.ui.components.seasonChipColors
 import com.dakyub.crunchymal.ui.theme.AdnBlue
 import com.dakyub.crunchymal.ui.components.MediaCard
@@ -233,6 +234,7 @@ fun AdnSeriesScreen(showId: String) {
                                     listOfNotNull(
                                         record?.scoredBy?.let { String.format(Locale.FRANCE, "%,d votes", it) },
                                         record?.title?.takeIf { it != show.title }?.let { "MAL : $it" },
+                                        airingLabel(record?.airing),
                                         "${state.episodes.size} épisodes".takeIf { state.episodes.isNotEmpty() },
                                         summary?.let { s ->
                                             when (s.status) {

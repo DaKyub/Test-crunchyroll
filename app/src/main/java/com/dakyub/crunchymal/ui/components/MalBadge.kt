@@ -54,3 +54,11 @@ fun MalBadge(key: String, titles: List<String>, modifier: Modifier = Modifier, l
         Text(formatScore(record, failing = error != null), style = style, color = Color.White, fontWeight = FontWeight.Bold)
     }
 }
+
+/** Statut de diffusion MAL en français (« En cours », « Terminé », « Pas encore sorti »). */
+fun airingLabel(status: String?): String? = when (status) {
+    "currently_airing" -> "En cours"
+    "finished_airing" -> "Terminé"
+    "not_yet_aired" -> "Pas encore sorti"
+    else -> null
+}

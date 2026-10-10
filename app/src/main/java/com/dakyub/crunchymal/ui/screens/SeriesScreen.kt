@@ -55,6 +55,7 @@ import com.dakyub.crunchymal.data.mal.MalAnime
 import com.dakyub.crunchymal.data.progress.SeriesTree
 import com.dakyub.crunchymal.ui.components.CenteredMessage
 import com.dakyub.crunchymal.ui.components.MalBadge
+import com.dakyub.crunchymal.ui.components.airingLabel
 import com.dakyub.crunchymal.ui.theme.CrunchyOrange
 import com.dakyub.crunchymal.ui.components.seasonChipColors
 import com.dakyub.crunchymal.ui.components.MediaCard
@@ -322,6 +323,8 @@ fun SeriesScreen(seriesId: String) {
                                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                             Text("S${s.seasonNumber} · $watched/${node.episodes.size}")
                                             MalBadge(key, titles)
+                                            // Diffusion de la saison d'après MAL (en cours, terminée, pas encore sortie).
+                                            airingLabel(malRecords[key]?.airing)?.let { Text(it, style = MaterialTheme.typography.labelSmall) }
                                         }
                                     }
                                 }

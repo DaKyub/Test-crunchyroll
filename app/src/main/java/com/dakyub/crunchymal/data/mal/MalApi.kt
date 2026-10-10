@@ -27,6 +27,8 @@ data class MalAnime(
     val genres: List<String> = emptyList(),
     val pictureUrl: String? = null,
     val synopsis: String? = null,
+    /** Diffusion d'après MAL : finished_airing, currently_airing ou not_yet_aired. */
+    val airing: String? = null,
 ) {
     val url: String get() = "https://myanimelist.net/anime/$malId"
 
@@ -61,6 +63,7 @@ private data class Node(
     val genres: List<Genre> = emptyList(),
     @SerialName("main_picture") val mainPicture: Picture? = null,
     val synopsis: String? = null,
+    val status: String? = null,
 ) {
     fun toAnime() = MalAnime(
         malId = id,
@@ -76,6 +79,7 @@ private data class Node(
         genres = genres.map { it.name }.filter { it.isNotBlank() },
         pictureUrl = mainPicture?.large ?: mainPicture?.medium,
         synopsis = synopsis?.takeIf { it.isNotBlank() },
+        airing = status?.takeIf { it.isNotBlank() },
     )
 }
 
@@ -233,7 +237,7 @@ class MalApi(private val clientId: () -> String) {
 
     private companion object {
         const val BASE = "https://api.myanimelist.net/v2"
-        const val FIELDS = "id,title,alternative_titles,mean,num_scoring_users,media_type,num_episodes,start_date,genres"
+        const val FIELDS = "id,title,alternative_titles,mean,num_scoring_users,media_type,num_episodes,start_date,genres,status"
         const val MIN_INTERVAL_MS = 400L
     }
 }
