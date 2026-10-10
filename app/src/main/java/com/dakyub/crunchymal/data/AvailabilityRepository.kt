@@ -33,6 +33,8 @@ data class Availability(
     val crunchyroll: FoundSeries? = null,
     val adn: FoundSeries? = null,
     val checkedAt: Long = 0,
+    /** Version de la recherche (2 : essaie aussi le titre sans numéro de saison). */
+    val version: Int = 0,
 ) {
     fun refFor(providers: Set<Provider>): SeriesRef? = when {
         Provider.CRUNCHYROLL in providers && crunchyroll != null ->
@@ -63,7 +65,9 @@ class AvailabilityRepository(context: Context, private val cr: CrApi, private va
 
     fun request(anime: MalAnime, crunchyrollEnabled: Boolean) {
         val existing = _found.value[anime.malId]
-        if (existing != null && System.currentTimeMillis() - existing.checkedAt < TTL) return
+        // Ancienne recherche incomplète : on la refait avec les titres de base (saisons 2, 3…).
+        val outdated = existing != null && existing.version < VERSION && (existing.crunchyroll == null || existing.adn == null)
+        if (existing != null && !outdated && System.currentTimeMillis() - existing.checkedAt < TTL) return
         if (!pending.add(anime.malId)) return
         scope.launch {
             try {
@@ -71,7 +75,7 @@ class AvailabilityRepository(context: Context, private val cr: CrApi, private va
                     val titles = anime.allTitles.filter { it.length >= 3 }.take(4)
                     val crFound = if (crunchyrollEnabled) runCatching { searchCrunchyroll(titles) }.getOrNull() else existing?.crunchyroll
                     val adnFound = runCatching { searchAdn(titles) }.getOrNull()
-                    val result = Availability(crFound, adnFound, System.currentTimeMillis())
+                    val result = Availability(crFound, adnFound, System.currentTimeMillis(), VERSION)
                     _found.update { it + (anime.malId to result) }
                     writeLock.withLock { runCatching { file.writeText(Http.json.encodeToString(_found.value)) } }
                 }
@@ -81,8 +85,18 @@ class AvailabilityRepository(context: Context, private val cr: CrApi, private va
         }
     }
 
-    private suspend fun searchCrunchyroll(titles: List<String>): FoundSeries? {
-        for (title in titles.take(2)) {
+    /**
+     * Requêtes : les deux premiers titres, puis leurs versions sans numéro de saison (les saisons
+     * suivantes sont en général dans la même fiche sur Crunchyroll / ADN).
+     */
+    private fun queries(titles: List<String>): List<String> =
+        (titles.take(2) + titles.take(2).map { TitleMatcher.withoutSeason(it) }).filter { it.length >= 3 }.distinct()
+
+    private fun withBases(titles: List<String>) = (titles + titles.map { TitleMatcher.withoutSeason(it) }).filter { it.length >= 3 }.distinct()
+
+    private suspend fun searchCrunchyroll(original: List<String>): FoundSeries? {
+        val titles = withBases(original)
+        for (title in queries(original)) {
             val best = cr.search(title, n = 10).maxByOrNull { panel ->
                 listOf(panel.title, panel.slugTitle.replace('-', ' ')).maxOf { t -> titles.maxOf { TitleMatcher.similarity(it, t) } }
             } ?: continue
@@ -92,8 +106,9 @@ class AvailabilityRepository(context: Context, private val cr: CrApi, private va
         return null
     }
 
-    private suspend fun searchAdn(titles: List<String>): FoundSeries? {
-        for (title in titles.take(2)) {
+    private suspend fun searchAdn(original: List<String>): FoundSeries? {
+        val titles = withBases(original)
+        for (title in queries(original)) {
             val best = adn.catalog(search = title, limit = 10).maxByOrNull { show ->
                 listOfNotNull(show.title, show.originalTitle, show.shortTitle).maxOf { t -> titles.maxOf { TitleMatcher.similarity(it, t) } }
             } ?: continue
@@ -106,5 +121,6 @@ class AvailabilityRepository(context: Context, private val cr: CrApi, private va
     private companion object {
         const val TTL = 7L * 24 * 3600 * 1000
         const val MATCH = 0.8
+        const val VERSION = 2
     }
 }

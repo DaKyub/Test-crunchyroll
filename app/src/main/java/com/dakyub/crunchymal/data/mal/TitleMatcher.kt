@@ -9,6 +9,28 @@ object TitleMatcher {
     private val nonAlnum = Regex("""[^\p{L}\p{N}]+""")
     private val diacritics = Regex("""\p{Mn}+""")
 
+    /**
+     * Titre sans sous-titre ni numéro de saison ("Bleach: Thousand-Year…" → "Bleach",
+     * "March Comes in Like a Lion 2nd Season" → "March Comes in Like a Lion").
+     */
+    fun baseTitle(title: String): String = title
+        .substringBefore(':')
+        .replace(Regex("""(?i)\s+(season|saison|part|cour)\s*\d+.*$"""), "")
+        .replace(Regex("""(?i)\s+\d+(st|nd|rd|th)\s+season.*$"""), "")
+        .replace(Regex("""\s+(\d+|II|III|IV|V)$"""), "")
+        .trim()
+
+    /**
+     * Titre sans numéro de saison seulement ("… 2nd Season", "… Season 2", "… II"). Contrairement à
+     * [baseTitle], le sous-titre et « Part N » sont gardés : « JoJo… Part 7: Steel Ball Run » n'est pas
+     * la même fiche Crunchyroll que JoJo.
+     */
+    fun withoutSeason(title: String): String = title
+        .replace(Regex("""(?i)\s+(season|saison|cour)\s*\d+$"""), "")
+        .replace(Regex("""(?i)\s+\d+(st|nd|rd|th)\s+season$"""), "")
+        .replace(Regex("""\s+([2-9]|II|III|IV|V)$"""), "")
+        .trim()
+
     fun normalize(s: String): String =
         Normalizer.normalize(s.lowercase(), Normalizer.Form.NFD)
             .replace(diacritics, "")

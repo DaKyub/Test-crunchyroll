@@ -125,7 +125,7 @@ class WatchPlatformsRepository(context: Context, private val settings: Settings)
     private suspend fun fromTmdb(anime: MalAnime): List<String>? {
         val kind = if (anime.type?.lowercase() == "movie") "movie" else "tv"
         val titles = listOfNotNull(anime.titleEnglish, anime.title).filter { it.isNotBlank() }
-        val queries = titles.flatMap { listOf(it, baseTitle(it)) }.filter { it.length >= 2 }.distinct().take(4)
+        val queries = titles.flatMap { listOf(it, TitleMatcher.baseTitle(it)) }.filter { it.length >= 2 }.distinct().take(4)
         for (query in queries) {
             val hits = Http.json.decodeFromString<TmdbHits>(tmdb("search/$kind") { addQueryParameter("query", query) }).results
             fun similarity(hit: TmdbHit) = hit.names.maxOfOrNull { n -> (titles + queries).maxOf { TitleMatcher.similarity(it, n) } } ?: 0.0
@@ -198,14 +198,6 @@ class WatchPlatformsRepository(context: Context, private val settings: Settings)
 
     private fun decode(text: String) = text
         .replace("&amp;", "&").replace("&#039;", "'").replace("&quot;", "\"").replace("&lt;", "<").replace("&gt;", ">")
-
-    /** Titre sans sous-titre ni numéro de saison, pour la recherche TMDB ("Bleach: Thousand-Year…" → "Bleach"). */
-    private fun baseTitle(title: String): String = title
-        .substringBefore(':')
-        .replace(Regex("""(?i)\s+(season|saison|part|cour)\s*\d+.*$"""), "")
-        .replace(Regex("""(?i)\s+\d+(st|nd|rd|th)\s+season.*$"""), "")
-        .replace(Regex("""\s+(\d+|II|III|IV|V)$"""), "")
-        .trim()
 
     /** Noms de plateformes harmonisés (TMDB et MAL n'écrivent pas tous pareil). */
     private fun normalize(name: String): String {
