@@ -1,21 +1,27 @@
 package com.dakyub.crunchymal.ui.screens
 
+import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -176,6 +182,7 @@ class CalendarViewModel(private val graph: Graph) : ViewModel() {
     }
 }
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun CalendarScreen(onOpenSeries: (SeriesRef) -> Unit) {
     val graph = LocalGraph.current
@@ -189,10 +196,27 @@ fun CalendarScreen(onOpenSeries: (SeriesRef) -> Unit) {
     val dayLabel = SimpleDateFormat("EEE d", Locale.FRANCE)
     val timeLabel = SimpleDateFormat("HH:mm", Locale.FRANCE)
 
-    Column(Modifier.fillMaxSize().padding(horizontal = 48.dp)) {
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 4.dp)) {
-            itemsIndexed((-7..7).toList()) { _, offset ->
-                FilterChip(selected = offset == ui.dayOffset, onClick = { vm.selectDay(offset) }) {
+    val dayRequester = remember { FocusRequester() }
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(horizontal = 48.dp)
+            // En descendant depuis les onglets, le focus arrive sur le jour affiché (et non sur
+            // « Ma watchlist uniquement » ou le sélecteur de services).
+            .focusProperties { enter = { dayRequester } }
+            .focusGroup()
+    ) {
+        // Row défilante (et non LazyRow) : toutes les puces existent, celle du jour affiché peut toujours recevoir le focus.
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.horizontalScroll(rememberScrollState()).padding(vertical = 4.dp),
+        ) {
+            (-7..7).forEach { offset ->
+                FilterChip(
+                    selected = offset == ui.dayOffset,
+                    onClick = { vm.selectDay(offset) },
+                    modifier = if (offset == ui.dayOffset) Modifier.focusRequester(dayRequester) else Modifier,
+                ) {
                     Text(
                         when (offset) {
                             0 -> "Aujourd'hui"
