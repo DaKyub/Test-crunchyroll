@@ -73,23 +73,14 @@ fun SettingsScreen() {
     var adnAnalysis by remember { mutableStateOf<List<String>?>(null) }
     var adnAnalyzing by remember { mutableStateOf(false) }
     var githubToken by remember { mutableStateOf(settings.githubToken) }
-    var diagStatus by remember { mutableStateOf<String?>(null) }
+    val diagStatus by graph.diagnostics.status.collectAsState()
+    val lastDiagnostic by graph.diagnostics.last.collectAsState()
 
     fun toast(msg: String) = Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
 
-    /** Envoie un diagnostic sur GitHub (issue) et affiche le résultat. */
-    fun sendDiagnostic(title: String, lines: List<String>) {
-        if (!graph.diagnostics.configured) {
-            diagStatus = "Ajoute d'abord un jeton GitHub (section Diagnostics) pour l'envoi automatique."
-            return
-        }
-        diagStatus = "Envoi de « $title » sur GitHub…"
-        scope.launch {
-            diagStatus = runCatching { graph.diagnostics.send(title, lines) }
-                .fold({ "« $title » envoyé sur GitHub : issue $it" }, { "Échec de l'envoi sur GitHub : ${it.message?.take(120)}" })
-            toast(diagStatus.orEmpty())
-        }
-    }
+    /** Envoie un diagnostic sur GitHub (issue) depuis une tâche de fond de l'app. */
+    fun sendDiagnostic(title: String, lines: suspend () -> List<String>) = graph.diagnostics.launch(title, lines)
+
     var ua by remember { mutableStateOf(settings.userAgentOverride) }
 
 
@@ -105,7 +96,7 @@ fun SettingsScreen() {
             item { Text(crash, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error) }
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    OutlinedButton(onClick = { sendDiagnostic("Plantage", crash.lines()) }) { Text("Envoyer sur GitHub") }
+                    OutlinedButton(onClick = { sendDiagnostic("Plantage") { crash.lines() } }) { Text("Envoyer sur GitHub") }
                     OutlinedButton(onClick = {
                         CrunchyMalApp.clearCrash(context)
                         lastCrash = null
@@ -185,22 +176,24 @@ fun SettingsScreen() {
         item {
             OutlinedButton(onClick = {
                 val pkg = AdnApp.packageName(context)
+                val appContext = context.applicationContext
                 if (pkg == null) {
                     adnAnalysis = listOf("Application ADN introuvable sur cet appareil.")
+                } else if (graph.diagnostics.configured) {
+                    // Analyse complète envoyée sur GitHub (tâche de fond) ; l'écran en affiche le début.
+                    adnAnalysis = null
+                    sendDiagnostic("Analyse de l'app ADN") { listOf("Paquet : $pkg") + AppAnalyzer.analyze(appContext, pkg, limit = 3000) }
                 } else {
                     adnAnalyzing = true
                     scope.launch {
-                        // Analyse complète envoyée sur GitHub ; seules les 150 premières lignes sont affichées.
-                        val full = withContext(Dispatchers.IO) {
+                        adnAnalysis = withContext(Dispatchers.IO) {
                             try {
-                                listOf("Paquet : $pkg") + AppAnalyzer.analyze(context, pkg, limit = 3000)
+                                listOf("Paquet : $pkg") + AppAnalyzer.analyze(appContext, pkg)
                             } catch (t: Throwable) {
                                 listOf("Analyse interrompue : ${t.javaClass.simpleName} ${t.message}")
                             }
                         }
-                        adnAnalysis = full.take(150)
                         adnAnalyzing = false
-                        if (graph.diagnostics.configured) sendDiagnostic("Analyse de l'app ADN", full)
                     }
                 }
             }) { Text(if (adnAnalyzing) "Analyse en cours…" else "Analyser l'app ADN (liens et liste)") }
@@ -208,17 +201,12 @@ fun SettingsScreen() {
         item {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedButton(onClick = {
-                    diagStatus = "Sondage de l'API ADN…"
-                    scope.launch {
-                        val lines = runCatching { graph.adn.probe() }
-                            .getOrElse { listOf("Sondage interrompu : ${it.javaClass.simpleName} ${it.message}") }
-                        sendDiagnostic("Sondage de l'API ADN", lines)
-                    }
+                    sendDiagnostic("Sondage de l'API ADN") { graph.adn.probe() }
                 }, enabled = adnLoggedIn) { Text("Sonder l'API ADN (liste, historique) → GitHub") }
                 diagStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
             }
         }
-        adnAnalysis?.let { lines ->
+        (adnAnalysis ?: lastDiagnostic?.takeIf { it.first == "Analyse de l'app ADN" }?.second?.take(150))?.let { lines ->
             items(lines.chunked(2)) { pair ->
                 Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
                     pair.forEach { line ->
@@ -344,7 +332,8 @@ fun SettingsScreen() {
                     settings.githubToken = githubToken
                     toast("Jeton GitHub enregistré")
                 }) { Text("Enregistrer le jeton") }
-                OutlinedButton(onClick = { sendDiagnostic("Diagnostic général", generalDiagnostic(graph, context)) }) {
+                OutlinedButton(onClick = { val appContext = context.applicationContext
+                    sendDiagnostic("Diagnostic général") { generalDiagnostic(graph, appContext) } }) {
                     Text("Envoyer un diagnostic général")
                 }
             }

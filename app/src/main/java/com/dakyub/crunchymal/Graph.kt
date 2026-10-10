@@ -31,7 +31,7 @@ class Graph(context: Context) {
     val adn = AdnApi(context)
     val ratings = RatingsRepository(settings)
     val availability = AvailabilityRepository(context, api, adn)
-    val diagnostics = DiagnosticsUploader(settings)
+    val diagnostics = DiagnosticsUploader(context, settings)
     val history = HistoryRepository(context, api)
 }
 
