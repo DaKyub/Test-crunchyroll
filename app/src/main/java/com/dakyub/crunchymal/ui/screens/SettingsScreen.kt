@@ -198,11 +198,11 @@ fun SettingsScreen() {
                 OutlinedButton(onClick = { AdnApp.start(context, intent) }, enabled = intent != null) {
                     Text("Essayer ${index + 1}")
                 }
-                FilterChip(selected = adnTemplate == template, onClick = {
+                FilterChip(selected = (adnTemplate ?: AdnApp.DEFAULT_TEMPLATE) == template, onClick = {
                     adnTemplate = template
                     settings.adnLinkTemplate = template
                     toast("Format ADN ${index + 1} choisi")
-                }) { Text(if (adnTemplate == template) "✓ Choisi" else "Choisir") }
+                }) { Text(if ((adnTemplate ?: AdnApp.DEFAULT_TEMPLATE) == template) "✓ Choisi" else "Choisir") }
                 Text(template, style = MaterialTheme.typography.labelMedium)
             }
         }

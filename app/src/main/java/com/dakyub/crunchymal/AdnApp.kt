@@ -15,16 +15,22 @@ import com.dakyub.crunchymal.data.adn.AdnVideo
 object AdnApp {
     private val KNOWN_PACKAGES = listOf("fr.anidn", "fr.anidn.tv", "com.adn.tv")
 
-    /** {show}/{video} = identifiants ADN ; {spath}/{vpath} = chemins web (/video/558-fruits-basket…). */
+    /**
+     * L'analyse de l'app ADN TV montre le schéma anidn:// avec seulement « home » et « show/ » :
+     * la fiche d'une série s'ouvre donc par défaut avec anidn://show/{show}.
+     */
+    const val DEFAULT_TEMPLATE = "anidn://show/{show}"
+
+    /** {show}/{video} = identifiants ADN ; {ref} = référence de la série ; {spath}/{vpath} = chemins web. */
     val CANDIDATES = listOf(
-        "https://animationdigitalnetwork.com{vpath}",
-        "https://animationdigitalnetwork.com{spath}",
-        "adn://video/{show}/{video}",
-        "adn://video/{video}",
-        "adn://show/{show}",
-        "anidn://video/{show}/{video}",
         "anidn://show/{show}",
-        "adn://player/{video}",
+        "anidn://show/{ref}",
+        "anidn://show/{show}/{video}",
+        "anidn://show/{show}?video={video}",
+        "anidn://show/{show}?videoId={video}",
+        "anidn://video/{video}",
+        "https://animationdigitalnetwork.com{vpath}",
+        "adn://video/{show}/{video}",
     )
 
     /** Paquet de l'app ADN installée (connu ou trouvé par son nom dans le lanceur), ou null. */
@@ -44,6 +50,7 @@ object AdnApp {
         val values = mapOf(
             "{show}" to (show?.id ?: video?.show?.id)?.toString(),
             "{video}" to video?.id?.toString(),
+            "{ref}" to (show?.reference ?: video?.show?.reference),
             "{spath}" to (show?.urlPath ?: video?.show?.urlPath),
             "{vpath}" to (show?.urlPath ?: video?.show?.urlPath)?.let { base -> video?.id?.let { "$base/$it" } },
         )
@@ -61,8 +68,8 @@ object AdnApp {
 
     /** Ouvre un épisode (ou la série) avec le format choisi, sinon lance simplement l'app ADN. */
     fun open(context: Context, show: AdnShow?, video: AdnVideo?) {
-        val template = (context.applicationContext as CrunchyMalApp).graph.settings.adnLinkTemplate
-        val intent = template?.let { buildIntent(context, it, show, video) }
+        val template = (context.applicationContext as CrunchyMalApp).graph.settings.adnLinkTemplate?.takeIf { it in CANDIDATES } ?: DEFAULT_TEMPLATE
+        val intent = buildIntent(context, template, show, video) ?: buildIntent(context, DEFAULT_TEMPLATE, show, video)
         start(context, intent)
     }
 
