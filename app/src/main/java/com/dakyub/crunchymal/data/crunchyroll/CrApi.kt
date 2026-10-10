@@ -53,10 +53,10 @@ class CrApi(private val auth: CrAuth, private val settings: Settings) {
             mapOf("order" to "desc", "n" to "500", "preferred_audio_language" to settings.preferredAudio),
         ).all
 
-    suspend fun watchHistory(pageSize: Int = 60): List<CrHistoryItem> =
+    suspend fun watchHistory(pageSize: Int = 60, page: Int = 1): List<CrHistoryItem> =
         get<CrListResponse<CrHistoryItem>>(
             "/content/v2/$account/watch-history",
-            mapOf("page_size" to pageSize.toString()),
+            mapOf("page_size" to pageSize.toString(), "page" to page.toString()),
         ).all
 
     /** Liste « Continuer à regarder » de l'app officielle : épisode en cours ou suivant de chaque série. */

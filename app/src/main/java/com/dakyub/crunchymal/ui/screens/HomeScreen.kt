@@ -111,7 +111,7 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
     private var progressJob: Job? = null
 
     /** Rangées après filtres (statut, note MAL) et tri ; les rangées vides disparaissent. */
-    val visible = combine(state, filters, graph.progress.summaries, graph.mal.records) { st, f, summaries, mal ->
+    val visible = combine(state, filters, graph.progress.summaries, graph.mal.records, graph.mal.myListSeenIds) { st, f, summaries, mal, malSeen ->
         fun statusOf(item: CardItem) =
             if (item.series.provider == Provider.CRUNCHYROLL) summaries[item.series.id]?.status else null
         val rows = st.rows.mapNotNull { row ->
@@ -119,6 +119,13 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
                 .filter { f.statuses.accepts(statusOf(it)) }
                 .filter { item -> f.minScore == null || (mal[item.series.malKey]?.score ?: -1.0) >= f.minScore }
                 .filter { item -> row.minMal == null || (mal[item.series.malKey]?.score ?: -1.0) >= row.minMal }
+                // Pépites : on retire aussi ce qui est déjà commencé (progression) ou vu d'après la liste MAL.
+                .filter { item ->
+                    row.minMal == null || (
+                        summaries[item.series.id]?.started != true &&
+                            mal[item.series.malKey]?.malId?.let { it in malSeen } != true
+                        )
+                }
                 .let { list ->
                     if (f.sort == HomeSort.MAL || row.minMal != null) list.sortedByDescending { mal[it.series.malKey]?.score ?: -1.0 }
                     else list
@@ -308,10 +315,11 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
     private fun gemsRow(): suspend () -> List<CardItem> = {
         coroutineScope {
             val popular = async { graph.api.browse("popularity", n = 100) }
-            val history = async { runCatching { graph.api.watchHistory(pageSize = 100) }.getOrDefault(emptyList()) }
+            // Historique complet (toutes les pages, en cache 12 h) + watchlist + liste MAL de l'utilisateur.
+            val history = async { runCatching { graph.history.watchedSeriesIds() }.getOrDefault(emptySet()) }
             val watchlist = async { runCatching { graph.watchlist.get() }.getOrDefault(emptyList()) }
-            val started = history.await().map { it.panel.episodeMetadata?.seriesId?.ifBlank { null } ?: it.parentId }.toSet() +
-                watchlist.await().filter { !it.neverWatched }.map { it.series.id }
+            launch { graph.mal.refreshMyListSeenIds() }
+            val started = history.await() + watchlist.await().filter { !it.neverWatched }.map { it.series.id }
             popular.await().filter { it.id !in started }.map { it.toSeriesCard() }
         }
     }

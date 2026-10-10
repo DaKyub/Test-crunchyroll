@@ -118,7 +118,22 @@ class MalRepository(context: Context, clientId: () -> String, val auth: MalAuth)
     suspend fun updateMyStatus(malId: Int, status: String, score: Int, episodesWatched: Int?) =
         api.updateStatus(malId, auth.accessToken(), status, score, episodesWatched)
 
-    suspend fun myList(): List<MalListEntry> = api.userList(auth.accessToken())
+    suspend fun myList(): List<MalListEntry> = api.userList(auth.accessToken()).also { list ->
+        _myListSeenIds.value = list.filter { it.status.status != null && it.status.status != "plan_to_watch" }
+            .map { it.anime.malId }.toSet()
+        myListFetchedAt = System.currentTimeMillis()
+    }
+
+    /** Fiches MAL déjà vues ou commencées par l'utilisateur (tout statut sauf « À voir »). */
+    private val _myListSeenIds = MutableStateFlow<Set<Int>>(emptySet())
+    val myListSeenIds: StateFlow<Set<Int>> = _myListSeenIds
+    private var myListFetchedAt = 0L
+
+    /** Rafraîchit [myListSeenIds] (au plus toutes les 30 min) si le compte MAL est connecté. */
+    suspend fun refreshMyListSeenIds() {
+        if (!auth.loggedIn.value || System.currentTimeMillis() - myListFetchedAt < 30 * 60 * 1000) return
+        runCatching { myList() }
+    }
 
     /** Enregistre une fiche déjà connue (ex. liste MAL) pour que les badges l'affichent sans recherche. */
     suspend fun seed(key: String, anime: MalAnime) {
