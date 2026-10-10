@@ -90,9 +90,10 @@ class WatchPlatformsRepository(context: Context, private val settings: Settings)
     private val _found = MutableStateFlow(load())
     val found: StateFlow<Map<Int, WatchPlatforms>> = _found
 
+    // Noms réharmonisés au chargement : le cache peut venir d'une version qui en reconnaissait moins.
     private fun load(): Map<Int, WatchPlatforms> = runCatching {
         if (file.exists()) Http.json.decodeFromString<Map<Int, WatchPlatforms>>(file.readText()) else emptyMap()
-    }.getOrElse { emptyMap() }
+    }.getOrElse { emptyMap() }.mapValues { (_, v) -> v.copy(names = v.names.map(::normalize).distinct()) }
 
     fun request(anime: MalAnime) {
         val existing = _found.value[anime.malId]
@@ -204,7 +205,8 @@ class WatchPlatformsRepository(context: Context, private val settings: Settings)
         val n = name.lowercase()
         return when {
             "crunchyroll" in n -> "Crunchyroll"
-            "animation digital network" in n || n == "adn" || n.startsWith("adn ") -> "ADN"
+            // TMDB : « Anime Digital Network » ; ailleurs « Animation Digital Network », « ADN Amazon Channel »…
+            "digital network" in n || n == "adn" || n.startsWith("adn ") -> "ADN"
             "netflix" in n -> "Netflix"
             "disney" in n -> "Disney+"
             "prime video" in n || n == "amazon video" || n == "amazon" -> "Prime Video"
