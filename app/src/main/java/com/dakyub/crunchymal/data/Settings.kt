@@ -38,6 +38,11 @@ class Settings(context: Context) {
         get() = prefs.getString("adn_link_template", null)
         set(value) = prefs.edit().putString("adn_link_template", value).apply()
 
+    /** Jeton GitHub (permission Issues sur le dépôt de l'app) pour l'envoi des diagnostics. */
+    var githubToken: String
+        get() = prefs.getString("github_token", "")!!
+        set(value) = prefs.edit().putString("github_token", value.trim()).apply()
+
     /** Clé OMDb (notes IMDb des épisodes), gratuite sur omdbapi.com. */
     var omdbKey: String
         get() = prefs.getString("omdb_key", "")!!

@@ -73,6 +73,24 @@ fun SettingsScreen() {
     var adnTemplate by remember { mutableStateOf(settings.adnLinkTemplate) }
     var adnAnalysis by remember { mutableStateOf<List<String>?>(null) }
     var adnAnalyzing by remember { mutableStateOf(false) }
+    var githubToken by remember { mutableStateOf(settings.githubToken) }
+    var diagStatus by remember { mutableStateOf<String?>(null) }
+
+    fun toast(msg: String) = Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+
+    /** Envoie un diagnostic sur GitHub (issue) et affiche le résultat. */
+    fun sendDiagnostic(title: String, lines: List<String>) {
+        if (!graph.diagnostics.configured) {
+            diagStatus = "Ajoute d'abord un jeton GitHub (section Diagnostics) pour l'envoi automatique."
+            return
+        }
+        diagStatus = "Envoi de « $title » sur GitHub…"
+        scope.launch {
+            diagStatus = runCatching { graph.diagnostics.send(title, lines) }
+                .fold({ "« $title » envoyé sur GitHub : issue $it" }, { "Échec de l'envoi sur GitHub : ${it.message?.take(120)}" })
+            toast(diagStatus.orEmpty())
+        }
+    }
     // Série / épisode ADN d'exemple pour le banc d'essai des liens.
     val adnSample by produceState<Pair<AdnShow, AdnVideo?>?>(null, adnLoggedIn) {
         value = runCatching {
@@ -82,7 +100,6 @@ fun SettingsScreen() {
     }
     var ua by remember { mutableStateOf(settings.userAgentOverride) }
 
-    fun toast(msg: String) = Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
 
     var lastCrash by remember { mutableStateOf(CrunchyMalApp.lastCrash(context)) }
 
@@ -95,11 +112,17 @@ fun SettingsScreen() {
             item { Section("Dernier plantage") }
             item { Text(crash, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error) }
             item {
-                OutlinedButton(onClick = {
-                    CrunchyMalApp.clearCrash(context)
-                    lastCrash = null
-                }) { Text("Effacer le rapport") }
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedButton(onClick = { sendDiagnostic("Plantage", crash.lines()) }) { Text("Envoyer sur GitHub") }
+                    OutlinedButton(onClick = {
+                        CrunchyMalApp.clearCrash(context)
+                        lastCrash = null
+                    }) { Text("Effacer le rapport") }
+                }
             }
+        }
+        diagStatus?.let { status ->
+            item { Text(status, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary) }
         }
         item { Section("Mises à jour") }
         item {
@@ -191,14 +214,17 @@ fun SettingsScreen() {
                 } else {
                     adnAnalyzing = true
                     scope.launch {
-                        adnAnalysis = withContext(Dispatchers.IO) {
+                        // Analyse complète envoyée sur GitHub ; seules les 150 premières lignes sont affichées.
+                        val full = withContext(Dispatchers.IO) {
                             try {
-                                listOf("Paquet : $pkg") + AppAnalyzer.analyze(context, pkg)
+                                listOf("Paquet : $pkg") + AppAnalyzer.analyze(context, pkg, limit = 3000)
                             } catch (t: Throwable) {
                                 listOf("Analyse interrompue : ${t.javaClass.simpleName} ${t.message}")
                             }
                         }
+                        adnAnalysis = full.take(150)
                         adnAnalyzing = false
+                        if (graph.diagnostics.configured) sendDiagnostic("Analyse de l'app ADN", full)
                     }
                 }
             }) { Text(if (adnAnalyzing) "Analyse en cours…" else "Analyser l'app ADN (liens et liste)") }
@@ -312,6 +338,29 @@ fun SettingsScreen() {
             malStatus?.let { item { Text(it, style = MaterialTheme.typography.bodySmall) } }
         }
 
+        item { Section("Diagnostics (envoi sur GitHub)") }
+        item {
+            Text(
+                "Avec un jeton GitHub, les analyses et rapports sont envoyés automatiquement sous forme d'issue dans le dépôt " +
+                    "(public) : aucune photo nécessaire. Jeton : github.com → Settings → Developer settings → Fine-grained tokens, " +
+                    "dépôt Test-crunchyroll uniquement, permission « Issues : Read and write ».",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        item { TvTextField(githubToken, { githubToken = it }, "Jeton GitHub (github_pat_…)", password = true) }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Button(onClick = {
+                    settings.githubToken = githubToken
+                    toast("Jeton GitHub enregistré")
+                }) { Text("Enregistrer le jeton") }
+                OutlinedButton(onClick = { sendDiagnostic("Diagnostic général", generalDiagnostic(graph, context)) }) {
+                    Text("Envoyer un diagnostic général")
+                }
+            }
+        }
+
         item { Section("Langues") }
         item {
             SettingRow("Titres") {
@@ -380,4 +429,23 @@ private fun SettingRow(label: String, content: @Composable () -> Unit) {
         Text(label, style = MaterialTheme.typography.titleSmall, modifier = Modifier.width(180.dp))
         content()
     }
+}
+
+/** Résumé de configuration (sans aucun secret) pour le diagnostic général. */
+private fun generalDiagnostic(graph: com.dakyub.crunchymal.Graph, context: android.content.Context): List<String> {
+    val s = graph.settings
+    fun yes(b: Boolean) = if (b) "oui" else "non"
+    return listOf(
+        "Build : ${com.dakyub.crunchymal.BuildConfig.VERSION_CODE}",
+        "Appareil : ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} · Android ${android.os.Build.VERSION.RELEASE}",
+        "Services affichés : ${graph.providers.selected.value.joinToString { it.label }}",
+        "Crunchyroll connecté : ${yes(graph.auth.loggedIn.value)} · langue ${s.locale} · audio ${s.preferredAudio}",
+        "ADN connecté : ${yes(graph.adn.loggedIn.value)} · app ADN : ${AdnApp.packageName(context) ?: "introuvable"} · format de lien : ${s.adnLinkTemplate ?: "aucun"}",
+        "MAL Client ID : ${yes(s.malClientId.isNotBlank())} · compte MAL connecté : ${yes(graph.malAuth.loggedIn.value)}",
+        "MAL dernière erreur : ${graph.mal.lastError.value ?: "aucune"} · notes en cache : ${graph.mal.records.value.size}",
+        "Clé OMDb : ${yes(s.omdbKey.isNotBlank())} · clé TMDB : ${yes(s.tmdbKey.isNotBlank())}",
+        "Progression en cache : ${graph.progress.summaries.value.size} séries",
+        "Mise à jour : ${graph.updates.state.value}",
+        "Dernier plantage :",
+    ) + (CrunchyMalApp.lastCrash(context)?.lines() ?: listOf("aucun"))
 }

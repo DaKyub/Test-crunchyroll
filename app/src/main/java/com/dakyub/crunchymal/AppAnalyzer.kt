@@ -23,7 +23,7 @@ object AppAnalyzer {
     }
     private val dexName by lazy { Regex("""classes\d*\.dex""") }
 
-    fun analyze(context: Context, packageName: String): List<String> {
+    fun analyze(context: Context, packageName: String, limit: Int = 150): List<String> {
         val out = mutableListOf<String>()
         val appInfo = try {
             context.packageManager.getApplicationInfo(packageName, 0)
@@ -62,7 +62,7 @@ object AppAnalyzer {
             .map { shorten(it) }
             .distinct()
             .sortedWith(compareBy({ priority(it) }, { it }))
-            .take(150)
+            .take(limit)
             .toList()
         return out
     }
