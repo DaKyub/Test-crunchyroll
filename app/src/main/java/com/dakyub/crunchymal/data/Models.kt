@@ -31,6 +31,13 @@ data class SeriesRef(
             Provider.ADN -> "adn:$id"
         }
 
+    /** Clé de progression / watchlist, unique tous services confondus. */
+    val progressKey: String
+        get() = when (provider) {
+            Provider.CRUNCHYROLL -> id
+            Provider.ADN -> "adn:$id"
+        }
+
     /** Route de navigation vers la fiche. */
     val route: String get() = "series/${provider.name}/$id"
 }

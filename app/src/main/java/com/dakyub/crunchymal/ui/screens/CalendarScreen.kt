@@ -27,7 +27,7 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.dakyub.crunchymal.Graph
 import com.dakyub.crunchymal.LocalGraph
-import com.dakyub.crunchymal.OfficialApp
+import com.dakyub.crunchymal.playEpisode
 import com.dakyub.crunchymal.data.CardItem
 import com.dakyub.crunchymal.data.DateUtils
 import com.dakyub.crunchymal.data.Provider
@@ -81,7 +81,7 @@ class CalendarViewModel(private val graph: Graph) : ViewModel() {
         val key = dayKey(dayFromToday(u.dayOffset))
         u.entries
             .filter { dayKey(it.time) == key }
-            .filter { !u.watchlistOnly || it.card.series.id in u.watchlistIds }
+            .filter { !u.watchlistOnly || it.card.series.progressKey in u.watchlistIds }
             .sortedBy { it.time }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -96,9 +96,11 @@ class CalendarViewModel(private val graph: Graph) : ViewModel() {
             ui.value = ui.value.copy(loading = true, error = null)
             val cr = async { if (Provider.CRUNCHYROLL in providers) runCatching { crunchyrollEntries() } else Result.success(emptyList<CalendarEntry>()) }
             val adn = async { if (Provider.ADN in providers) runCatching { adnEntries() } else Result.success(emptyList<CalendarEntry>()) }
+            // Clés des séries des watchlists Crunchyroll et ADN (voir SeriesRef.progressKey).
             val watchlist = async {
-                if (Provider.CRUNCHYROLL in providers) runCatching { graph.watchlist.get().map { it.series.id }.toSet() }.getOrDefault(emptySet())
-                else emptySet()
+                val cr = if (Provider.CRUNCHYROLL in providers) runCatching { graph.watchlist.get() }.getOrDefault(emptyList()) else emptyList()
+                val adn = if (Provider.ADN in providers) runCatching { graph.adnWatchlist.get() }.getOrDefault(emptyList()) else emptyList()
+                (cr + adn).map { it.series.progressKey }.toSet()
             }
             val results = listOf(cr.await(), adn.await())
             val entries = results.flatMap { it.getOrDefault(emptyList()) }
@@ -156,6 +158,7 @@ class CalendarViewModel(private val graph: Graph) : ViewModel() {
                 CardItem(
                     series = show.toRef().copy(wideUrl = video.image2x ?: video.image),
                     subtitle = video.label.ifBlank { null },
+                    episodeId = video.id.toString().takeIf { time.time <= System.currentTimeMillis() },
                     wide = true,
                 ),
                 time,
@@ -203,7 +206,7 @@ fun CalendarScreen(onOpenSeries: (SeriesRef) -> Unit) {
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (Provider.CRUNCHYROLL in providers) {
+            if (Provider.CRUNCHYROLL in providers || graph.adn.loggedIn.value) {
                 FilterChip(selected = ui.watchlistOnly, onClick = vm::toggleWatchlistOnly) {
                     Text(if (ui.watchlistOnly) "✓ Ma watchlist uniquement" else "Ma watchlist uniquement", style = MaterialTheme.typography.labelMedium)
                 }
@@ -235,7 +238,7 @@ fun CalendarScreen(onOpenSeries: (SeriesRef) -> Unit) {
                             ).joinToString(" · "),
                         ),
                         onClick = { onOpenSeries(card.series) },
-                        onLongClick = card.episodeId?.let { id -> { OfficialApp.openEpisode(context, id, card.series.id) } },
+                        onLongClick = card.episodeId?.let { id -> { playEpisode(context, card.series, id) } },
                     )
                 }
             }

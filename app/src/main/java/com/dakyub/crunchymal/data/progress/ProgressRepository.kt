@@ -73,6 +73,9 @@ class ProgressRepository(context: Context, private val api: CrApi) {
     private val semaphore = Semaphore(3)
     private val writeLock = Mutex()
 
+    /** Appelé par [clear] pour vider aussi les caches liés (progression ADN). */
+    var onClear: () -> Unit = {}
+
     private val _summaries = MutableStateFlow(load())
     val summaries: StateFlow<Map<String, ProgressSummary>> = _summaries
 
@@ -80,8 +83,14 @@ class ProgressRepository(context: Context, private val api: CrApi) {
         if (file.exists()) Http.json.decodeFromString<Map<String, ProgressSummary>>(file.readText()) else emptyMap()
     }.getOrElse { emptyMap() }
 
-    private fun isFresh(s: ProgressSummary) =
+    fun isFresh(s: ProgressSummary) =
         s.remainingAfterLast != null && System.currentTimeMillis() - s.computedAt < TTL
+
+    /** Enregistre un résumé calculé ailleurs (progression ADN, clé "adn:<id>"). */
+    suspend fun put(key: String, summary: ProgressSummary) {
+        _summaries.update { it + (key to summary) }
+        persist()
+    }
 
     /** S'assure qu'un résumé récent existe (utilisé par la watchlist pour les filtres). */
     suspend fun ensureSummary(seriesId: String, force: Boolean = false) {
@@ -165,12 +174,19 @@ class ProgressRepository(context: Context, private val api: CrApi) {
         runCatching { file.writeText(Http.json.encodeToString(_summaries.value)) }
     }
 
+    /** Retire les résumés dont la clé correspond (ex. ceux d'ADN à la déconnexion). */
+    suspend fun removeKeys(predicate: (String) -> Boolean) {
+        _summaries.update { map -> map.filterKeys { !predicate(it) } }
+        persist()
+    }
+
     fun invalidate(seriesId: String) {
         trees.remove(seriesId)
     }
 
     suspend fun clear() {
         trees.clear()
+        onClear()
         _summaries.value = emptyMap()
         writeLock.withLock { file.delete() }
     }

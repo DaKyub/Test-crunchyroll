@@ -20,7 +20,14 @@ import androidx.compose.runtime.setValue
 import androidx.tv.material3.OutlinedButton
 import com.dakyub.crunchymal.ui.components.MalEntryChoice
 import com.dakyub.crunchymal.ui.components.MalListDialog
+import android.widget.Toast
 import androidx.compose.ui.Alignment
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
+import com.dakyub.crunchymal.data.progress.AdnEpisodeNode
+import com.dakyub.crunchymal.data.progress.AdnSeriesTree
+import com.dakyub.crunchymal.data.progress.ProgressSummary
+import com.dakyub.crunchymal.data.progress.WatchStatus
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
@@ -43,7 +50,6 @@ import com.dakyub.crunchymal.data.CardItem
 import com.dakyub.crunchymal.data.Provider
 import com.dakyub.crunchymal.data.SeriesRef
 import com.dakyub.crunchymal.data.adn.AdnShow
-import com.dakyub.crunchymal.data.adn.AdnVideo
 import com.dakyub.crunchymal.ui.components.CenteredMessage
 import com.dakyub.crunchymal.ui.components.GenresLine
 import com.dakyub.crunchymal.ui.components.MalBadge
@@ -59,33 +65,91 @@ data class AdnSeriesUi(
     val loading: Boolean = true,
     val error: String? = null,
     val show: AdnShow? = null,
-    val episodes: List<AdnVideo> = emptyList(),
+    val episodes: List<AdnEpisodeNode> = emptyList(),
+    /** Progression (null si non connecté à ADN ou historique injoignable). */
+    val summary: ProgressSummary? = null,
     val selectedSeason: Int = 0,
+    val inWatchlist: Boolean? = null,
+    val watchlistBusy: Boolean = false,
 ) {
-    /** Épisodes groupés par saison, dans l'ordre. */
-    val seasons: List<Pair<Int, List<AdnVideo>>>
-        get() = episodes.groupBy { it.seasonNumber }.toSortedMap().map { (k, v) -> k to v }
+    /** Épisodes groupés par saison ("1", "Saga 1 : East Blue"…), dans l'ordre de la série. */
+    val seasons: List<Pair<String, List<AdnEpisodeNode>>>
+        get() = episodes.groupBy { it.video.seasonKey }.map { (k, v) -> k to v }
 }
 
 class AdnSeriesViewModel(private val graph: Graph, private val showId: String) : ViewModel() {
     val state = MutableStateFlow(AdnSeriesUi())
+    private var firstResume = true
 
     init {
         load()
     }
 
-    fun load() {
+    fun load(force: Boolean = false) {
         viewModelScope.launch {
             state.value = state.value.copy(loading = true, error = null)
             runCatching {
                 val show = async { graph.adn.show(showId) }
-                val episodes = async { runCatching { graph.adn.episodes(showId) }.getOrDefault(emptyList()) }
-                show.await() to episodes.await()
-            }.onSuccess { (show, episodes) ->
-                state.value = AdnSeriesUi(loading = false, show = show, episodes = episodes)
+                val tree = async { runCatching { graph.adnProgress.tree(showId, force) }.getOrNull() }
+                show.await() to tree.await()
+            }.onSuccess { (show, tree) ->
+                applyTree(tree, show)
             }.onFailure {
                 state.value = state.value.copy(loading = false, error = it.message ?: "Erreur")
             }
+            if (graph.adn.loggedIn.value) {
+                val inList = runCatching { graph.adn.inWatchlist(showId) }.getOrNull()
+                state.value = state.value.copy(inWatchlist = inList)
+            }
+        }
+    }
+
+    private fun applyTree(tree: AdnSeriesTree?, show: AdnShow? = state.value.show) {
+        val current = state.value
+        val episodes = tree?.episodes ?: current.episodes
+        val seasons = episodes.groupBy { it.video.seasonKey }.values.toList()
+        // Au premier chargement, on se place sur la saison de l'épisode suivant.
+        val selected = if (current.show == null) {
+            seasons.indexOfFirst { s -> s.any { it.video.id.toString() == tree?.summary?.nextEpisodeId } }.coerceAtLeast(0)
+        } else current.selectedSeason.coerceAtMost((seasons.size - 1).coerceAtLeast(0))
+        state.value = current.copy(
+            loading = false,
+            show = show,
+            episodes = episodes,
+            summary = tree?.summary ?: current.summary,
+            selectedSeason = selected,
+        )
+    }
+
+    fun refreshProgress() {
+        viewModelScope.launch {
+            runCatching { graph.adnProgress.tree(showId, force = true) }.onSuccess { applyTree(it) }
+        }
+    }
+
+    /** Au retour de l'app ADN, on recalcule la progression. */
+    fun onResume() {
+        if (firstResume) {
+            firstResume = false
+            return
+        }
+        if (graph.adn.loggedIn.value) refreshProgress()
+    }
+
+    fun toggleWatchlist(onResult: (String) -> Unit) {
+        val current = state.value.inWatchlist ?: return
+        viewModelScope.launch {
+            state.value = state.value.copy(watchlistBusy = true)
+            val error = runCatching { graph.adn.setInWatchlist(showId, add = !current) }.getOrElse { it.message ?: "erreur" }
+            val now = runCatching { graph.adn.inWatchlist(showId) }.getOrNull()
+            graph.adnWatchlist.invalidate()
+            state.value = state.value.copy(watchlistBusy = false, inWatchlist = now ?: current)
+            onResult(
+                when (now) {
+                    !current -> if (now == true) "Ajoutée à ta watchlist ADN" else "Retirée de ta watchlist ADN"
+                    else -> "ADN n'a pas pris en compte la modification (${error ?: "statut inchangé"})"
+                }
+            )
         }
     }
 
@@ -100,6 +164,8 @@ fun AdnSeriesScreen(showId: String) {
     val vm = viewModel(key = "adn-$showId") { AdnSeriesViewModel(graph, showId) }
     val state by vm.state.collectAsState()
     val context = LocalContext.current
+    val adnLoggedIn by graph.adn.loggedIn.collectAsState()
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.onResume() }
     val show = state.show
     var malListOpen by remember { mutableStateOf(false) }
     if (malListOpen && show != null) {
@@ -116,7 +182,9 @@ fun AdnSeriesScreen(showId: String) {
             val season = seasons.getOrNull(state.selectedSeason)
             val ratingTitles = listOfNotNull(record?.englishTitle, show.originalTitle, show.title)
                 .filter { it.isNotBlank() }.distinct()
-            val ratings = rememberSeasonRatings(ratingTitles, season?.first ?: 1)
+            val ratings = rememberSeasonRatings(ratingTitles, season?.second?.firstOrNull()?.video?.seasonNumber ?: 1)
+            val summary = state.summary
+            val next = summary?.nextEpisodeId?.let { id -> state.episodes.firstOrNull { it.video.id.toString() == id } }
 
             LazyColumn(
                 contentPadding = PaddingValues(horizontal = 48.dp, vertical = 32.dp),
@@ -143,6 +211,14 @@ fun AdnSeriesScreen(showId: String) {
                                         record?.scoredBy?.let { String.format(Locale.FRANCE, "%,d votes", it) },
                                         record?.title?.takeIf { it != show.title }?.let { "MAL : $it" },
                                         "${state.episodes.size} épisodes".takeIf { state.episodes.isNotEmpty() },
+                                        summary?.let { s ->
+                                            when (s.status) {
+                                                WatchStatus.NOT_STARTED -> "non commencée"
+                                                WatchStatus.COMPLETED -> "✓ tout vu"
+                                                WatchStatus.UP_TO_DATE -> "à jour (${s.watched}/${s.total})"
+                                                WatchStatus.IN_PROGRESS -> "${s.watched}/${s.total} vus"
+                                            }
+                                        },
                                         "ADN",
                                     ).joinToString(" · "),
                                     style = MaterialTheme.typography.bodyLarge,
@@ -154,10 +230,31 @@ fun AdnSeriesScreen(showId: String) {
                                 Text(it, style = MaterialTheme.typography.bodyMedium, maxLines = 4, overflow = TextOverflow.Ellipsis)
                             }
                             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                Button(onClick = { AdnApp.openShow(context, show) }) {
-                                    Text("▶ Ouvrir dans ADN")
+                                Button(onClick = { if (next != null) AdnApp.open(context, show, next.video) else AdnApp.openShow(context, show) }) {
+                                    val episode = next?.video?.let { v -> v.number?.takeIf { it.isNotBlank() } ?: v.label }
+                                    Text(
+                                        when {
+                                            next == null -> "▶ Ouvrir dans ADN"
+                                            summary?.started == true -> "▶ Reprendre ${episode.orEmpty()}"
+                                            else -> "▶ Regarder ${episode.orEmpty()}"
+                                        }
+                                    )
+                                }
+                                if (next != null) {
+                                    OutlinedButton(onClick = { AdnApp.openShow(context, show) }) { Text("Fiche ADN") }
+                                }
+                                state.inWatchlist?.let { inList ->
+                                    OutlinedButton(
+                                        onClick = {
+                                            vm.toggleWatchlist { message -> Toast.makeText(context, message, Toast.LENGTH_LONG).show() }
+                                        },
+                                        enabled = !state.watchlistBusy,
+                                    ) { Text(if (inList) "✓ Watchlist ADN" else "+ Watchlist ADN") }
                                 }
                                 OutlinedButton(onClick = { malListOpen = true }) { Text("Ma liste MAL") }
+                                if (adnLoggedIn) {
+                                    OutlinedButton(onClick = { vm.refreshProgress() }) { Text("↻") }
+                                }
                             }
                         }
                     }
@@ -165,18 +262,19 @@ fun AdnSeriesScreen(showId: String) {
                 if (seasons.size > 1) {
                     item {
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            itemsIndexed(seasons) { index, (number, videos) ->
+                            itemsIndexed(seasons) { index, (name, videos) ->
                                 FilterChip(selected = index == state.selectedSeason, onClick = { vm.selectSeason(index) }) {
-                                    Text("Saison $number · ${videos.size} ép.")
+                                    Text("${if (name.all { it.isDigit() }) "Saison $name" else name} · ${videos.size} ép.")
                                 }
                             }
                         }
                     }
                 }
-                season?.let { (_, videos) ->
+                season?.let { (_, nodes) ->
                     item {
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            itemsIndexed(videos, key = { _, v -> v.id }) { index, video ->
+                            itemsIndexed(nodes, key = { _, n -> n.video.id }) { index, node ->
+                                val video = node.video
                                 val rating = ratings.find(video.episodeNumber, index)
                                 MediaCard(
                                     item = CardItem(
@@ -187,10 +285,12 @@ fun AdnSeriesScreen(showId: String) {
                                             provider = Provider.ADN,
                                         ),
                                         subtitle = listOfNotNull(
+                                            "✓ vu".takeIf { node.watched },
                                             rating?.label,
                                             if (video.duration > 0) "${video.duration / 60} min" else null,
-                                            "à venir".takeIf { !video.available },
+                                            "à venir".takeIf { !node.available },
                                         ).joinToString(" · ").ifBlank { null },
+                                        progress = node.progress.takeIf { it > 0f },
                                         wide = true,
                                     ),
                                     onClick = { AdnApp.open(context, show, video) },

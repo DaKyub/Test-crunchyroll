@@ -152,7 +152,12 @@ fun SettingsScreen() {
         item {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (adnLoggedIn) {
-                    OutlinedButton(onClick = { graph.adn.logout() }) { Text("Se déconnecter d'ADN") }
+                    OutlinedButton(onClick = {
+                        graph.adn.logout()
+                        graph.adnWatchlist.invalidate()
+                        graph.adnProgress.clearCache()
+                        scope.launch { graph.progress.removeKeys { it.startsWith("adn:") } }
+                    }) { Text("Se déconnecter d'ADN") }
                 } else {
                     Button(onClick = {
                         adnStatus = "Connexion…"
@@ -425,7 +430,7 @@ private fun generalDiagnostic(graph: com.dakyub.crunchymal.Graph, context: andro
         "MAL Client ID : ${yes(s.malClientId.isNotBlank())} · compte MAL connecté : ${yes(graph.malAuth.loggedIn.value)}",
         "MAL dernière erreur : ${graph.mal.lastError.value ?: "aucune"} · notes en cache : ${graph.mal.records.value.size}",
         "Clé OMDb : ${yes(s.omdbKey.isNotBlank())} · clé TMDB : ${yes(s.tmdbKey.isNotBlank())}",
-        "Progression en cache : ${graph.progress.summaries.value.size} séries",
+        "Progression en cache : ${graph.progress.summaries.value.size} séries (dont ADN : ${graph.progress.summaries.value.keys.count { it.startsWith("adn:") }})",
         "Mise à jour : ${graph.updates.state.value}",
         "Dernier plantage :",
     ) + (CrunchyMalApp.lastCrash(context)?.lines() ?: listOf("aucun"))

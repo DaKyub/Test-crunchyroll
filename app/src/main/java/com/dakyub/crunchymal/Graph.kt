@@ -5,15 +5,19 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import com.dakyub.crunchymal.data.AvailabilityRepository
 import com.dakyub.crunchymal.data.DiagnosticsUploader
 import com.dakyub.crunchymal.data.HistoryRepository
+import com.dakyub.crunchymal.data.Provider
 import com.dakyub.crunchymal.data.ProviderSelection
+import com.dakyub.crunchymal.data.SeriesRef
 import com.dakyub.crunchymal.data.Settings
 import com.dakyub.crunchymal.data.adn.AdnApi
+import com.dakyub.crunchymal.data.adn.AdnWatchlistRepository
 import com.dakyub.crunchymal.data.ratings.RatingsRepository
 import com.dakyub.crunchymal.data.WatchlistRepository
 import com.dakyub.crunchymal.data.crunchyroll.CrApi
 import com.dakyub.crunchymal.data.crunchyroll.CrAuth
 import com.dakyub.crunchymal.data.mal.MalAuth
 import com.dakyub.crunchymal.data.mal.MalRepository
+import com.dakyub.crunchymal.data.progress.AdnProgressRepository
 import com.dakyub.crunchymal.data.progress.ProgressRepository
 import com.dakyub.crunchymal.update.UpdateManager
 
@@ -29,10 +33,22 @@ class Graph(context: Context) {
     val updates = UpdateManager(context)
     val providers = ProviderSelection(settings)
     val adn = AdnApi(context)
+    val adnProgress = AdnProgressRepository(adn, progress).also { repo -> progress.onClear = repo::clearCache }
+    val adnWatchlist = AdnWatchlistRepository(adn)
     val ratings = RatingsRepository(settings)
     val availability = AvailabilityRepository(context, api, adn)
     val diagnostics = DiagnosticsUploader(context, settings)
     val history = HistoryRepository(context, api)
+
+    /** Calcule (si besoin) la progression d'une série, quel que soit son service. */
+    suspend fun ensureProgress(ref: SeriesRef, force: Boolean = false) = when (ref.provider) {
+        Provider.CRUNCHYROLL -> progress.ensureSummary(ref.id, force)
+        Provider.ADN -> adnProgress.ensureSummary(ref.id, force)
+    }
+
+    /** Progression calculable pour cette série (ADN : il faut être connecté). */
+    fun progressAvailable(ref: SeriesRef): Boolean =
+        ref.id.isNotBlank() && (ref.provider == Provider.CRUNCHYROLL || adn.loggedIn.value)
 }
 
 val LocalGraph = staticCompositionLocalOf<Graph> { error("Graph non fourni") }

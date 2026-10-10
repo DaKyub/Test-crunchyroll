@@ -21,7 +21,9 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.dakyub.crunchymal.Graph
 import com.dakyub.crunchymal.LocalGraph
-import com.dakyub.crunchymal.OfficialApp
+import com.dakyub.crunchymal.playEpisode
+import com.dakyub.crunchymal.data.adn.AdnShow
+import com.dakyub.crunchymal.data.adn.AdnVideo
 import com.dakyub.crunchymal.data.CardItem
 import com.dakyub.crunchymal.data.Provider
 import com.dakyub.crunchymal.data.SeriesRef
@@ -112,8 +114,7 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
 
     /** Rangées après filtres (statut, note MAL) et tri ; les rangées vides disparaissent. */
     val visible = combine(state, filters, graph.progress.summaries, graph.mal.records, graph.mal.myListSeenIds) { st, f, summaries, mal, malSeen ->
-        fun statusOf(item: CardItem) =
-            if (item.series.provider == Provider.CRUNCHYROLL) summaries[item.series.id]?.status else null
+        fun statusOf(item: CardItem) = summaries[item.series.progressKey]?.status
         val rows = st.rows.mapNotNull { row ->
             val items = row.items
                 .filter { f.statuses.accepts(statusOf(it)) }
@@ -122,7 +123,7 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
                 // Pépites : on retire aussi ce qui est déjà commencé (progression) ou vu d'après la liste MAL.
                 .filter { item ->
                     row.minMal == null || (
-                        summaries[item.series.id]?.started != true &&
+                        summaries[item.series.progressKey]?.started != true &&
                             mal[item.series.malKey]?.malId?.let { it in malSeen } != true
                         )
                 }
@@ -132,17 +133,19 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
                 }
             items.takeIf { it.isNotEmpty() }?.let { row.copy(items = it) }
         }
-        val crIds = crSeriesIds(st)
+        val refs = trackableSeries(st)
         HomeVisible(
             rows = rows,
-            progressKnown = crIds.count { summaries.containsKey(it) },
-            progressNeeded = if (f.statuses.isEmpty()) 0 else crIds.size,
+            progressKnown = refs.count { summaries.containsKey(it.progressKey) },
+            progressNeeded = if (f.statuses.isEmpty()) 0 else refs.size,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeVisible())
 
-    private fun crSeriesIds(st: HomeState = state.value) = st.rows.flatMap { it.items }
-        .filter { it.series.provider == Provider.CRUNCHYROLL && it.series.id.isNotBlank() }
-        .map { it.series.id }.distinct()
+    /** Séries dont la progression peut être calculée (ADN : compte connecté). */
+    private fun trackableSeries(st: HomeState = state.value) = st.rows.flatMap { it.items }
+        .map { it.series }
+        .filter { graph.progressAvailable(it) }
+        .distinctBy { it.progressKey }
 
     fun nextSort() {
         filters.value = filters.value.copy(sort = HomeSort.entries[(filters.value.sort.ordinal + 1) % HomeSort.entries.size])
@@ -168,19 +171,19 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
         }
         progressJob?.cancel()
         if (f.statuses.isNotEmpty()) {
-            val ids = crSeriesIds()
+            val refs = trackableSeries()
             progressJob = viewModelScope.launch {
-                ids.forEach { id -> launch { runCatching { graph.progress.ensureSummary(id) } } }
+                refs.forEach { ref -> launch { runCatching { graph.ensureProgress(ref) } } }
             }
         }
     }
     private var job: Job? = null
 
-    private var loadedFor: Set<Provider>? = null
+    private var loadedFor: Pair<Set<Provider>, Boolean>? = null
 
-    /** Charge (ou recharge si les services affichés ont changé). */
-    fun ensure(providers: Set<Provider>) {
-        if (providers != loadedFor) load()
+    /** Charge (ou recharge si les services affichés ou la connexion ADN ont changé). */
+    fun ensure(providers: Set<Provider>, adnLoggedIn: Boolean) {
+        if (providers to adnLoggedIn != loadedFor) load()
     }
 
     // Rangées courantes : conservées pour pouvoir rafraîchir « Reprendre » seule au retour de Crunchyroll.
@@ -190,12 +193,14 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
     private var firstError: String? = null
     private var lastResumeRefresh = 0L
     private val continueLoader = continueWatching()
+    private val adnContinueLoader = adnContinueWatching()
     private val newEpisodesLoader = newEpisodesRow()
     private val gemsLoader = gemsRow()
 
     fun load() {
         val providers = graph.providers.selected.value
-        loadedFor = providers
+        val adnLoggedIn = graph.adn.loggedIn.value
+        loadedFor = providers to adnLoggedIn
         job?.cancel()
         job = viewModelScope.launch {
             state.value = HomeState(loading = true)
@@ -209,7 +214,15 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
                 list += "Pépites non vues (MAL 8+)" to gemsLoader
                 list += official.drop(2)
             }
-            if (Provider.ADN in providers) list += adnLoaders()
+            if (Provider.ADN in providers) {
+                if (adnLoggedIn) {
+                    // « ADN · Reprendre » juste après la rangée Crunchyroll équivalente (ou en tête).
+                    val crContinue = list.indexOfFirst { it.second === continueLoader }
+                    list.add(crContinue + 1, "ADN · Reprendre" to adnContinueLoader)
+                    if (Provider.CRUNCHYROLL !in providers) list.add(0, "Nouveaux épisodes pour toi" to newEpisodesLoader)
+                }
+                list += adnLoaders()
+            }
 
             // Les rangées s'affichent au fur et à mesure, dans l'ordre du fil officiel.
             loaders = list
@@ -249,16 +262,19 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
         )
     }
 
-    /** Au retour dans l'app (après un épisode), seule la rangée « Reprendre » est rechargée. */
+    /** Au retour dans l'app (après un épisode), seules les rangées « Reprendre » sont rechargées. */
     fun onResume() {
-        val index = loaders.indexOfFirst { it.second === continueLoader }
-        if (index < 0 || System.currentTimeMillis() - lastResumeRefresh < 20_000) return
+        if (System.currentTimeMillis() - lastResumeRefresh < 20_000) return
         lastResumeRefresh = System.currentTimeMillis()
-        viewModelScope.launch {
-            runCatching { continueLoader() }.onSuccess {
-                if (index < results.size && loaders.getOrNull(index)?.second === continueLoader) {
-                    results[index] = it
-                    publish()
+        for (loader in listOf(continueLoader, adnContinueLoader)) {
+            val index = loaders.indexOfFirst { it.second === loader }
+            if (index < 0) continue
+            viewModelScope.launch {
+                runCatching { loader() }.onSuccess {
+                    if (index < results.size && loaders.getOrNull(index)?.second === loader) {
+                        results[index] = it
+                        publish()
+                    }
                 }
             }
         }
@@ -285,19 +301,57 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
         }
     }
 
+    /** Reprise ADN : dernière vidéo de chaque série de l'historique, ou la suivante si elle a été finie. */
+    private fun adnContinueWatching(): suspend () -> List<CardItem> = {
+        val recent = graph.adn.viewingHistory()
+            .filter { it.show != null }
+            .sortedByDescending { it.user?.watchDate.orEmpty() }
+            .distinctBy { it.show!!.id }
+            .take(20)
+        coroutineScope {
+            recent.map { video ->
+                async {
+                    val show = video.show!!
+                    val user = video.user
+                    if (user != null && !user.isFullyWatched) {
+                        adnEpisodeCard(show, video, "Continuer", if (video.duration > 0) user.stoptime.toFloat() / video.duration else null)
+                    } else {
+                        val episodes = runCatching { graph.adnProgress.tree(show.id.toString()).episodes }.getOrDefault(emptyList())
+                        val index = episodes.indexOfFirst { it.video.id == video.id }
+                        val next = if (index >= 0) episodes.drop(index + 1).firstOrNull { it.available } else null
+                        next?.let { adnEpisodeCard(show, it.video, "Suite", null) }
+                    }
+                }
+            }.awaitAll().filterNotNull()
+        }
+    }
+
+    private fun adnEpisodeCard(show: AdnShow, video: AdnVideo, prefix: String, progress: Float?) = CardItem(
+        series = show.toRef().copy(wideUrl = video.image2x ?: video.image ?: show.imageHorizontal2x),
+        subtitle = "$prefix · ${video.label.ifBlank { show.title }}",
+        episodeId = video.id.toString(),
+        progress = progress?.coerceIn(0f, 1f)?.takeIf { it > 0f },
+        wide = true,
+    )
+
     /**
-     * Séries de la watchlist où l'utilisateur était à jour et qui ont reçu 1 à 3 épisodes
-     * sortis depuis moins de 3 semaines.
+     * Séries des watchlists (Crunchyroll et/ou ADN) où l'utilisateur était à jour et qui ont reçu
+     * 1 à 3 épisodes sortis depuis moins de 3 semaines.
      */
     private fun newEpisodesRow(): suspend () -> List<CardItem> = {
-        val entries = graph.watchlist.get()
+        val providers = graph.providers.selected.value
+        val entries = coroutineScope {
+            val cr = async { if (Provider.CRUNCHYROLL in providers) graph.watchlist.get() else emptyList() }
+            val adn = async { if (Provider.ADN in providers) runCatching { graph.adnWatchlist.get() }.getOrDefault(emptyList()) else emptyList() }
+            cr.await() + adn.await()
+        }
         coroutineScope {
-            entries.map { e -> async { runCatching { graph.progress.ensureSummary(e.series.id) } } }.awaitAll()
+            entries.map { e -> async { runCatching { graph.ensureProgress(e.series) } } }.awaitAll()
         }
         val summaries = graph.progress.summaries.value
         val cutoff = DateUtils.isoDaysAgo(21)
         entries.mapNotNull { e ->
-            val s = summaries[e.series.id] ?: return@mapNotNull null
+            val s = summaries[e.series.progressKey] ?: return@mapNotNull null
             val remaining = s.remainingAfterLast ?: return@mapNotNull null
             val released = s.nextReleased?.take(19) ?: return@mapNotNull null
             if (s.watched > 0 && remaining in 1..3 && released >= cutoff && s.nextEpisodeId != null) Triple(e, s, released) else null
@@ -395,7 +449,8 @@ fun HomeScreen(onOpenSeries: (SeriesRef) -> Unit) {
     val visible by vm.visible.collectAsState()
     val filters by vm.filters.collectAsState()
     val providers by graph.providers.selected.collectAsState()
-    LaunchedEffect(providers) { vm.ensure(providers) }
+    val adnLoggedIn by graph.adn.loggedIn.collectAsState()
+    LaunchedEffect(providers, adnLoggedIn) { vm.ensure(providers, adnLoggedIn) }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.onResume() }
     val context = LocalContext.current
 
@@ -451,10 +506,10 @@ fun HomeScreen(onOpenSeries: (SeriesRef) -> Unit) {
                                 onClick = {
                                     when {
                                         item.series.id.isNotBlank() -> onOpenSeries(item.series)
-                                        item.episodeId != null -> OfficialApp.openEpisode(context, item.episodeId, null)
+                                        item.episodeId != null -> playEpisode(context, item.series, item.episodeId)
                                     }
                                 },
-                                onLongClick = item.episodeId?.let { id -> { OfficialApp.openEpisode(context, id, item.series.id) } },
+                                onLongClick = item.episodeId?.let { id -> { playEpisode(context, item.series, id) } },
                             )
                         }
                     }

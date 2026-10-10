@@ -62,6 +62,10 @@ object AdnApp {
         start(context, intent)
     }
 
+    /** Même chose à partir des identifiants seuls (cartes des rangées / de la watchlist). */
+    fun open(context: Context, showId: String, videoId: String?) =
+        open(context, showId.toIntOrNull()?.let { AdnShow(id = it) }, videoId?.toIntOrNull()?.let { AdnVideo(id = it) })
+
     fun openShow(context: Context, show: AdnShow) = start(context, buildIntent(context, SHOW_TEMPLATE, show, null))
 
     fun start(context: Context, intent: Intent?): Boolean {

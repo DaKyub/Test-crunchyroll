@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -27,7 +28,7 @@ import androidx.tv.material3.OutlinedButton
 import androidx.tv.material3.Text
 import com.dakyub.crunchymal.Graph
 import com.dakyub.crunchymal.LocalGraph
-import com.dakyub.crunchymal.OfficialApp
+import com.dakyub.crunchymal.playEpisode
 import com.dakyub.crunchymal.data.CardItem
 import com.dakyub.crunchymal.data.Provider
 import com.dakyub.crunchymal.data.SeriesRef
@@ -36,6 +37,7 @@ import com.dakyub.crunchymal.data.progress.WatchStatus
 import com.dakyub.crunchymal.ui.components.CenteredMessage
 import com.dakyub.crunchymal.ui.components.MediaCard
 import com.dakyub.crunchymal.ui.components.GridPosterWidth
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
@@ -80,10 +82,11 @@ internal data class Loaded(val loading: Boolean = true, val error: String? = nul
 class WatchlistViewModel(private val graph: Graph) : ViewModel() {
     private val loaded = MutableStateFlow(Loaded())
     private val filters = MutableStateFlow(WatchlistFilters())
+    private var loadedFor: Pair<Set<Provider>, Boolean>? = null
 
     val ui = combine(loaded, filters, graph.progress.summaries, graph.mal.records) { l, f, summaries, mal ->
         val rows = l.entries.map { e ->
-            val summary = summaries[e.series.id]
+            val summary = summaries[e.series.progressKey]
             val status = summary?.status ?: if (e.neverWatched) WatchStatus.NOT_STARTED else null
             Triple(e, status, mal[e.series.malKey]?.score)
         }
@@ -91,7 +94,8 @@ class WatchlistViewModel(private val graph: Graph) : ViewModel() {
             .filter { (_, status, _) -> f.statuses.accepts(status) }
             .filter { (_, _, score) -> f.minScore == null || (score != null && score >= f.minScore) }
         val sorted = when (f.sort) {
-            SortMode.RECENT -> filtered.sortedBy { it.first.order }
+            // « Les deux » : les deux watchlists sont entrelacées, chacune dans son ordre.
+            SortMode.RECENT -> filtered.sortedWith(compareBy({ it.first.order }, { it.first.series.provider.ordinal }))
             SortMode.MAL -> filtered.sortedByDescending { it.third ?: -1.0 }
             SortMode.TITLE -> filtered.sortedBy { it.first.series.title.lowercase() }
         }
@@ -99,11 +103,11 @@ class WatchlistViewModel(private val graph: Graph) : ViewModel() {
             loading = l.loading,
             error = l.error,
             total = l.entries.size,
-            progressKnown = l.entries.count { summaries.containsKey(it.series.id) },
+            progressKnown = l.entries.count { summaries.containsKey(it.series.progressKey) },
             malKnown = l.entries.count { mal.containsKey(it.series.malKey) },
             filters = f,
             items = sorted.map { (e, status, _) ->
-                val summary = summaries[e.series.id]
+                val summary = summaries[e.series.progressKey]
                 CardItem(
                     series = e.series,
                     episodeId = summary?.nextEpisodeId ?: e.nextEpisodeId,
@@ -121,7 +125,6 @@ class WatchlistViewModel(private val graph: Graph) : ViewModel() {
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), WatchlistUi())
 
     init {
-        load(force = false)
         // Client ID MAL ajouté ou modifié : on redemande les notes.
         viewModelScope.launch {
             graph.mal.version.drop(1).collect {
@@ -130,19 +133,31 @@ class WatchlistViewModel(private val graph: Graph) : ViewModel() {
         }
     }
 
+    /** Charge (ou recharge si les services affichés ou la connexion ADN ont changé). */
+    fun ensure(providers: Set<Provider>, adnLoggedIn: Boolean) {
+        if (providers to adnLoggedIn != loadedFor) load(force = false)
+    }
+
     fun load(force: Boolean) {
+        val providers = graph.providers.selected.value
+        loadedFor = providers to graph.adn.loggedIn.value
         viewModelScope.launch {
             loaded.value = loaded.value.copy(loading = true, error = null)
-            val entries = try {
-                graph.watchlist.get(force)
-            } catch (e: Exception) {
-                loaded.value = Loaded(loading = false, error = e.message ?: "Erreur de chargement")
-                return@launch
+            val cr = async {
+                if (Provider.CRUNCHYROLL in providers) runCatching { graph.watchlist.get(force) } else Result.success(emptyList<WatchlistEntry>())
             }
-            loaded.value = Loaded(loading = false, entries = entries)
+            val adn = async {
+                if (Provider.ADN in providers) runCatching { graph.adnWatchlist.get(force) } else Result.success(emptyList<WatchlistEntry>())
+            }
+            val results = listOf(cr.await(), adn.await())
+            val entries = results.flatMap { it.getOrDefault(emptyList()) }
+            val errors = results.zip(listOf(Provider.CRUNCHYROLL, Provider.ADN)).mapNotNull { (result, provider) ->
+                result.exceptionOrNull()?.let { "${provider.label} : ${it.message ?: "erreur de chargement"}" }
+            }
+            loaded.value = Loaded(loading = false, entries = entries, error = errors.joinToString(" · ").ifBlank { null })
             entries.forEach { graph.mal.request(it.series.malKey, it.series.malTitles) }
             entries.forEach { e ->
-                launch { runCatching { graph.progress.ensureSummary(e.series.id, force) } }
+                launch { runCatching { graph.ensureProgress(e.series, force) } }
             }
         }
     }
@@ -156,11 +171,13 @@ class WatchlistViewModel(private val graph: Graph) : ViewModel() {
 fun WatchlistScreen(onOpenSeries: (SeriesRef) -> Unit) {
     val graph = LocalGraph.current
     val providers by graph.providers.selected.collectAsState()
-    if (Provider.CRUNCHYROLL !in providers) {
-        CenteredMessage("La watchlist ADN (avec progression) arrive dans la prochaine version.")
+    val adnLoggedIn by graph.adn.loggedIn.collectAsState()
+    if (providers == setOf(Provider.ADN) && !adnLoggedIn) {
+        CenteredMessage("Connecte ton compte ADN dans Réglages pour afficher ta watchlist ADN.")
         return
     }
     val vm = viewModel { WatchlistViewModel(graph) }
+    LaunchedEffect(providers, adnLoggedIn) { vm.ensure(providers, adnLoggedIn) }
     val ui by vm.ui.collectAsState()
     val malError by graph.mal.lastError.collectAsState()
     val context = LocalContext.current
@@ -193,10 +210,20 @@ fun WatchlistScreen(onOpenSeries: (SeriesRef) -> Unit) {
                 color = MaterialTheme.colorScheme.error,
             )
         }
+        if (Provider.ADN in providers && !adnLoggedIn) {
+            Text(
+                "Watchlist ADN : connecte ton compte ADN dans Réglages.",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (ui.error != null && ui.total > 0) {
+            Text(ui.error!!, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
+        }
 
         when {
             ui.loading && ui.total == 0 -> CenteredMessage("Chargement de la watchlist…")
-            ui.error != null -> CenteredMessage(ui.error!!, "Réessayer") { vm.load(force = true) }
+            ui.error != null && ui.total == 0 -> CenteredMessage(ui.error!!, "Réessayer") { vm.load(force = true) }
             ui.items.isEmpty() -> CenteredMessage("Aucune série ne correspond à ces filtres.")
             else -> LazyVerticalGrid(
                 columns = GridCells.Adaptive(GridPosterWidth + 12.dp),
@@ -205,12 +232,12 @@ fun WatchlistScreen(onOpenSeries: (SeriesRef) -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.fillMaxSize(),
             ) {
-                items(ui.items, key = { it.series.id }) { item ->
+                items(ui.items, key = { it.series.progressKey }) { item ->
                     MediaCard(
                         item = item,
                         width = GridPosterWidth,
                         onClick = { onOpenSeries(item.series) },
-                        onLongClick = item.episodeId?.let { id -> { OfficialApp.openEpisode(context, id, item.series.id) } },
+                        onLongClick = item.episodeId?.let { id -> { playEpisode(context, item.series, id) } },
                     )
                 }
             }

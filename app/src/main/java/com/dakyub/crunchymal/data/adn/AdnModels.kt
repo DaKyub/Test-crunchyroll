@@ -16,6 +16,8 @@ data class AdnShow(
     val summary: String? = null,
     val image: String? = null,
     val image2x: String? = null,
+    val imageHorizontal: String? = null,
+    val imageHorizontal2x: String? = null,
     val urlPath: String? = null,
     val episodeCount: Int = 0,
     val genres: List<String> = emptyList(),
@@ -28,6 +30,7 @@ data class AdnShow(
         id = id.toString(),
         title = title,
         posterUrl = image2x ?: image,
+        wideUrl = imageHorizontal2x ?: imageHorizontal,
         provider = Provider.ADN,
         altTitles = listOfNotNull(originalTitle, shortTitle),
     )
@@ -48,6 +51,8 @@ data class AdnVideo(
     val number: String? = null,
     val shortNumber: String? = null,
     val season: String? = null,
+    /** Position dans la série. */
+    val order: Int? = null,
     val image: String? = null,
     val image2x: String? = null,
     val summary: String? = null,
@@ -55,12 +60,23 @@ data class AdnVideo(
     val duration: Int = 0,
     val rating: Double? = null,
     val available: Boolean = true,
+    /** Progression de l'utilisateur (renvoyée par la liste et l'historique quand on est connecté). */
+    val user: AdnUserProgress? = null,
     val show: AdnShow? = null,
 ) {
-    val seasonNumber: Int get() = season?.toIntOrNull() ?: 1
+    /** Libellé de saison : "1", "Saga 1 : East Blue", "Arc 1 : Bullet"… */
+    val seasonKey: String get() = season?.takeIf { it.isNotBlank() } ?: "1"
+    val seasonNumber: Int get() = Regex("\\d+").find(seasonKey)?.value?.toIntOrNull() ?: 1
     val episodeNumber: Int? get() = shortNumber?.toIntOrNull()
     val label: String get() = listOfNotNull(number?.takeIf { it.isNotBlank() }, name?.takeIf { it.isNotBlank() }).joinToString(" · ")
 }
+
+@Serializable
+data class AdnUserProgress(
+    val stoptime: Int = 0,
+    val watchDate: String? = null,
+    val isFullyWatched: Boolean = false,
+)
 
 @Serializable
 internal data class AdnShowsResponse(val shows: List<AdnShow> = emptyList())
@@ -70,6 +86,12 @@ internal data class AdnShowResponse(val show: AdnShow = AdnShow())
 
 @Serializable
 internal data class AdnVideosResponse(val videos: List<AdnVideo> = emptyList())
+
+@Serializable
+internal data class AdnVideoResponse(val video: AdnVideo? = null)
+
+@Serializable
+internal data class AdnStatusResponse(val status: Boolean = false)
 
 @Serializable
 internal data class AdnLoginResponse(

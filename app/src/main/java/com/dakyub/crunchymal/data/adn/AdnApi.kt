@@ -113,6 +113,40 @@ class AdnApi(context: Context) {
         return Http.json.decodeFromString<AdnVideosResponse>(get(url)).videos
     }
 
+    /** Watchlist : une vidéo par série (celle où l'on en est), avec la série et la progression. */
+    suspend fun watchlist(): List<AdnVideo> =
+        Http.json.decodeFromString<AdnVideosResponse>(get("$BASE/watchlist")).videos
+
+    /** Historique de visionnage (vidéos les plus récentes d'abord), avec la progression. */
+    suspend fun viewingHistory(): List<AdnVideo> =
+        Http.json.decodeFromString<AdnVideosResponse>(get("$BASE/viewing/history")).videos
+
+    /** Dernière vidéo regardée d'une série, ou null si elle n'a jamais été commencée. */
+    suspend fun lastWatched(showId: String): AdnVideo? = try {
+        get("$BASE/viewing/history/show/$showId/last").takeIf { it.isNotBlank() }
+            ?.let { Http.json.decodeFromString<AdnVideoResponse>(it).video }
+    } catch (e: HttpException) {
+        if (e.code == 404 || e.code == 204) null else throw e
+    }
+
+    suspend fun inWatchlist(showId: String): Boolean =
+        Http.json.decodeFromString<AdnStatusResponse>(get("$BASE/watchlist/show/$showId/status")).status
+
+    /** Ajoute ou retire une série de la watchlist ; renvoie null si OK, sinon l'erreur. */
+    suspend fun setInWatchlist(showId: String, add: Boolean): String? = withContext(Dispatchers.IO) {
+        val url = "$BASE/watchlist/show/$showId"
+        fun send(): Int {
+            val builder = request(url)
+            val req = if (add) builder.post(FormBody.Builder().build()).build() else builder.delete().build()
+            return Http.client.newCall(req).execute().use { it.code }
+        }
+        var code = send()
+        val user = prefs.getString("username", null)
+        val pass = prefs.getString("password", null)
+        if (code == 401 && user != null && pass != null && login(user, pass) == null) code = send()
+        if (code in 200..299) null else "HTTP $code"
+    }
+
     /** GET brut (code HTTP + corps), avec ou sans en-tête de profil, pour le diagnostic. */
     private suspend fun rawGet(url: String, profileId: String?): Pair<Int, String> = withContext(Dispatchers.IO) {
         val request = request(url).apply { profileId?.let { header("X-Profile-ID", it) } }.build()
@@ -127,8 +161,16 @@ class AdnApi(context: Context) {
         val out = mutableListOf<String>()
         out += "== Réponse de connexion (masquée) =="
         out += prefs.getString("login_info", null) ?: "(non disponible : se reconnecter à ADN pour la capturer)"
-        val showId = runCatching { catalog(limit = 1).firstOrNull()?.id?.toString() }.getOrNull() ?: "1"
+        // Une série de la watchlist de préférence : elle a une progression à observer.
+        val showId = runCatching { watchlist().firstOrNull()?.show?.id?.toString() }.getOrNull()
+            ?: runCatching { catalog(limit = 1).firstOrNull()?.id?.toString() }.getOrNull() ?: "1"
         val videoId = runCatching { episodes(showId).firstOrNull()?.id?.toString() }.getOrNull() ?: "1"
+        out += "== Progression par épisode (série $showId) =="
+        out += runCatching {
+            val list = episodes(showId)
+            "${list.count { it.user != null }}/${list.size} épisodes avec progression · dernier vu : " +
+                (lastWatched(showId)?.let { "${it.id} ${it.number} vu=${it.user?.isFullyWatched}" } ?: "aucun")
+        }.getOrElse { "${it.javaClass.simpleName}: ${it.message}" }
         val paths = listOf(
             "/watchlist",
             "/watchlist?maxAgeCategory=18",

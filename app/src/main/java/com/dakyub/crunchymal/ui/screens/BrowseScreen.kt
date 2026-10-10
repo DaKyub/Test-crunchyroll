@@ -72,23 +72,22 @@ class BrowseViewModel(private val graph: Graph) : ViewModel() {
     private var job: Job? = null
     private var progressJob: Job? = null
 
-    val visible = combine(ui, graph.progress.summaries, graph.mal.records) { u, summaries, mal ->
+    val visible = combine(ui, graph.progress.summaries, graph.mal.records, graph.adn.loggedIn) { u, summaries, mal, _ ->
         val rows = u.results.map { item ->
-            val status = if (item.series.provider == Provider.CRUNCHYROLL) summaries[item.series.id]?.status else null
-            Triple(item, status, mal[item.series.malKey]?.score)
+            Triple(item, summaries[item.series.progressKey]?.status, mal[item.series.malKey]?.score)
         }
         val filtered = rows
             .filter { (_, status, _) -> u.statuses.accepts(status) }
             .filter { (_, _, score) -> u.minScore == null || (score != null && score >= u.minScore) }
         val sorted = if (u.sort == BrowseSort.MAL) filtered.sortedByDescending { it.third ?: -1.0 } else filtered
-        val crItems = u.results.filter { it.series.provider == Provider.CRUNCHYROLL }
+        val trackable = u.results.filter { graph.progressAvailable(it.series) }
         BrowseVisible(
             items = sorted.map { (item, _, _) ->
-                val summary = if (item.series.provider == Provider.CRUNCHYROLL) summaries[item.series.id] else null
+                val summary = summaries[item.series.progressKey]
                 if (summary != null && u.statuses.isNotEmpty()) item.copy(subtitle = "${summary.watched}/${summary.total} ép.") else item
             },
-            progressKnown = crItems.count { summaries.containsKey(it.series.id) },
-            progressNeeded = if (u.statuses.isEmpty()) 0 else crItems.size,
+            progressKnown = trackable.count { summaries.containsKey(it.series.progressKey) },
+            progressNeeded = if (u.statuses.isEmpty()) 0 else trackable.size,
             malKnown = u.results.count { mal.containsKey(it.series.malKey) },
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BrowseVisible())
@@ -135,9 +134,9 @@ class BrowseViewModel(private val graph: Graph) : ViewModel() {
     private fun computeProgressIfNeeded() {
         progressJob?.cancel()
         if (ui.value.statuses.isEmpty()) return
-        val ids = ui.value.results.filter { it.series.provider == Provider.CRUNCHYROLL }.map { it.series.id }
+        val refs = ui.value.results.map { it.series }.filter { graph.progressAvailable(it) }
         progressJob = viewModelScope.launch {
-            ids.forEach { id -> launch { runCatching { graph.progress.ensureSummary(id) } } }
+            refs.forEach { ref -> launch { runCatching { graph.ensureProgress(ref) } } }
         }
     }
 
@@ -173,6 +172,7 @@ fun BrowseScreen(onOpenSeries: (SeriesRef) -> Unit) {
     val ui by vm.ui.collectAsState()
     val visible by vm.visible.collectAsState()
     val providers by graph.providers.selected.collectAsState()
+    val adnLoggedIn by graph.adn.loggedIn.collectAsState()
     LaunchedEffect(providers) { vm.ensure(providers) }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 48.dp)) {
@@ -199,7 +199,7 @@ fun BrowseScreen(onOpenSeries: (SeriesRef) -> Unit) {
             buildString {
                 append("${visible.items.size}/${ui.results.size} séries · MAL ${visible.malKnown}/${ui.results.size}")
                 if (visible.progressNeeded > 0) append(" · progression ${visible.progressKnown}/${visible.progressNeeded}")
-                if (ui.statuses.isNotEmpty() && Provider.ADN in providers) append(" · statut ADN pas encore disponible")
+                if (ui.statuses.isNotEmpty() && Provider.ADN in providers && !adnLoggedIn) append(" · statut ADN : connecte ADN dans Réglages")
             },
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
