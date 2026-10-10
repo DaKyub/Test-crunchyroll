@@ -41,6 +41,7 @@ import com.dakyub.crunchymal.data.mal.MalAnime
 import com.dakyub.crunchymal.ui.components.CenteredMessage
 import com.dakyub.crunchymal.ui.components.GenresLine
 import com.dakyub.crunchymal.ui.components.MalBadge
+import com.dakyub.crunchymal.ui.components.MalRecommendationsRow
 import com.dakyub.crunchymal.ui.components.airingLabel
 import com.dakyub.crunchymal.ui.components.MalEntryChoice
 import com.dakyub.crunchymal.ui.components.MalListDialog
@@ -78,7 +79,7 @@ class MalSeriesViewModel(private val graph: Graph, private val malId: Int) : Vie
 
 /** Fiche d'une série de la liste MAL absente de Crunchyroll / ADN : infos MAL et plateformes où la regarder. */
 @Composable
-fun MalSeriesScreen(malId: Int, onOpenSeries: (SeriesRef) -> Unit) {
+fun MalSeriesScreen(malId: Int, onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (Int) -> Unit = {}) {
     val graph = LocalGraph.current
     val vm = viewModel(key = "mal-$malId") { MalSeriesViewModel(graph, malId) }
     val state by vm.state.collectAsState()
@@ -165,6 +166,8 @@ fun MalSeriesScreen(malId: Int, onOpenSeries: (SeriesRef) -> Unit) {
                         }
                     }
                 }
+                // Recommandations des membres MAL, avec où les regarder.
+                item { MalRecommendationsRow(malId, onOpenSeries, onOpenMal) }
             }
         }
     }

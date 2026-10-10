@@ -89,6 +89,12 @@ private data class Wrapper(val node: Node = Node())
 @Serializable
 private data class SearchResponse(val data: List<Wrapper> = emptyList())
 
+@Serializable
+private data class RecommendationItem(val node: Node = Node(), @SerialName("num_recommendations") val count: Int = 0)
+
+@Serializable
+private data class RecommendationsNode(val recommendations: List<RecommendationItem> = emptyList())
+
 /** Statut de l'anime dans la liste MAL de l'utilisateur. */
 @Serializable
 data class MalListStatus(
@@ -181,6 +187,26 @@ class MalApi(private val clientId: () -> String) {
             .addQueryParameter("fields", FIELDS)
             .build().toString()
         return Http.json.decodeFromString<Node>(get(url)).toAnime()
+    }
+
+    /** Animes de la saison ([season] : winter, spring, summer, fall), les mieux notés d'abord. */
+    suspend fun seasonal(year: Int, season: String, limit: Int = 100): List<MalAnime> {
+        val url = "$BASE/anime/season/$year/$season".toHttpUrl().newBuilder()
+            .addQueryParameter("sort", "anime_score")
+            .addQueryParameter("limit", limit.toString())
+            .addQueryParameter("fields", "$FIELDS,main_picture")
+            .build().toString()
+        return Http.json.decodeFromString<SearchResponse>(get(url)).data.map { it.node.toAnime() }
+    }
+
+    /** Animes recommandés par les membres MAL pour [malId], les plus recommandés d'abord. */
+    suspend fun recommendationIds(malId: Int): List<Int> {
+        val url = "$BASE/anime/$malId".toHttpUrl().newBuilder()
+            .addQueryParameter("fields", "recommendations")
+            .build().toString()
+        return Http.json.decodeFromString<RecommendationsNode>(get(url)).recommendations
+            .sortedByDescending { it.count }
+            .map { it.node.id }
     }
 
     /** Fiche complète (avec affiche et résumé) pour l'écran de détail. */

@@ -55,6 +55,7 @@ import com.dakyub.crunchymal.data.mal.MalAnime
 import com.dakyub.crunchymal.data.progress.SeriesTree
 import com.dakyub.crunchymal.ui.components.CenteredMessage
 import com.dakyub.crunchymal.ui.components.MalBadge
+import com.dakyub.crunchymal.ui.components.MalRecommendationsRow
 import com.dakyub.crunchymal.ui.components.airingLabel
 import com.dakyub.crunchymal.ui.theme.CrunchyOrange
 import com.dakyub.crunchymal.ui.components.seasonChipColors
@@ -70,6 +71,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import com.dakyub.crunchymal.data.mal.MalRecord
 import com.dakyub.crunchymal.data.mal.TitleMatcher
 import com.dakyub.crunchymal.data.crunchyroll.CrSeason
+import androidx.compose.runtime.produceState
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.lazy.rememberLazyListState
 import com.dakyub.crunchymal.ui.components.ExpandableSynopsis
@@ -193,7 +195,7 @@ private fun seasonMalKey(seriesKey: String, index: Int, season: CrSeason, record
 }
 
 @Composable
-fun SeriesScreen(seriesId: String) {
+fun SeriesScreen(seriesId: String, onOpenSeries: (SeriesRef) -> Unit = {}, onOpenMal: (Int) -> Unit = {}) {
     val graph = LocalGraph.current
     val vm = viewModel(key = seriesId) { SeriesViewModel(graph, seriesId) }
     val state by vm.state.collectAsState()
@@ -377,6 +379,9 @@ fun SeriesScreen(seriesId: String) {
                             }
                         }
                     }
+                    // Recommandations : membres MAL, puis séries similaires d'après Crunchyroll.
+                    item { MalRecommendationsRow(malRecords[ref.malKey]?.malId, onOpenSeries, onOpenMal) }
+                    item { CrSimilarRow(series.id, onOpenSeries) }
                 }
             }
         }
@@ -466,6 +471,22 @@ private fun MalCorrectionDialog(malKey: String, initialQuery: String, onDismiss:
                     }
                 }
             }
+        }
+    }
+}
+
+/** Séries que Crunchyroll juge similaires (« similar_to »). */
+@Composable
+private fun CrSimilarRow(seriesId: String, onOpenSeries: (SeriesRef) -> Unit) {
+    val graph = LocalGraph.current
+    val similar by produceState<List<CardItem>?>(null, seriesId) {
+        value = runCatching { graph.api.similarTo(seriesId).map { it.toSeriesCard() } }.getOrDefault(emptyList())
+    }
+    val list = similar?.takeIf { it.isNotEmpty() } ?: return
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Similaires sur Crunchyroll", style = MaterialTheme.typography.titleMedium)
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            items(list) { item -> MediaCard(item = item, onClick = { onOpenSeries(item.series) }) }
         }
     }
 }

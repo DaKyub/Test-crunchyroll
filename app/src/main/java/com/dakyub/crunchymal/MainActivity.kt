@@ -49,6 +49,7 @@ import com.dakyub.crunchymal.ui.screens.MalSeriesScreen
 import com.dakyub.crunchymal.ui.screens.HomeScreen
 import com.dakyub.crunchymal.ui.screens.LoginScreen
 import com.dakyub.crunchymal.ui.screens.SearchScreen
+import com.dakyub.crunchymal.ui.screens.SeasonScreen
 import com.dakyub.crunchymal.ui.screens.SeriesScreen
 import com.dakyub.crunchymal.ui.screens.SettingsScreen
 import com.dakyub.crunchymal.ui.screens.SeriesListSource
@@ -89,18 +90,14 @@ private fun AppRoot() {
         return
     }
     val nav = rememberNavController()
+    val openSeries: (SeriesRef) -> Unit = { ref -> if (ref.id.isNotBlank()) nav.navigate(ref.route) }
+    val openMal: (Int) -> Unit = { malId -> nav.navigate("mal/$malId") }
     NavHost(navController = nav, startDestination = "main") {
         composable("main") {
-            MainTabs(
-                onOpenSeries = { ref -> if (ref.id.isNotBlank()) nav.navigate(ref.route) },
-                onOpenMal = { malId -> nav.navigate("mal/$malId") },
-            )
+            MainTabs(onOpenSeries = openSeries, onOpenMal = openMal)
         }
         composable("mal/{id}", arguments = listOf(navArgument("id") { type = NavType.IntType })) { entry ->
-            MalSeriesScreen(
-                malId = entry.arguments?.getInt("id") ?: 0,
-                onOpenSeries = { ref -> if (ref.id.isNotBlank()) nav.navigate(ref.route) },
-            )
+            MalSeriesScreen(malId = entry.arguments?.getInt("id") ?: 0, onOpenSeries = openSeries, onOpenMal = openMal)
         }
         composable(
             "series/{provider}/{id}",
@@ -111,14 +108,14 @@ private fun AppRoot() {
         ) { entry ->
             val id = entry.arguments?.getString("id").orEmpty()
             when (entry.arguments?.getString("provider")) {
-                Provider.ADN.name -> AdnSeriesScreen(showId = id)
-                else -> SeriesScreen(seriesId = id)
+                Provider.ADN.name -> AdnSeriesScreen(showId = id, onOpenSeries = openSeries, onOpenMal = openMal)
+                else -> SeriesScreen(seriesId = id, onOpenSeries = openSeries, onOpenMal = openMal)
             }
         }
     }
 }
 
-private val Tabs = listOf("Accueil", "En cours", "Parcourir", "Calendrier", "Watchlist", "Liste MAL", "Recherche", "Réglages")
+private val Tabs = listOf("Accueil", "En cours", "Parcourir", "Calendrier", "Saison", "Watchlist", "Liste MAL", "Recherche", "Réglages")
 
 @Composable
 private fun MainTabs(onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (Int) -> Unit) {
@@ -170,9 +167,10 @@ private fun MainTabs(onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (Int) -> Unit
             1 -> WatchlistScreen(onOpenSeries, SeriesListSource.STARTED)
             2 -> BrowseScreen(onOpenSeries)
             3 -> CalendarScreen(onOpenSeries)
-            4 -> WatchlistScreen(onOpenSeries)
-            5 -> MalListScreen(onOpenSeries, onOpenMal)
-            6 -> SearchScreen(onOpenSeries)
+            4 -> SeasonScreen(onOpenSeries, onOpenMal)
+            5 -> WatchlistScreen(onOpenSeries)
+            6 -> MalListScreen(onOpenSeries, onOpenMal)
+            7 -> SearchScreen(onOpenSeries)
             else -> SettingsScreen()
         }
     }

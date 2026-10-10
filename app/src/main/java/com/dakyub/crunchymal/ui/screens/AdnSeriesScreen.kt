@@ -54,6 +54,7 @@ import com.dakyub.crunchymal.data.adn.AdnShow
 import com.dakyub.crunchymal.ui.components.CenteredMessage
 import com.dakyub.crunchymal.ui.components.GenresLine
 import com.dakyub.crunchymal.ui.components.MalBadge
+import com.dakyub.crunchymal.ui.components.MalRecommendationsRow
 import com.dakyub.crunchymal.ui.components.airingLabel
 import com.dakyub.crunchymal.ui.components.seasonChipColors
 import com.dakyub.crunchymal.ui.theme.AdnBlue
@@ -174,7 +175,7 @@ class AdnSeriesViewModel(private val graph: Graph, private val showId: String) :
 }
 
 @Composable
-fun AdnSeriesScreen(showId: String) {
+fun AdnSeriesScreen(showId: String, onOpenSeries: (SeriesRef) -> Unit = {}, onOpenMal: (Int) -> Unit = {}) {
     val graph = LocalGraph.current
     val vm = viewModel(key = "adn-$showId") { AdnSeriesViewModel(graph, showId) }
     val state by vm.state.collectAsState()
@@ -331,6 +332,8 @@ fun AdnSeriesScreen(showId: String) {
                         }
                     }
                 }
+                // Recommandations des membres MAL, avec où les regarder.
+                item { MalRecommendationsRow(record?.malId, onOpenSeries, onOpenMal) }
             }
         }
     }

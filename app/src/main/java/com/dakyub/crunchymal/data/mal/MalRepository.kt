@@ -148,6 +148,17 @@ class MalRepository(context: Context, clientId: () -> String, val auth: MalAuth)
 
     suspend fun details(malId: Int): MalAnime = api.details(malId)
 
+    suspend fun seasonal(year: Int, season: String): List<MalAnime> = api.seasonal(year, season)
+
+    private val recommendationCache = java.util.concurrent.ConcurrentHashMap<Int, List<MalAnime>>()
+
+    /** Recommandations MAL d'un anime (fiches complètes, 12 au plus), gardées le temps de la session. */
+    suspend fun recommendations(malId: Int): List<MalAnime> = recommendationCache[malId] ?: run {
+        api.recommendationIds(malId).take(12)
+            .mapNotNull { id -> runCatching { api.details(id) }.getOrNull() }
+            .also { recommendationCache[malId] = it }
+    }
+
     /** Correction manuelle ; [anime] null = "pas sur MAL". */
     suspend fun setManual(key: String, anime: MalAnime?) {
         val now = System.currentTimeMillis()
