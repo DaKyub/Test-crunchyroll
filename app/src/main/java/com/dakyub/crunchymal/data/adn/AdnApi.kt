@@ -98,6 +98,30 @@ class AdnApi(context: Context) {
         return Http.json.decodeFromString<AdnShowsResponse>(get(url)).shows
     }
 
+    private var genresCache: List<String>? = null
+
+    /**
+     * Genres acceptés par le catalogue. L'API ne les liste nulle part : on les lit dans son message
+     * d'erreur de validation (« Must be one of : action, adventure… »), ce qui suit ses changements.
+     */
+    suspend fun genres(): List<String> {
+        genresCache?.let { return it }
+        val parsed = try {
+            get("$BASE/show/catalog?genres=x&limit=1")
+            null
+        } catch (e: HttpException) {
+            Regex("""Must be one of\s*:\s*([^"\\]+)""").find(e.body)?.groupValues?.get(1)
+                ?.split(',')
+                ?.map { it.trim().trimEnd('.') }
+                ?.filter { it.matches(Regex("[a-z0-9-]+")) }
+                ?.takeIf { it.isNotEmpty() }
+        } catch (e: Exception) {
+            null
+        }
+        parsed?.let { genresCache = it }
+        return parsed ?: AdnGenreFallback
+    }
+
     suspend fun show(id: String): AdnShow =
         Http.json.decodeFromString<AdnShowResponse>(get("$BASE/show/$id")).show
 

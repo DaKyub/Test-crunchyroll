@@ -32,7 +32,8 @@ import com.dakyub.crunchymal.data.CardItem
 import com.dakyub.crunchymal.data.Provider
 import com.dakyub.crunchymal.data.SeriesRef
 import com.dakyub.crunchymal.data.progress.WatchStatus
-import com.dakyub.crunchymal.data.adn.AdnGenres
+import com.dakyub.crunchymal.data.adn.AdnGenreFallback
+import com.dakyub.crunchymal.data.adn.adnGenreLabel
 import com.dakyub.crunchymal.data.crunchyroll.CrCategory
 import com.dakyub.crunchymal.ui.components.CenteredMessage
 import com.dakyub.crunchymal.ui.components.GridPosterWidth
@@ -50,6 +51,8 @@ enum class BrowseSort(val label: String) { POPULAR("Popularité"), ALPHA("A → 
 
 data class BrowseUi(
     val crCategories: List<CrCategory> = emptyList(),
+    /** Genres du catalogue ADN (identifiants de l'API). */
+    val adnGenres: List<String> = emptyList(),
     val selection: BrowseSelection? = null,
     val sort: BrowseSort = BrowseSort.POPULAR,
     val statuses: Set<WatchStatus> = emptySet(),
@@ -100,11 +103,16 @@ class BrowseViewModel(private val graph: Graph) : ViewModel() {
             val categories = if (Provider.CRUNCHYROLL in providers) {
                 runCatching { graph.api.categories() }.getOrDefault(emptyList())
             } else emptyList()
+            val adnGenres = if (Provider.ADN in providers) {
+                runCatching { graph.adn.genres() }.getOrDefault(AdnGenreFallback)
+            } else emptyList()
+            // Une sélection ADN qui n'existe plus (genres renommés par ADN) est abandonnée.
             val current = ui.value.selection?.takeIf { it.provider in providers }
+                ?.takeIf { it.provider != Provider.ADN || it.id in adnGenres }
             val first = current
                 ?: categories.firstOrNull()?.let { BrowseSelection(Provider.CRUNCHYROLL, it.slug.ifBlank { it.id }, it.title) }
-                ?: AdnGenres.first().takeIf { Provider.ADN in providers }?.let { (id, title) -> BrowseSelection(Provider.ADN, id, title) }
-            ui.value = ui.value.copy(crCategories = categories)
+                ?: adnGenres.firstOrNull()?.let { BrowseSelection(Provider.ADN, it, adnGenreLabel(it)) }
+            ui.value = ui.value.copy(crCategories = categories, adnGenres = adnGenres)
             first?.let { select(it) }
         }
     }
@@ -179,8 +187,8 @@ fun BrowseScreen(onOpenSeries: (SeriesRef) -> Unit) {
         if (Provider.CRUNCHYROLL in providers && ui.crCategories.isNotEmpty()) {
             CategoryRow("Crunchyroll", ui.crCategories.map { BrowseSelection(Provider.CRUNCHYROLL, it.slug.ifBlank { it.id }, it.title) }, ui.selection, vm::select)
         }
-        if (Provider.ADN in providers) {
-            CategoryRow("ADN", AdnGenres.map { (id, title) -> BrowseSelection(Provider.ADN, id, title) }, ui.selection, vm::select)
+        if (Provider.ADN in providers && ui.adnGenres.isNotEmpty()) {
+            CategoryRow("ADN", ui.adnGenres.map { BrowseSelection(Provider.ADN, it, adnGenreLabel(it)) }, ui.selection, vm::select)
         }
         Row(
             verticalAlignment = Alignment.CenterVertically,

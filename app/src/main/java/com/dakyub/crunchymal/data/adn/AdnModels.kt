@@ -111,27 +111,37 @@ internal data class AdnLoginResponse(
     val code: String? = null,
 )
 
-/** Genres du catalogue ADN (identifiant API → libellé). */
-val AdnGenres = listOf(
-    "aventure--action" to "Action / Aventure",
-    "arts_martiaux" to "Arts martiaux",
-    "comedie" to "Comédie",
-    "drame" to "Drame",
-    "ecchi--fan_service" to "Ecchi",
-    "fantastique--science-fiction" to "Fantastique / SF",
-    "heroic_fantasy" to "Heroic fantasy",
-    "historique" to "Historique",
-    "jeunesse" to "Jeunesse",
-    "josei" to "Josei",
-    "mecha" to "Mecha",
-    "musical" to "Musical",
-    "nostalgie" to "Nostalgie",
-    "policier--thriller" to "Policier / Thriller",
-    "psychologie" to "Psychologique",
-    "romance" to "Romance",
-    "scolaire" to "Scolaire",
-    "seinen" to "Seinen",
-    "shojo" to "Shôjo",
-    "shonen" to "Shônen",
-    "sport" to "Sport",
-)
+/** Genres du catalogue ADN connus (secours si la liste ne peut pas être lue sur l'API). */
+val AdnGenreFallback = listOf("action", "adventure", "comedy", "drama", "ecchi", "fantasy", "isekai", "romance", "sci-fi", "seinen")
+
+/** Libellé français d'un genre du catalogue ADN (identifiant anglais de l'API). */
+fun adnGenreLabel(slug: String): String = when (slug) {
+    "action" -> "Action"
+    "adventure" -> "Aventure"
+    "comedy" -> "Comédie"
+    "drama" -> "Drame"
+    "ecchi" -> "Ecchi"
+    "fantasy" -> "Fantasy"
+    "isekai" -> "Isekai"
+    "romance" -> "Romance"
+    "sci-fi" -> "Science-fiction"
+    "seinen" -> "Seinen"
+    "josei" -> "Josei"
+    "shojo", "shoujo" -> "Shôjo"
+    "shonen", "shounen" -> "Shônen"
+    "slice-of-life" -> "Tranche de vie"
+    "sport", "sports" -> "Sport"
+    "horror" -> "Horreur"
+    "mystery" -> "Mystère"
+    "thriller" -> "Thriller"
+    "mecha" -> "Mecha"
+    "music" -> "Musique"
+    "psychological" -> "Psychologique"
+    "historical" -> "Historique"
+    "supernatural" -> "Surnaturel"
+    "martial-arts" -> "Arts martiaux"
+    "kids" -> "Jeunesse"
+    "school" -> "Scolaire"
+    "crime" -> "Policier"
+    else -> slug.replace('-', ' ').replaceFirstChar { it.uppercase() }
+}
