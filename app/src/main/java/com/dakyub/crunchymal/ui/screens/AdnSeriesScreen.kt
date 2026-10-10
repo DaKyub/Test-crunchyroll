@@ -154,7 +154,7 @@ fun AdnSeriesScreen(showId: String) {
                                 Text(it, style = MaterialTheme.typography.bodyMedium, maxLines = 4, overflow = TextOverflow.Ellipsis)
                             }
                             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                Button(onClick = { AdnApp.open(context, show, state.episodes.firstOrNull()) }) {
+                                Button(onClick = { AdnApp.openShow(context, show) }) {
                                     Text("▶ Ouvrir dans ADN")
                                 }
                                 OutlinedButton(onClick = { malListOpen = true }) { Text("Ma liste MAL") }

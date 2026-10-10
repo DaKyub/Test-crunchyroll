@@ -45,6 +45,7 @@ class AdnApi(context: Context) {
             val token = parsed?.accessToken
             if (response.isSuccessful && !token.isNullOrBlank()) {
                 prefs.edit()
+                    .putString("login_info", redact(body).take(3000))
                     .putString("token", token)
                     .putString("refresh_token", parsed?.refreshToken)
                     .putString("username", username.trim())
@@ -112,7 +113,55 @@ class AdnApi(context: Context) {
         return Http.json.decodeFromString<AdnVideosResponse>(get(url)).videos
     }
 
+    /** GET brut (code HTTP + corps), avec ou sans en-tête de profil, pour le diagnostic. */
+    private suspend fun rawGet(url: String, profileId: String?): Pair<Int, String> = withContext(Dispatchers.IO) {
+        val request = request(url).apply { profileId?.let { header("X-Profile-ID", it) } }.build()
+        Http.client.newCall(request).execute().use { it.code to (it.body?.string().orEmpty()) }
+    }
+
+    /**
+     * Sonde les adresses de l'API utilisées par l'app ADN TV (liste, historique, profil) et renvoie
+     * les réponses brutes (jetons, mots de passe et e-mails masqués) pour adapter le code à leur format.
+     */
+    suspend fun probe(): List<String> {
+        val out = mutableListOf<String>()
+        out += "== Réponse de connexion (masquée) =="
+        out += prefs.getString("login_info", null) ?: "(non disponible : se reconnecter à ADN pour la capturer)"
+        val showId = runCatching { catalog(limit = 1).firstOrNull()?.id?.toString() }.getOrNull() ?: "1"
+        val videoId = runCatching { episodes(showId).firstOrNull()?.id?.toString() }.getOrNull() ?: "1"
+        val paths = listOf(
+            "/watchlist",
+            "/watchlist?maxAgeCategory=18",
+            "/viewing/history",
+            "/viewing/history/show/$showId/last",
+            "/viewing/history/video/$videoId",
+            "/watchlist/show/$showId/status",
+            "/show/$showId/season",
+            "/profile",
+            "/profile/1",
+        )
+        for (base in listOf(BASE, BASE_COM)) {
+            for (path in paths) {
+                for (profile in listOf(null, "1")) {
+                    val label = "GET ${base.removePrefix("https://")}$path" + (profile?.let { " [X-Profile-ID: $it]" } ?: "")
+                    val (code, body) = runCatching { rawGet(base + path, profile) }.getOrElse { 0 to "${it.javaClass.simpleName}: ${it.message}" }
+                    out += "== $label → HTTP $code =="
+                    out += redact(body).take(2500).ifBlank { "(vide)" }
+                    // Inutile de doubler l'appel avec en-tête de profil si le premier a échoué pour une autre raison.
+                    if (code == 404) break
+                }
+            }
+        }
+        return out
+    }
+
+    private fun redact(json: String): String = json.replace(
+        Regex(""""([A-Za-z_]*(?:[Tt]oken|password|Password|email|Email|mail)[A-Za-z_]*)"\s*:\s*"[^"]*""""),
+        "\"$1\":\"***\"",
+    )
+
     companion object {
+        const val BASE_COM = "https://gw.api.animationdigitalnetwork.com"
         const val BASE = "https://gw.api.animationdigitalnetwork.fr"
     }
 }

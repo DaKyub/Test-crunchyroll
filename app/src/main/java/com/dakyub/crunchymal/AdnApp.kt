@@ -16,22 +16,11 @@ object AdnApp {
     private val KNOWN_PACKAGES = listOf("fr.anidn", "fr.anidn.tv", "com.adn.tv")
 
     /**
-     * L'analyse de l'app ADN TV montre le schéma anidn:// avec seulement « home » et « show/ » :
-     * la fiche d'une série s'ouvre donc par défaut avec anidn://show/{show}.
+     * Liens profonds de l'app ADN TV (validés sur Shield) : anidn://video/<id> lance l'épisode,
+     * anidn://show/<id> ouvre la fiche de la série.
      */
-    const val DEFAULT_TEMPLATE = "anidn://show/{show}"
-
-    /** {show}/{video} = identifiants ADN ; {ref} = référence de la série ; {spath}/{vpath} = chemins web. */
-    val CANDIDATES = listOf(
-        "anidn://show/{show}",
-        "anidn://show/{ref}",
-        "anidn://show/{show}/{video}",
-        "anidn://show/{show}?video={video}",
-        "anidn://show/{show}?videoId={video}",
-        "anidn://video/{video}",
-        "https://animationdigitalnetwork.com{vpath}",
-        "adn://video/{show}/{video}",
-    )
+    private const val EPISODE_TEMPLATE = "anidn://video/{video}"
+    private const val SHOW_TEMPLATE = "anidn://show/{show}"
 
     /** Paquet de l'app ADN installée (connu ou trouvé par son nom dans le lanceur), ou null. */
     fun packageName(context: Context): String? {
@@ -66,12 +55,14 @@ object AdnApp {
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
     }
 
-    /** Ouvre un épisode (ou la série) avec le format choisi, sinon lance simplement l'app ADN. */
+    /** Ouvre l'épisode s'il est fourni (lecture directe), sinon la fiche de la série. */
     fun open(context: Context, show: AdnShow?, video: AdnVideo?) {
-        val template = (context.applicationContext as CrunchyMalApp).graph.settings.adnLinkTemplate?.takeIf { it in CANDIDATES } ?: DEFAULT_TEMPLATE
-        val intent = buildIntent(context, template, show, video) ?: buildIntent(context, DEFAULT_TEMPLATE, show, video)
+        val intent = video?.let { buildIntent(context, EPISODE_TEMPLATE, show, it) }
+            ?: buildIntent(context, SHOW_TEMPLATE, show, video)
         start(context, intent)
     }
+
+    fun openShow(context: Context, show: AdnShow) = start(context, buildIntent(context, SHOW_TEMPLATE, show, null))
 
     fun start(context: Context, intent: Intent?): Boolean {
         if (intent != null) {

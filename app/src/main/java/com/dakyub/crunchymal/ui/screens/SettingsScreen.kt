@@ -70,7 +70,6 @@ fun SettingsScreen() {
     var adnStatus by remember { mutableStateOf<String?>(null) }
     val adnLoggedIn by graph.adn.loggedIn.collectAsState()
     val providers by graph.providers.selected.collectAsState()
-    var adnTemplate by remember { mutableStateOf(settings.adnLinkTemplate) }
     var adnAnalysis by remember { mutableStateOf<List<String>?>(null) }
     var adnAnalyzing by remember { mutableStateOf(false) }
     var githubToken by remember { mutableStateOf(settings.githubToken) }
@@ -90,13 +89,6 @@ fun SettingsScreen() {
                 .fold({ "« $title » envoyé sur GitHub : issue $it" }, { "Échec de l'envoi sur GitHub : ${it.message?.take(120)}" })
             toast(diagStatus.orEmpty())
         }
-    }
-    // Série / épisode ADN d'exemple pour le banc d'essai des liens.
-    val adnSample by produceState<Pair<AdnShow, AdnVideo?>?>(null, adnLoggedIn) {
-        value = runCatching {
-            val show = graph.adn.catalog(order = "popular", limit = 1).first()
-            show to graph.adn.episodes(show.id.toString()).firstOrNull()
-        }.getOrNull()
     }
     var ua by remember { mutableStateOf(settings.userAgentOverride) }
 
@@ -185,26 +177,10 @@ fun SettingsScreen() {
         }
         item {
             Text(
-                "Lecture dans l'app ADN : « Essayer » ouvre « ${adnSample?.first?.title ?: "…"} » avec ce format. " +
-                    "Quand un format ouvre la bonne série ou l'épisode, appuie sur « Choisir ».",
+                "Lecture dans l'app ADN : les épisodes se lancent directement (anidn://video/…), « Ouvrir dans ADN » ouvre la fiche.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-        }
-        itemsIndexed(AdnApp.CANDIDATES) { index, template ->
-            val sample = adnSample
-            val intent = sample?.let { AdnApp.buildIntent(context, template, it.first, it.second) }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedButton(onClick = { AdnApp.start(context, intent) }, enabled = intent != null) {
-                    Text("Essayer ${index + 1}")
-                }
-                FilterChip(selected = (adnTemplate ?: AdnApp.DEFAULT_TEMPLATE) == template, onClick = {
-                    adnTemplate = template
-                    settings.adnLinkTemplate = template
-                    toast("Format ADN ${index + 1} choisi")
-                }) { Text(if ((adnTemplate ?: AdnApp.DEFAULT_TEMPLATE) == template) "✓ Choisi" else "Choisir") }
-                Text(template, style = MaterialTheme.typography.labelMedium)
-            }
         }
         item {
             OutlinedButton(onClick = {
@@ -228,6 +204,19 @@ fun SettingsScreen() {
                     }
                 }
             }) { Text(if (adnAnalyzing) "Analyse en cours…" else "Analyser l'app ADN (liens et liste)") }
+        }
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedButton(onClick = {
+                    diagStatus = "Sondage de l'API ADN…"
+                    scope.launch {
+                        val lines = runCatching { graph.adn.probe() }
+                            .getOrElse { listOf("Sondage interrompu : ${it.javaClass.simpleName} ${it.message}") }
+                        sendDiagnostic("Sondage de l'API ADN", lines)
+                    }
+                }, enabled = adnLoggedIn) { Text("Sonder l'API ADN (liste, historique) → GitHub") }
+                diagStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
+            }
         }
         adnAnalysis?.let { lines ->
             items(lines.chunked(2)) { pair ->
@@ -360,6 +349,9 @@ fun SettingsScreen() {
                 }
             }
         }
+        diagStatus?.let { status ->
+            item { Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
+        }
 
         item { Section("Langues") }
         item {
@@ -440,7 +432,7 @@ private fun generalDiagnostic(graph: com.dakyub.crunchymal.Graph, context: andro
         "Appareil : ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} · Android ${android.os.Build.VERSION.RELEASE}",
         "Services affichés : ${graph.providers.selected.value.joinToString { it.label }}",
         "Crunchyroll connecté : ${yes(graph.auth.loggedIn.value)} · langue ${s.locale} · audio ${s.preferredAudio}",
-        "ADN connecté : ${yes(graph.adn.loggedIn.value)} · app ADN : ${AdnApp.packageName(context) ?: "introuvable"} · format de lien : ${s.adnLinkTemplate ?: "aucun"}",
+        "ADN connecté : ${yes(graph.adn.loggedIn.value)} · app ADN : ${AdnApp.packageName(context) ?: "introuvable"}",
         "MAL Client ID : ${yes(s.malClientId.isNotBlank())} · compte MAL connecté : ${yes(graph.malAuth.loggedIn.value)}",
         "MAL dernière erreur : ${graph.mal.lastError.value ?: "aucune"} · notes en cache : ${graph.mal.records.value.size}",
         "Clé OMDb : ${yes(s.omdbKey.isNotBlank())} · clé TMDB : ${yes(s.tmdbKey.isNotBlank())}",
