@@ -28,6 +28,7 @@ import androidx.tv.material3.OutlinedButton
 import androidx.tv.material3.Text
 import com.dakyub.crunchymal.CrunchyMalApp
 import com.dakyub.crunchymal.AdnApp
+import com.dakyub.crunchymal.ManifestReader
 import com.dakyub.crunchymal.AppAnalyzer
 import com.dakyub.crunchymal.data.Provider
 import com.dakyub.crunchymal.data.adn.AdnShow
@@ -238,7 +239,7 @@ fun SettingsScreen() {
                         }
                     }
                     var playerStatus by remember { mutableStateOf<String?>(null) }
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
                         OutlinedButton(onClick = {
                             playerStatus = "Recherche de l'app Plex…"
                             scope.launch {
@@ -250,6 +251,24 @@ fun SettingsScreen() {
                         OutlinedButton(onClick = { sendDiagnostic("Diagnostic Plex") { graph.plex.diagnostic(context) } }) {
                             Text("Envoyer un diagnostic Plex")
                         }
+                        OutlinedButton(onClick = {
+                            val appContext = context.applicationContext
+                            sendDiagnostic("Analyse de l'app Plex") {
+                                // Liens déclarés par l'app Plex, puis chaînes de son code évoquant des liens vers un contenu.
+                                val pkg = PlexApp.PACKAGE
+                                listOf("Paquet : $pkg", "", "Liens acceptés (intent-filter) :") +
+                                    ManifestReader.intentFilters(appContext, pkg) +
+                                    listOf("", "Chaînes du code :") +
+                                    AppAnalyzer.analyze(
+                                        appContext, pkg, limit = 1500,
+                                        extra = Regex("(?i)plex://|metadataKey|ratingKey|preplay|deep.?link|watch\\.plex\\.tv|app\\.plex\\.tv"),
+                                        keep = { s ->
+                                            !(s.startsWith("L") && s.endsWith(";")) ||
+                                                Regex("(?i)deep.?link|uri|route|intent").containsMatchIn(s)
+                                        },
+                                    )
+                            }
+                        }) { Text("Analyser l'app Plex") }
                     }
                     playerStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                     Text(

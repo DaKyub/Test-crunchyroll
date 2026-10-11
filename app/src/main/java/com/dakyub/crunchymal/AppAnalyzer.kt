@@ -23,7 +23,17 @@ object AppAnalyzer {
     }
     private val dexName by lazy { Regex("""classes\d*\.dex""") }
 
-    fun analyze(context: Context, packageName: String, limit: Int = 150): List<String> {
+    /**
+     * [extra] : autres chaînes à retenir (en plus des liens et chemins d'API) ; [keep] : filtre final des
+     * chaînes affichées.
+     */
+    fun analyze(
+        context: Context,
+        packageName: String,
+        limit: Int = 150,
+        extra: Regex? = null,
+        keep: (String) -> Boolean = { true },
+    ): List<String> {
         val out = mutableListOf<String>()
         val appInfo = try {
             context.packageManager.getApplicationInfo(packageName, 0)
@@ -44,7 +54,7 @@ object AppAnalyzer {
                     for (entry in dexEntries) {
                         try {
                             zip.getInputStream(entry).use { input -> tmp.outputStream().use { input.copyTo(it) } }
-                            scanDex(tmp, found)
+                            scanDex(tmp, found, extra)
                         } catch (t: Throwable) {
                             out += "${entry.name} illisible : ${t.javaClass.simpleName} ${t.message}"
                         } finally {
@@ -58,7 +68,7 @@ object AppAnalyzer {
         }
         out += "— ${found.size} chaîne(s) brutes, les plus pertinentes ci-dessous —"
         out += found.asSequence()
-            .filter { it.length <= 120 && '\n' !in it && "deeplink_url_format" !in it && !isForeignClass(it, packageName) }
+            .filter { it.length <= 120 && '\n' !in it && "deeplink_url_format" !in it && !isForeignClass(it, packageName) && keep(it) }
             .map { shorten(it) }
             .distinct()
             .sortedWith(compareBy({ priority(it) }, { it }))
@@ -86,7 +96,7 @@ object AppAnalyzer {
         } else s
 
     /** Parcourt la table des chaînes du .dex (format : https://source.android.com/docs/core/runtime/dex-format). */
-    private fun scanDex(file: File, found: MutableSet<String>) {
+    private fun scanDex(file: File, found: MutableSet<String>, extra: Regex?) {
         RandomAccessFile(file, "r").use { raf ->
             val buf: MappedByteBuffer = raf.channel.map(FileChannel.MapMode.READ_ONLY, 0, raf.length())
             buf.order(ByteOrder.LITTLE_ENDIAN)
@@ -107,7 +117,7 @@ object AppAnalyzer {
                 }
                 if (len < 3 || len >= bytes.size) continue
                 val s = String(bytes, 0, len, Charsets.UTF_8)
-                if (interesting.containsMatchIn(s)) found += s
+                if (interesting.containsMatchIn(s) || extra?.containsMatchIn(s) == true) found += s
             }
         }
     }
