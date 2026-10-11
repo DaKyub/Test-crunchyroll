@@ -19,6 +19,8 @@ import com.dakyub.crunchymal.data.crunchyroll.CrApi
 import com.dakyub.crunchymal.data.crunchyroll.CrAuth
 import com.dakyub.crunchymal.data.mal.MalAuth
 import com.dakyub.crunchymal.data.mal.MalRepository
+import com.dakyub.crunchymal.data.mal.MalSync
+import com.dakyub.crunchymal.tv.HomeChannel
 import com.dakyub.crunchymal.data.progress.AdnProgressRepository
 import com.dakyub.crunchymal.data.progress.ProgressRepository
 import com.dakyub.crunchymal.update.UpdateManager
@@ -43,6 +45,8 @@ class Graph(context: Context) {
     val diagnostics = DiagnosticsUploader(context, settings)
     val history = HistoryRepository(context, api)
     val started = StartedSeriesRepository(api, history, adn, adnWatchlist)
+    val malSync = MalSync(mal, settings)
+    val homeChannel = HomeChannel(context, settings)
 
     /** Calcule (si besoin) la progression d'une série, quel que soit son service. */
     suspend fun ensureProgress(ref: SeriesRef, force: Boolean = false) = when (ref.provider) {

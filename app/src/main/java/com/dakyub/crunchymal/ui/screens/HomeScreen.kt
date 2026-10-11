@@ -263,6 +263,11 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
             }.joinAll()
             publish()
             applyFilterNeeds()
+            // Chaîne de l'écran d'accueil Android TV : nouveaux épisodes puis reprises.
+            val channelItems = listOf(newEpisodesLoader, continueLoader, adnContinueLoader).flatMap { loader ->
+                list.indexOfFirst { it.second === loader }.takeIf { it >= 0 }?.let { res.getOrNull(it) }.orEmpty()
+            }
+            if (channelItems.isNotEmpty()) launch { graph.homeChannel.publish(channelItems) }
         }
     }
 
@@ -301,93 +306,11 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
 
     private fun row(block: suspend () -> List<CardItem>): suspend () -> List<CardItem> = block
 
-    private fun continueWatching(): suspend () -> List<CardItem> = {
-        // Même source que la rangée « Reprendre » de l'app officielle ; repli sur l'historique.
-        val resume = runCatching { graph.api.continueWatching() }.getOrDefault(emptyList())
-            .filter { it.panel.type == "episode" && !it.fullyWatched }
-        if (resume.isNotEmpty()) {
-            resume.distinctBy { it.panel.episodeMetadata?.seriesId ?: it.panel.id }.take(20).map { item ->
-                val card = item.panel.toEpisodeCard(item.playhead, item.fullyWatched)
-                val prefix = if (item.playhead > 0) "Continuer" else "Suite"
-                card.copy(subtitle = "$prefix · ${card.subtitle.orEmpty()}")
-            }
-        } else {
-            graph.api.watchHistory()
-                .filter { it.panel.type == "episode" && !it.fullyWatched }
-                .distinctBy { it.panel.episodeMetadata?.seriesId ?: it.parentId }
-                .take(20)
-                .map { it.panel.toEpisodeCard(it.playhead, it.fullyWatched, it.parentId) }
-        }
-    }
+    private fun continueWatching(): suspend () -> List<CardItem> = { graph.crContinueCards() }
 
-    /** Reprise ADN : dernière vidéo de chaque série de l'historique, ou la suivante si elle a été finie. */
-    private fun adnContinueWatching(): suspend () -> List<CardItem> = {
-        val recent = graph.adn.viewingHistory()
-            .filter { it.show != null }
-            .sortedByDescending { it.user?.watchDate.orEmpty() }
-            .distinctBy { it.show!!.id }
-            .take(20)
-        coroutineScope {
-            recent.map { video ->
-                async {
-                    val show = video.show!!
-                    val user = video.user
-                    if (user != null && !video.watched) {
-                        adnEpisodeCard(show, video, "Continuer", if (video.duration > 0) user.stoptime.toFloat() / video.duration else null)
-                    } else {
-                        // Épisode suivant : il faut la liste des épisodes, parfois très longue (One Piece). Le calcul
-                        // continue en arrière-plan (et reste en cache) mais la rangée ne l'attend que 8 s.
-                        val pending = viewModelScope.async {
-                            runCatching { graph.adnProgress.tree(show.id.toString()).episodes }.getOrNull()
-                        }
-                        val episodes = withTimeoutOrNull(8_000) { pending.await() }.orEmpty()
-                        val index = episodes.indexOfFirst { it.video.id == video.id }
-                        val next = if (index >= 0) episodes.drop(index + 1).firstOrNull { it.available } else null
-                        next?.let { adnEpisodeCard(show, it.video, "Suite", null) }
-                    }
-                }
-            }.awaitAll().filterNotNull()
-        }
-    }
+    private fun adnContinueWatching(): suspend () -> List<CardItem> = { graph.adnContinueCards(viewModelScope) }
 
-    private fun adnEpisodeCard(show: AdnShow, video: AdnVideo, prefix: String, progress: Float?) = CardItem(
-        series = show.toRef().copy(wideUrl = video.image2x ?: video.image ?: show.imageHorizontal2x),
-        subtitle = "$prefix · ${video.label.ifBlank { show.title }}",
-        episodeId = video.id.toString(),
-        progress = progress?.coerceIn(0f, 1f)?.takeIf { it > 0f },
-        wide = true,
-    )
-
-    /**
-     * Séries des watchlists (Crunchyroll et/ou ADN) où l'utilisateur était à jour et qui ont reçu
-     * 1 à 3 épisodes sortis depuis moins de 3 semaines.
-     */
-    private fun newEpisodesRow(): suspend () -> List<CardItem> = {
-        val providers = graph.providers.selected.value
-        val entries = coroutineScope {
-            val cr = async { if (Provider.CRUNCHYROLL in providers) graph.watchlist.get() else emptyList() }
-            val adn = async { if (Provider.ADN in providers) runCatching { graph.adnWatchlist.get() }.getOrDefault(emptyList()) else emptyList() }
-            cr.await() + adn.await()
-        }
-        coroutineScope {
-            entries.map { e -> async { runCatching { graph.ensureProgress(e.series) } } }.awaitAll()
-        }
-        val summaries = graph.progress.summaries.value
-        val cutoff = DateUtils.isoDaysAgo(21)
-        entries.mapNotNull { e ->
-            val s = summaries[e.series.progressKey] ?: return@mapNotNull null
-            val remaining = s.remainingAfterLast ?: return@mapNotNull null
-            val released = s.nextReleased?.take(19) ?: return@mapNotNull null
-            if (s.watched > 0 && remaining in 1..3 && released >= cutoff && s.nextEpisodeId != null) Triple(e, s, released) else null
-        }.sortedByDescending { it.third }.map { (e, s, _) ->
-            val more = (s.remainingAfterLast ?: 1) - 1
-            CardItem(
-                series = e.series,
-                episodeId = s.nextEpisodeId,
-                subtitle = "Nouveau : ${s.nextLabel.orEmpty()}" + (if (more > 0) " (+$more)" else ""),
-            )
-        }
-    }
+    private fun newEpisodesRow(): suspend () -> List<CardItem> = { graph.newEpisodeCards(graph.providers.selected.value) }
 
     /** Séries populaires jamais commencées ; la rangée ne garde que celles notées 8+ sur MAL. */
     private fun gemsRow(): suspend () -> List<CardItem> = {

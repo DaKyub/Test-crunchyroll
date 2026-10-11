@@ -1,6 +1,8 @@
 package com.dakyub.crunchymal.ui.screens
 
 import android.widget.Toast
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -123,6 +125,39 @@ fun SettingsScreen() {
                 UpdateButton()
             }
         }
+        item { Section("Automatismes") }
+        item {
+            var malSync by remember { mutableStateOf(settings.malAutoSync) }
+            var channel by remember { mutableStateOf(settings.homeChannel) }
+            var notifications by remember { mutableStateOf(settings.newEpisodeNotifications) }
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
+                FilterChip(selected = malSync, onClick = { malSync = !malSync; settings.malAutoSync = malSync }) {
+                    Text(if (malSync) "✓ Synchro auto de ma liste MAL" else "Synchro auto de ma liste MAL")
+                }
+                FilterChip(selected = channel, onClick = {
+                    channel = !channel
+                    settings.homeChannel = channel
+                    // Désactivée : la chaîne est retirée de l'écran d'accueil.
+                    if (!channel) scope.launch { graph.homeChannel.publish(emptyList()) }
+                }) {
+                    Text(if (channel) "✓ Chaîne sur l'accueil Android TV" else "Chaîne sur l'accueil Android TV")
+                }
+                FilterChip(selected = notifications, onClick = { notifications = !notifications; settings.newEpisodeNotifications = notifications }) {
+                    Text(if (notifications) "✓ Notifications nouveaux épisodes" else "Notifications nouveaux épisodes")
+                }
+            }
+        }
+        item {
+            Text(
+                "Synchro MAL : à l'ouverture d'une fiche, les épisodes vus sont reportés sur ta liste MAL (jamais en arrière ; " +
+                    "les séries « Terminé » ou « Abandonné » ne sont pas modifiées). Chaîne : remplie à chaque ouverture de l'accueil ; " +
+                    "si elle n'apparaît pas, ajoute « CrunchyMAL » dans Paramètres Android TV → Écran d'accueil → Chaînes. " +
+                    "Notifications : vérification toutes les 4 h des séries de ta watchlist.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
         item { Section("Services") }
         item {
             SettingRow("Afficher") {

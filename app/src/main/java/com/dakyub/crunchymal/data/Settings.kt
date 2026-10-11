@@ -63,6 +63,21 @@ class Settings(context: Context) {
         get() = prefs.getString("mal_client_secret", "")!!
         set(value) = prefs.edit().putString("mal_client_secret", value.trim()).apply()
 
+    /** Mettre à jour la liste MAL d'après ce qui est regardé sur Crunchyroll / ADN. */
+    var malAutoSync: Boolean
+        get() = prefs.getBoolean("mal_auto_sync", true)
+        set(value) = prefs.edit().putBoolean("mal_auto_sync", value).apply()
+
+    /** Chaîne « CrunchyMAL » sur l'écran d'accueil Android TV. */
+    var homeChannel: Boolean
+        get() = prefs.getBoolean("home_channel", true)
+        set(value) = prefs.edit().putBoolean("home_channel", value).apply()
+
+    /** Notification quand une série suivie sort un nouvel épisode. */
+    var newEpisodeNotifications: Boolean
+        get() = prefs.getBoolean("new_episode_notifications", true)
+        set(value) = prefs.edit().putBoolean("new_episode_notifications", value).apply()
+
     val malClientId: String
         get() = malClientIdOverride.ifBlank { BuildConfig.MAL_CLIENT_ID }
 

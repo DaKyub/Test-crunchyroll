@@ -66,6 +66,7 @@ import com.dakyub.crunchymal.ui.components.rememberSeasonRatings
 import com.dakyub.crunchymal.data.ratings.firstEpisodeNumber
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
+import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -217,6 +218,14 @@ fun AdnSeriesScreen(showId: String, onOpenSeries: (SeriesRef) -> Unit = {}, onOp
             val firstNumber = firstEpisodeNumber(season?.second.orEmpty().map { it.video.episodeNumber })
             val summary = state.summary
             val listState = rememberLazyListState()
+            // Synchro MAL : épisodes vus reportés sur la fiche MAL de la série (option des réglages).
+            val syncMalId = record?.malId
+            val syncWatched = summary?.watched ?: 0
+            LaunchedEffect(syncMalId, syncWatched) {
+                val malId = syncMalId ?: return@LaunchedEffect
+                runCatching { graph.malSync.sync(malId, syncWatched) }.getOrNull()
+                    ?.let { Toast.makeText(context, it, Toast.LENGTH_LONG).show() }
+            }
             val scope = rememberCoroutineScope()
             val next = summary?.nextEpisodeId?.let { id -> state.episodes.firstOrNull { it.video.id.toString() == id } }
 

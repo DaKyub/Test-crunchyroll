@@ -2,6 +2,7 @@ package com.dakyub.crunchymal
 
 import android.app.Application
 import android.content.Context
+import com.dakyub.crunchymal.work.NewEpisodesWorker
 
 class CrunchyMalApp : Application() {
     lateinit var graph: Graph
@@ -11,6 +12,8 @@ class CrunchyMalApp : Application() {
         super.onCreate()
         graph = Graph(this)
         installCrashRecorder()
+        // Nouveaux épisodes (notifications) et chaîne de l'écran d'accueil, toutes les 4 h.
+        runCatching { NewEpisodesWorker.schedule(this) }
     }
 
     /** Mémorise le dernier plantage pour l'afficher dans les paramètres au prochain lancement. */

@@ -75,6 +75,8 @@ import com.dakyub.crunchymal.data.mal.MalRecord
 import com.dakyub.crunchymal.data.mal.TitleMatcher
 import com.dakyub.crunchymal.data.crunchyroll.CrSeason
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.LaunchedEffect
+import android.widget.Toast
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.lazy.rememberLazyListState
 import com.dakyub.crunchymal.ui.components.ExpandableSynopsis
@@ -218,6 +220,15 @@ fun SeriesScreen(seriesId: String, onOpenSeries: (SeriesRef) -> Unit = {}, onOpe
             val tree = state.tree
             val summary = tree?.summary
             val listState = rememberLazyListState()
+            // Synchro MAL : épisodes vus de chaque saison reportés sur sa fiche MAL (option des réglages).
+            val syncTargets = tree?.seasons?.mapIndexedNotNull { index, node ->
+                malRecords[seasonMalKey(ref.malKey, index, node.season, malRecords)]?.malId
+                    ?.let { it to node.episodes.count { e -> e.watched } }
+            }.orEmpty()
+            LaunchedEffect(syncTargets) {
+                val messages = syncTargets.mapNotNull { (malId, watched) -> runCatching { graph.malSync.sync(malId, watched) }.getOrNull() }
+                if (messages.isNotEmpty()) Toast.makeText(context, messages.joinToString("\n"), Toast.LENGTH_LONG).show()
+            }
             val scope = rememberCoroutineScope()
 
             Box(Modifier.fillMaxSize()) {
