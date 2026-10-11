@@ -50,7 +50,6 @@ import com.dakyub.crunchymal.LocalGraph
 import com.dakyub.crunchymal.PlexApp
 import com.dakyub.crunchymal.data.CardItem
 import com.dakyub.crunchymal.data.SeriesRef
-import com.dakyub.crunchymal.data.plex.PlexApi
 import com.dakyub.crunchymal.data.plex.PlexDirectory
 import com.dakyub.crunchymal.data.plex.PlexItem
 import com.dakyub.crunchymal.data.progress.WatchStatus
@@ -79,11 +78,12 @@ import java.util.Locale
 private val PlexOrange = Color(0xFFE5A00D)
 
 /** Série Plex sous forme de référence (clé MAL « plex:<id> » pour la note et les corrections). */
-private fun PlexItem.showRef(plex: PlexApi) = SeriesRef(
+private fun PlexItem.showRef(graph: Graph) = SeriesRef(
     id = "plex-$ratingKey",
     title = title,
-    posterUrl = plex.image(thumb, 240, 360),
-    altTitles = listOfNotNull(originalTitle),
+    posterUrl = graph.plex.image(thumb, 240, 360),
+    // Titres TMDB (anglais, original) avant ceux de Plex, souvent en français : la fiche MAL est mieux trouvée.
+    altTitles = (graph.plexLibrary.extraTitles(ratingKey) + listOfNotNull(originalTitle)).distinct(),
     malKeyOverride = "plex:$ratingKey",
 )
 
@@ -142,7 +142,7 @@ class PlexViewModel(private val graph: Graph) : ViewModel() {
                     else -> graph.plex.shows(selected.key)
                 }
                 ui.value = ui.value.copy(loading = false, libraries = libraries, library = selected, shows = shows, onDeck = onDeck.await())
-                shows.forEach { graph.mal.request("plex:${it.ratingKey}", it.showRef(graph.plex).malTitles) }
+                shows.forEach { graph.mal.request("plex:${it.ratingKey}", it.showRef(graph).malTitles) }
             }.onFailure { ui.value = ui.value.copy(loading = false, error = it.message ?: "Serveur Plex injoignable") }
         }
     }
@@ -227,7 +227,7 @@ fun PlexScreen(onOpenPlexShow: (String) -> Unit) {
     ) { show ->
         MediaCard(
             item = CardItem(
-                series = show.showRef(graph.plex),
+                series = show.showRef(graph),
                 subtitle = if (show.leafCount > 0) "${show.viewedLeafCount}/${show.leafCount} ép." else show.year?.toString(),
                 progress = show.leafCount.takeIf { it > 0 }?.let { show.viewedLeafCount.toFloat() / it }?.takeIf { it > 0f },
                 badges = listOf("Plex"),
@@ -309,7 +309,7 @@ fun PlexShowScreen(ratingKey: String, onOpenSeries: (SeriesRef) -> Unit, onOpenM
         state.loading && show == null -> CenteredMessage("Chargement…")
         state.error != null && show == null -> CenteredMessage(state.error!!, "Réessayer") { vm.load() }
         show != null -> {
-            val ref = show.showRef(graph.plex)
+            val ref = show.showRef(graph)
             val record = rememberMalRecord(malKey, ref.malTitles)
             val watched = state.episodes.count { it.watched }
             val next = state.next

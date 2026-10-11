@@ -83,9 +83,11 @@ class MalRepository(context: Context, clientId: () -> String, val auth: MalAuth)
      * Demande (en arrière-plan) la note MAL associée à [key]. Le résultat arrive dans [records].
      * [titles] : titres Crunchyroll servant à la recherche (titre anglais déduit du slug en premier).
      */
-    fun request(key: String, titles: List<String>) {
+    fun request(key: String, titles: List<String>, retryMissing: Boolean = false) {
         val existing = _records.value[key]
-        if (existing != null && !isStale(existing)) return
+        // [retryMissing] : nouvelle recherche d'une fiche restée sans correspondance (titres plus fiables).
+        val retry = retryMissing && existing != null && existing.malId == null && !existing.manual
+        if (existing != null && !isStale(existing) && !retry) return
         val queries = titles.map { it.trim() }.filter { it.length >= 3 }.distinct()
         if (queries.isEmpty() && existing?.malId == null) return
         if (!pending.add(key)) return

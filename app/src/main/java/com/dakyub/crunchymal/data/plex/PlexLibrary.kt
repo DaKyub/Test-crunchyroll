@@ -33,11 +33,20 @@ data class PlexShowEntry(
     /** Saisons présentes sur le serveur (hors spéciaux). */
     val seasons: Int = 0,
     val tmdbId: Int? = null,
+    val tvdbId: String? = null,
+    val imdbId: String? = null,
     /** Saisons de la série d'après TMDB (null = inconnu). */
     val totalSeasons: Int? = null,
     val totalCheckedAt: Long = 0,
+    /** Titres d'après TMDB : Plex affiche souvent les titres en français, introuvables sur MAL. */
+    val englishTitle: String? = null,
+    val tmdbOriginalTitle: String? = null,
+    /** Fiche MAL déjà recherchée de nouveau avec le titre anglais. */
+    val malRetried: Boolean = false,
 ) {
-    val malTitles: List<String> get() = listOfNotNull(originalTitle, title).filter { it.isNotBlank() }.distinct()
+    /** Titres pour MAL et pour reconnaître la série ailleurs : anglais d'abord, titre Plex en dernier. */
+    val malTitles: List<String>
+        get() = listOfNotNull(englishTitle, originalTitle, tmdbOriginalTitle, title).filter { it.isNotBlank() }.distinct()
 }
 
 @Serializable
@@ -112,6 +121,10 @@ class PlexLibrary(
         return PlexIndex(byMalId, byTitle)
     }
 
+    /** Titres TMDB (anglais, original) d'une série Plex, à essayer avant ses titres Plex. */
+    fun extraTitles(ratingKey: String): List<String> =
+        _shows.value.firstOrNull { it.ratingKey == ratingKey }?.let { listOfNotNull(it.englishTitle, it.tmdbOriginalTitle) }.orEmpty()
+
     /** Relit la bibliothèque si elle date de plus de 6 h (ou [force]), puis complète fiches MAL et saisons. */
     fun refresh(force: Boolean = false) {
         if (!plex.connected.value) return
@@ -131,18 +144,24 @@ class PlexLibrary(
                 .filter { (it.index ?: 0) > 0 && it.parentRatingKey != null }
                 .groupingBy { it.parentRatingKey!! }.eachCount()
             plex.showsWithGuids(library.key).map { show ->
-                val tmdbId = show.guids.firstNotNullOfOrNull { guid ->
-                    guid.id.takeIf { it.startsWith("tmdb://") }?.removePrefix("tmdb://")?.toIntOrNull()
-                }
-                val old = previous[show.ratingKey]?.takeIf { it.tmdbId == tmdbId }
+                fun guid(prefix: String) = show.guids.firstNotNullOfOrNull { g -> g.id.takeIf { it.startsWith(prefix) }?.removePrefix(prefix) }
+                val previousEntry = previous[show.ratingKey]
+                // Sans identifiant TMDB chez Plex, on garde celui retrouvé via TVDB / IMDb.
+                val tmdbId = guid("tmdb://")?.toIntOrNull() ?: previousEntry?.tmdbId
+                val old = previousEntry?.takeIf { it.tmdbId == tmdbId }
                 PlexShowEntry(
                     ratingKey = show.ratingKey,
                     title = show.title,
                     originalTitle = show.originalTitle,
                     seasons = seasonsByShow[show.ratingKey] ?: show.childCount,
                     tmdbId = tmdbId,
+                    tvdbId = guid("tvdb://"),
+                    imdbId = guid("imdb://"),
                     totalSeasons = old?.totalSeasons,
                     totalCheckedAt = old?.totalCheckedAt ?: 0,
+                    englishTitle = old?.englishTitle,
+                    tmdbOriginalTitle = old?.tmdbOriginalTitle,
+                    malRetried = old?.malRetried ?: false,
                 )
             }
         }.distinctBy { it.ratingKey }
@@ -151,20 +170,49 @@ class PlexLibrary(
         save()
     }
 
-    /** Fiche MAL de chaque série (badge sur les cartes MAL) et nombre de saisons d'après TMDB. */
+    /**
+     * D'après TMDB : identifiant (retrouvé via TVDB / IMDb si Plex n'en donne pas), titres anglais et original,
+     * nombre de saisons. Puis fiche MAL de chaque série, cherchée avec ces titres ; une série restée sans fiche
+     * MAL est recherchée une fois de plus quand son titre anglais devient connu.
+     */
     private suspend fun completeDetails() {
-        _shows.value.forEach { mal.request("plex:${it.ratingKey}", it.malTitles) }
-        val now = System.currentTimeMillis()
-        val stale = _shows.value.filter { it.tmdbId != null && (it.totalSeasons == null || now - it.totalCheckedAt > TOTAL_TTL) }
-        stale.forEachIndexed { i, show ->
-            val total = platforms.tvSeasonCount(show.tmdbId!!) ?: return@forEachIndexed
-            _shows.value = _shows.value.map {
-                if (it.ratingKey == show.ratingKey) it.copy(totalSeasons = total, totalCheckedAt = System.currentTimeMillis()) else it
+        var updated = 0
+        for (show in _shows.value) {
+            val now = System.currentTimeMillis()
+            var entry = show
+            if (entry.tmdbId == null && (entry.tvdbId != null || entry.imdbId != null) && now - entry.totalCheckedAt > TOTAL_TTL) {
+                val id = entry.tvdbId?.let { platforms.tmdbIdFrom("tvdb_id", it) } ?: entry.imdbId?.let { platforms.tmdbIdFrom("imdb_id", it) }
+                entry = entry.copy(tmdbId = id, totalCheckedAt = if (id == null) now else 0)
             }
-            if (i % 20 == 19) save()
-            delay(100)
+            val tmdbId = entry.tmdbId
+            if (tmdbId != null && (entry.totalSeasons == null || entry.englishTitle == null || now - entry.totalCheckedAt > TOTAL_TTL)) {
+                platforms.tvInfo(tmdbId)?.let { info ->
+                    entry = entry.copy(
+                        totalSeasons = info.seasons.takeIf { it > 0 },
+                        englishTitle = info.name.ifBlank { null },
+                        tmdbOriginalTitle = info.originalName.ifBlank { null },
+                        totalCheckedAt = now,
+                    )
+                }
+                delay(100)
+            }
+            if (entry != show) {
+                _shows.value = _shows.value.map { if (it.ratingKey == entry.ratingKey) entry else it }
+                if (++updated % 20 == 0) save()
+            }
         }
-        if (stale.isNotEmpty()) save()
+        if (updated > 0) save()
+
+        val retried = mutableSetOf<String>()
+        _shows.value.forEach { show ->
+            val retry = show.englishTitle != null && !show.malRetried
+            mal.request("plex:${show.ratingKey}", show.malTitles, retryMissing = retry)
+            if (retry) retried += show.ratingKey
+        }
+        if (retried.isNotEmpty()) {
+            _shows.value = _shows.value.map { if (it.ratingKey in retried) it.copy(malRetried = true) else it }
+            save()
+        }
     }
 
     private fun save() {

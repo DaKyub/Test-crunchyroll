@@ -93,7 +93,15 @@ private data class TmdbSeasonInfo(
 private data class TmdbTvDetails(
     val seasons: List<TmdbSeasonInfo> = emptyList(),
     @SerialName("number_of_seasons") val numberOfSeasons: Int = 0,
+    val name: String = "",
+    @SerialName("original_name") val originalName: String = "",
 )
+
+@Serializable
+private data class TmdbFind(@SerialName("tv_results") val tvResults: List<TmdbShowLite> = emptyList())
+
+/** Fiche TMDB d'une série : titre anglais, titre original et nombre de saisons (hors spéciaux). */
+data class TmdbTvInfo(val name: String, val originalName: String, val seasons: Int)
 
 /**
  * Recherche TMDB : [titles] à essayer, [allTitles] (noms de saison), film ou série, année de diffusion.
@@ -346,11 +354,20 @@ class WatchPlatformsRepository(context: Context, private val settings: Settings)
         return out.distinctBy { it.id }
     }
 
-    /** Nombre de saisons d'une série TMDB (hors spéciaux), ou null sans clé TMDB / en cas d'échec. */
-    suspend fun tvSeasonCount(tvId: Int): Int? {
+    /** Titre anglais, titre original et nombre de saisons d'une série TMDB ; null sans clé TMDB ou en cas d'échec. */
+    suspend fun tvInfo(tvId: Int): TmdbTvInfo? {
         if (settings.tmdbKey.isBlank()) return null
-        return runCatching { Http.json.decodeFromString<TmdbTvDetails>(tmdb("tv/$tvId") {}).numberOfSeasons }
-            .getOrNull()?.takeIf { it > 0 }
+        val details = runCatching { Http.json.decodeFromString<TmdbTvDetails>(tmdb("tv/$tvId") {}) }.getOrNull() ?: return null
+        return TmdbTvInfo(details.name, details.originalName, details.numberOfSeasons)
+    }
+
+    /** Identifiant TMDB d'une série à partir d'un identifiant TVDB ([source] « tvdb_id ») ou IMDb (« imdb_id »). */
+    suspend fun tmdbIdFrom(source: String, externalId: String): Int? {
+        if (settings.tmdbKey.isBlank()) return null
+        return runCatching {
+            Http.json.decodeFromString<TmdbFind>(tmdb("find/$externalId") { addQueryParameter("external_source", source) })
+                .tvResults.firstOrNull()?.id
+        }.getOrNull()
     }
 
     suspend fun clear() {
