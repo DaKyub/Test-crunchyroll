@@ -19,8 +19,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.tv.material3.Button
 import androidx.tv.material3.FilterChip
 import androidx.tv.material3.MaterialTheme
@@ -68,7 +70,7 @@ fun MalListDialog(choices: List<MalEntryChoice>, onDismiss: () -> Unit) {
             .onFailure { message = "Erreur : ${it.message}" }
     }
 
-    Dialog(onDismissRequest = onDismiss) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Column(
             Modifier
                 .width(720.dp)
@@ -82,10 +84,10 @@ fun MalListDialog(choices: List<MalEntryChoice>, onDismiss: () -> Unit) {
                 available.isEmpty() -> Text("Aucune fiche MAL associée (corrige la correspondance d'abord).")
                 else -> {
                     if (available.size > 1) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            available.forEachIndexed { index, c ->
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(available.indices.toList()) { index ->
                                 FilterChip(selected = index == choiceIndex, onClick = { choiceIndex = index }) {
-                                    Text(c.label)
+                                    Text(available[index].label, maxLines = 1)
                                 }
                             }
                         }
@@ -95,11 +97,14 @@ fun MalListDialog(choices: List<MalEntryChoice>, onDismiss: () -> Unit) {
                             (if (totalEpisodes > 0) " · $watched/$totalEpisodes ép. vus" else ""),
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
                     )
                     Text("Statut", style = MaterialTheme.typography.labelLarge)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        MalStatuses.forEach { (value, label) ->
-                            FilterChip(selected = status == value, onClick = { status = value }) { Text(label) }
+                    // Rangée défilante : sinon le dernier statut, écrasé, s'étire sur toute la hauteur.
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(MalStatuses) { (value, label) ->
+                            FilterChip(selected = status == value, onClick = { status = value }) { Text(label, maxLines = 1) }
                         }
                     }
                     Text("Note", style = MaterialTheme.typography.labelLarge)
