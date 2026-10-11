@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal.ui.screens
 
+import com.dakyub.crunchymal.ui.components.nextPlatformFilter
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
@@ -61,6 +62,8 @@ data class SeasonUi(
     val anime: List<MalAnime> = emptyList(),
     val tvOnly: Boolean = true,
     val availableOnly: Boolean = false,
+    /** Plateforme où l'anime est disponible (null = toutes). */
+    val platform: String? = null,
 )
 
 data class SeasonVisible(val items: List<MalCardItem> = emptyList(), val total: Int = 0)
@@ -91,6 +94,7 @@ class SeasonViewModel(private val graph: Graph) : ViewModel() {
                 )
             }
             .filter { !u.availableOnly || it.target != null }
+            .filter { u.platform == null || u.platform in it.card.badges }
         SeasonVisible(items, u.anime.size)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SeasonVisible())
 
@@ -121,6 +125,7 @@ class SeasonViewModel(private val graph: Graph) : ViewModel() {
 
     fun toggleTvOnly() { ui.value = ui.value.copy(tvOnly = !ui.value.tvOnly) }
     fun toggleAvailableOnly() { ui.value = ui.value.copy(availableOnly = !ui.value.availableOnly) }
+    fun nextPlatform() { ui.value = ui.value.copy(platform = nextPlatformFilter(ui.value.platform)) }
 }
 
 /** Animes d'une saison d'après MAL, classés par note, avec les plateformes où les regarder. */
@@ -167,6 +172,7 @@ fun SeasonScreen(onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (Int) -> Unit) {
                 FilterChip(selected = ui.availableOnly, onClick = vm::toggleAvailableOnly) {
                     Text(if (ui.availableOnly) "✓ Sur Crunchyroll / ADN" else "Sur Crunchyroll / ADN", style = MaterialTheme.typography.labelMedium)
                 }
+                CycleButton("Plateforme", ui.platform ?: "toutes", vm::nextPlatform)
                 Text(
                     "${visible.items.size}/${visible.total} animes · classés par note MAL",
                     style = MaterialTheme.typography.labelMedium,

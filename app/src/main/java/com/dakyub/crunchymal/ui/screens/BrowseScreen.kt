@@ -81,10 +81,16 @@ data class BrowseUi(
     val error: String? = null,
     /** Plateforme TMDB affichée (Netflix, Prime Video, Disney+) à la place de Crunchyroll / ADN. */
     val platform: Pair<Int, String>? = null,
+    /** Seulement les séries disponibles sur une seule plateforme en France. */
+    val exclusiveOnly: Boolean = false,
 )
 
 /** Carte d'un catalogue de plateforme (TMDB) : pas de fiche Crunchyroll / ADN, seulement MAL. */
 private val CardItem.isPlatformItem: Boolean get() = series.id.startsWith("tmdb-")
+
+/** Clé de la série dans le cache des plateformes des catalogues. */
+private val CardItem.catalogKey: String
+    get() = if (isPlatformItem) "tmdb:" + series.id.removePrefix("tmdb-") else "${series.provider.name}:${series.id}"
 
 /** Liste affichée après filtres (statut, note MAL) et tri. */
 data class BrowseVisible(
@@ -92,6 +98,8 @@ data class BrowseVisible(
     val progressKnown: Int = 0,
     val progressNeeded: Int = 0,
     val malKnown: Int = 0,
+    /** Séries dont les plateformes en France sont connues (filtre « Exclusivités »). */
+    val platformsKnown: Int = 0,
 )
 
 class BrowseViewModel(private val graph: Graph) : ViewModel() {
@@ -101,8 +109,17 @@ class BrowseViewModel(private val graph: Graph) : ViewModel() {
     /** Séries de l'historique Crunchyroll : les autres sont « non commencées » sans rien calculer. */
     private val crWatched = MutableStateFlow<Set<String>?>(null)
 
-    val visible = combine(ui, graph.progress.summaries, graph.mal.records, graph.adn.loggedIn, crWatched) { u, summaries, mal, _, watched ->
+    // La connexion ADN change ce qui est calculable : elle relance le calcul avec l'historique Crunchyroll.
+    private val watchedFlow = combine(graph.adn.loggedIn, crWatched) { _, watched -> watched }
+
+    val visible = combine(ui, graph.progress.summaries, graph.mal.records, watchedFlow, graph.watchPlatforms.catalog) { u, summaries, mal, watched, catalog ->
         val malStatuses = graph.mal.myListStatuses.value
+        /** Plateformes en France (TMDB + ce que l'app sait déjà), ou null tant que ce n'est pas vérifié. */
+        fun platformsOf(item: CardItem): Set<String>? {
+            val found = catalog[item.catalogKey]?.takeIf { it.source.isNotEmpty() } ?: return null
+            val own = if (item.isPlatformItem) item.badges else (listOf(item.series.provider) + item.series.alsoOn).map { it.label }
+            return (found.names + own).toSet()
+        }
         fun statusOf(item: CardItem): WatchStatus? {
             // Plateformes : statut d'après la liste MAL (pas de progression disponible chez elles).
             if (item.isPlatformItem) {
@@ -119,6 +136,7 @@ class BrowseViewModel(private val graph: Graph) : ViewModel() {
         val filtered = rows
             .filter { (_, status, _) -> u.statuses.accepts(status) }
             .filter { (_, _, score) -> u.minScore == null || (score != null && score >= u.minScore) }
+            .filter { (item, _, _) -> !u.exclusiveOnly || platformsOf(item)?.size == 1 }
         val sorted = if (u.sort == BrowseSort.MAL) filtered.sortedByDescending { it.third ?: -1.0 } else filtered
         val trackable = u.results.filter { !it.isPlatformItem && graph.progressAvailable(it.series) }
         BrowseVisible(
@@ -129,6 +147,7 @@ class BrowseViewModel(private val graph: Graph) : ViewModel() {
             progressKnown = trackable.count { statusOf(it) != null },
             progressNeeded = if (u.statuses.isEmpty()) 0 else trackable.size,
             malKnown = u.results.count { mal.containsKey(it.series.malKey) },
+            platformsKnown = u.results.count { catalog[it.catalogKey] != null },
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BrowseVisible())
     private var loadedFor: Set<Provider>? = null
@@ -164,6 +183,23 @@ class BrowseViewModel(private val graph: Graph) : ViewModel() {
     fun selectPlatform(platform: Pair<Int, String>) {
         ui.value = ui.value.copy(platform = platform)
         reload()
+    }
+
+    fun toggleExclusive() {
+        ui.value = ui.value.copy(exclusiveOnly = !ui.value.exclusiveOnly)
+        requestPlatformsIfNeeded()
+    }
+
+    /** Plateformes de chaque série (TMDB), vérifiées seulement quand le filtre « Exclusivités » est actif. */
+    private fun requestPlatformsIfNeeded() {
+        if (!ui.value.exclusiveOnly) return
+        ui.value.results.forEach { item ->
+            if (item.isPlatformItem) {
+                item.series.id.removePrefix("tmdb-").toIntOrNull()?.let { graph.watchPlatforms.requestTmdbShow(it) }
+            } else {
+                graph.watchPlatforms.requestByTitle(item.catalogKey, item.series.malTitles + item.series.title)
+            }
+        }
     }
 
     fun nextSort() {
@@ -215,6 +251,7 @@ class BrowseViewModel(private val graph: Graph) : ViewModel() {
             ui.value = ui.value.copy(loading = false, results = merged, error = error.takeIf { merged.isEmpty() })
             merged.forEach { graph.mal.request(it.series.malKey, it.series.malTitles) }
             computeProgressIfNeeded()
+            requestPlatformsIfNeeded()
         }
     }
 
@@ -240,6 +277,7 @@ class BrowseViewModel(private val graph: Graph) : ViewModel() {
                     }.let { list -> if (alpha) list.sortedBy { it.series.title.lowercase() } else list }
                     ui.value = ui.value.copy(loading = false, results = cards)
                     cards.forEach { graph.mal.request(it.series.malKey, it.series.malTitles) }
+                    requestPlatformsIfNeeded()
                     graph.mal.refreshMyListSeenIds()
                 }
                 .onFailure { ui.value = ui.value.copy(loading = false, error = it.message ?: "Erreur TMDB") }
@@ -297,8 +335,11 @@ fun BrowseScreen(onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (Int) -> Unit = {
         ui.error != null -> "Erreur : ${ui.error}"
         ui.selections.isEmpty() -> "Aucune catégorie disponible."
         ui.results.isEmpty() -> "Aucune série dans cette catégorie."
-        visible.items.isEmpty() ->
-            if (visible.progressNeeded > visible.progressKnown) "Calcul de la progression…" else "Aucune série ne correspond à ces filtres."
+        visible.items.isEmpty() -> when {
+            visible.progressNeeded > visible.progressKnown -> "Calcul de la progression…"
+            ui.exclusiveOnly && visible.platformsKnown < ui.results.size -> "Vérification des plateformes…"
+            else -> "Aucune série ne correspond à ces filtres."
+        }
         else -> null
     }
     PosterGrid(
@@ -345,12 +386,20 @@ fun BrowseScreen(onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (Int) -> Unit = {
                 )
                 CycleButton("Tri", ui.sort.label, vm::nextSort)
                 CycleButton("MAL ≥", ui.minScore?.toString() ?: "toutes", vm::nextMinScore)
+                if (graph.settings.tmdbKey.isNotBlank()) {
+                    FilterChip(selected = ui.exclusiveOnly, onClick = vm::toggleExclusive) {
+                        Text(if (ui.exclusiveOnly) "✓ Exclusivités" else "Exclusivités")
+                    }
+                }
             }
             StatusChips(ui.statuses, vm::toggleStatus)
             Text(
                 buildString {
                     append("${visible.items.size}/${ui.results.size} séries · MAL ${visible.malKnown}/${ui.results.size}")
                     if (visible.progressNeeded > 0) append(" · progression ${visible.progressKnown}/${visible.progressNeeded}")
+                    if (ui.exclusiveOnly) {
+                        append(" · exclusivités (une seule plateforme en France, d'après TMDB) : vérifiées ${visible.platformsKnown}/${ui.results.size}")
+                    }
                     if (ui.statuses.isNotEmpty() && Provider.ADN in providers && !adnLoggedIn) append(" · statut ADN : connecte ADN dans Réglages")
                 },
                 style = MaterialTheme.typography.labelMedium,

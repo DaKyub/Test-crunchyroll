@@ -1,5 +1,11 @@
 package com.dakyub.crunchymal.ui.components
 
+import com.dakyub.crunchymal.ui.screens.CycleButton
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.lazy.LazyRow
@@ -20,6 +26,12 @@ import com.dakyub.crunchymal.data.Provider
 import com.dakyub.crunchymal.data.SeriesRef
 import com.dakyub.crunchymal.data.WatchPlatforms
 import com.dakyub.crunchymal.data.mal.MalAnime
+
+/** Filtre « Plateforme » des listes d'animes MAL (null = toutes). */
+val PlatformFilterOptions = listOf<String?>(null, "Crunchyroll", "ADN", "Netflix", "Prime Video", "Disney+")
+
+fun nextPlatformFilter(current: String?): String? =
+    PlatformFilterOptions[(PlatformFilterOptions.indexOf(current) + 1) % PlatformFilterOptions.size]
 
 /** Carte d'un anime MAL, avec la fiche Crunchyroll / ADN à ouvrir si l'app l'a trouvée. */
 data class MalCardItem(val malId: Int, val card: CardItem, val target: SeriesRef?)
@@ -79,13 +91,17 @@ fun MalRecommendationsRow(malId: Int?, onOpenSeries: (SeriesRef) -> Unit, onOpen
     val providers by graph.providers.selected.collectAsState()
     val crLoggedIn by graph.auth.loggedIn.collectAsState()
     val seen by graph.mal.myListSeenIds.collectAsState()
+    var platform by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(recommendations) {
         recommendations?.let { graph.prepareMalAnime(it) }
         graph.mal.refreshMyListSeenIds()
     }
     val list = recommendations
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Si tu as aimé cette série (recommandations MAL)", style = MaterialTheme.typography.titleMedium)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text("Si tu as aimé cette série (recommandations MAL)", style = MaterialTheme.typography.titleMedium)
+            if (!list.isNullOrEmpty()) CycleButton("Plateforme", platform ?: "toutes") { platform = nextPlatformFilter(platform) }
+        }
         when {
             list == null -> Text("Chargement…", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             list.isEmpty() -> Text("Aucune recommandation sur MAL.", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -102,6 +118,10 @@ fun MalRecommendationsRow(malId: Int?, onOpenSeries: (SeriesRef) -> Unit, onOpen
                             subtitle = if (anime.malId in seen) "✓ dans ta liste MAL" else airingLabel(anime.airing),
                         )
                     }
+                    .filter { platform == null || platform in it.card.badges }
+                if (items.isEmpty()) {
+                    Text("Aucune recommandation trouvée sur $platform.", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     items(items, key = { it.malId }) { item ->
                         MediaCard(

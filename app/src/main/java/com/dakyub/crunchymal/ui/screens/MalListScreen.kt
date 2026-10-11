@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal.ui.screens
 
+import com.dakyub.crunchymal.ui.components.nextPlatformFilter
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
 import com.dakyub.crunchymal.ui.components.nextCompanionFilter
@@ -57,6 +58,8 @@ data class MalListUi(
     val availableOnly: Boolean = false,
     val sort: MalListSort = MalListSort.MAL,
     val companion: CompanionFilter? = null,
+    /** Plateforme où la série est disponible (null = toutes). */
+    val platform: String? = null,
 )
 
 /** Carte de la liste MAL + série correspondante sur Crunchyroll / ADN (si trouvée). */
@@ -106,6 +109,7 @@ class MalListViewModel(private val graph: Graph) : ViewModel() {
             )
         }
             .filter { (_, row) -> !u.availableOnly || row.target != null }
+            .filter { (_, row) -> u.platform == null || u.platform in row.card.badges }
             .let { list ->
                 when (u.sort) {
                     MalListSort.MAL -> list.sortedByDescending { it.first.anime.score ?: -1.0 }
@@ -144,6 +148,10 @@ class MalListViewModel(private val graph: Graph) : ViewModel() {
 
     fun toggleAvailableOnly() {
         ui.value = ui.value.copy(availableOnly = !ui.value.availableOnly)
+    }
+
+    fun nextPlatform() {
+        ui.value = ui.value.copy(platform = nextPlatformFilter(ui.value.platform))
     }
 
     fun nextCompanion() {
@@ -200,6 +208,7 @@ fun MalListScreen(onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (Int) -> Unit) {
                 modifier = Modifier.padding(vertical = 2.dp).horizontalScroll(rememberScrollState()),
             ) {
                 CycleButton("Tri", ui.sort.label, vm::nextSort)
+                CycleButton("Plateforme", ui.platform ?: "toutes", vm::nextPlatform)
                 CycleButton("Vu avec", ui.companion?.label ?: "toutes", vm::nextCompanion)
                 FilterChip(selected = ui.availableOnly, onClick = vm::toggleAvailableOnly) {
                     Text(if (ui.availableOnly) "✓ Disponibles seulement" else "Disponibles seulement", style = MaterialTheme.typography.labelMedium)

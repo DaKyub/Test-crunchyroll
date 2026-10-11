@@ -5,7 +5,9 @@ import com.dakyub.crunchymal.data.mal.MalAnime
 import com.dakyub.crunchymal.data.mal.TitleMatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -91,6 +93,21 @@ private data class TmdbSeasonInfo(
 private data class TmdbTvDetails(val seasons: List<TmdbSeasonInfo> = emptyList())
 
 /**
+ * Recherche TMDB : [titles] à essayer, [allTitles] (noms de saison), film ou série, année de diffusion.
+ * [seasonAware] : si le titre ne correspond qu'en partie, prendre les plateformes de la saison concernée.
+ */
+private data class TmdbQuery(
+    val titles: List<String>,
+    val allTitles: List<String>,
+    val movie: Boolean,
+    val year: Int?,
+    val seasonAware: Boolean = true,
+)
+
+private fun MalAnime.tmdbQuery() =
+    TmdbQuery(listOfNotNull(titleEnglish, title).filter { it.isNotBlank() }, allTitles, type?.lowercase() == "movie", startYear)
+
+/**
  * Où regarder une série de la liste MAL : rubrique « Où regarder » de TMDB pour la France (données
  * JustWatch, clé TMDB nécessaire) ; si TMDB ne trouve pas la série, section « Streaming Platforms »
  * de la page MAL (liste mondiale). Recherches en arrière-plan, cache disque d'une semaine.
@@ -107,6 +124,59 @@ class WatchPlatformsRepository(context: Context, private val settings: Settings)
 
     private val _found = MutableStateFlow(load())
     val found: StateFlow<Map<Int, WatchPlatforms>> = _found
+
+    private val catalogFile = File(context.filesDir, "catalog_platforms_cache.json")
+    private val catalogPending = ConcurrentHashMap.newKeySet<String>()
+    private var catalogSave: Job? = null
+    private val _catalog = MutableStateFlow(
+        runCatching { Http.json.decodeFromString<Map<String, WatchPlatforms>>(catalogFile.readText()) }.getOrElse { emptyMap() }
+    )
+
+    /**
+     * Plateformes en France des séries des catalogues de Parcourir (TMDB), par clé : « tmdb:<id> » pour les
+     * catalogues Netflix / Prime / Disney+, « CRUNCHYROLL:<id> » ou « ADN:<id> » (recherche par titre).
+     * source vide = série introuvable sur TMDB.
+     */
+    val catalog: StateFlow<Map<String, WatchPlatforms>> = _catalog
+
+    /** Série d'un catalogue TMDB : ses plateformes en France. */
+    fun requestTmdbShow(tvId: Int) = requestCatalog("tmdb:$tvId") {
+        val france = Http.json.decodeFromString<TmdbProviders>(tmdb("tv/$tvId/watch/providers") {}).results["FR"]
+        WatchPlatforms(france?.platforms().orEmpty(), "TMDB", System.currentTimeMillis())
+    }
+
+    /** Série Crunchyroll / ADN : retrouvée sur TMDB par son titre. */
+    fun requestByTitle(key: String, titles: List<String>) = requestCatalog(key) {
+        val clean = titles.map { it.trim() }.filter { it.length >= 2 }.distinct()
+        val names = fromTmdb(TmdbQuery(clean.take(3), clean, movie = false, year = null, seasonAware = false))
+        WatchPlatforms(names.orEmpty(), if (names == null) "" else "TMDB", System.currentTimeMillis())
+    }
+
+    private fun requestCatalog(key: String, lookup: suspend () -> WatchPlatforms) {
+        if (settings.tmdbKey.isBlank()) return
+        val existing = _catalog.value[key]
+        if (existing != null && System.currentTimeMillis() - existing.checkedAt < TTL) return
+        if (!catalogPending.add(key)) return
+        scope.launch {
+            try {
+                val result = semaphore.withPermit { runCatching { lookup() }.getOrNull() } ?: return@launch
+                _catalog.update { it + (key to result) }
+                saveCatalogSoon()
+            } finally {
+                catalogPending.remove(key)
+            }
+        }
+    }
+
+    /** Enregistrement groupé : un catalogue vérifie des centaines de séries d'affilée. */
+    @Synchronized
+    private fun saveCatalogSoon() {
+        if (catalogSave?.isActive == true) return
+        catalogSave = scope.launch {
+            delay(3_000)
+            writeLock.withLock { runCatching { catalogFile.writeText(Http.json.encodeToString(_catalog.value)) } }
+        }
+    }
 
     // Noms réharmonisés au chargement : le cache peut venir d'une version qui en reconnaissait moins.
     private fun load(): Map<Int, WatchPlatforms> = runCatching {
@@ -132,7 +202,7 @@ class WatchPlatformsRepository(context: Context, private val settings: Settings)
     /** null = les deux sources ont échoué (réseau…) : rien n'est mis en cache, on réessaiera. */
     private suspend fun lookup(anime: MalAnime): WatchPlatforms? {
         val now = System.currentTimeMillis()
-        val tmdb = if (settings.tmdbKey.isNotBlank()) runCatching { fromTmdb(anime) } else null
+        val tmdb = if (settings.tmdbKey.isNotBlank()) runCatching { fromTmdb(anime.tmdbQuery()) } else null
         tmdb?.getOrNull()?.let { return WatchPlatforms(it, "TMDB", now) }
         val mal = runCatching { fromMalPage(anime.malId) }
         mal.getOrNull()?.let { return WatchPlatforms(it, if (it.isEmpty()) "" else "MAL", now) }
@@ -141,9 +211,9 @@ class WatchPlatformsRepository(context: Context, private val settings: Settings)
     }
 
     /** Plateformes en France d'après TMDB, ou null si la série n'y est pas trouvée. */
-    private suspend fun fromTmdb(anime: MalAnime): List<String>? {
-        val kind = if (anime.type?.lowercase() == "movie") "movie" else "tv"
-        val titles = listOfNotNull(anime.titleEnglish, anime.title).filter { it.isNotBlank() }
+    private suspend fun fromTmdb(query: TmdbQuery): List<String>? {
+        val kind = if (query.movie) "movie" else "tv"
+        val titles = query.titles
         val queries = titles.flatMap { listOf(it, TitleMatcher.baseTitle(it)) }.filter { it.length >= 2 }.distinct().take(4)
         for (query in queries) {
             val hits = Http.json.decodeFromString<TmdbHits>(tmdb("search/$kind") { addQueryParameter("query", query) }).results
@@ -155,7 +225,7 @@ class WatchPlatformsRepository(context: Context, private val settings: Settings)
             // Titre MAL ≠ titre TMDB : la fiche MAL est sans doute une saison d'une série TMDB plus large
             // (Steel Ball Run dans JoJo) ; on prend alors les plateformes de cette saison.
             val showSimilarity = best.names.maxOfOrNull { n -> titles.maxOf { TitleMatcher.similarity(it, n) } } ?: 0.0
-            if (kind == "tv" && showSimilarity < 0.9) seasonPlatforms(best.id, anime, titles)?.let { return it }
+            if (kind == "tv" && query.seasonAware && showSimilarity < 0.9) seasonPlatforms(best.id, query)?.let { return it }
             val france = Http.json.decodeFromString<TmdbProviders>(tmdb("$kind/${best.id}/watch/providers") {}).results["FR"]
             return france?.platforms().orEmpty()
         }
@@ -165,9 +235,9 @@ class WatchPlatformsRepository(context: Context, private val settings: Settings)
     private fun TmdbCountry.platforms() = (flatrate + free + ads).map { normalize(it.name) }.distinct()
 
     /** Plateformes en France de la saison TMDB qui correspond à la fiche MAL, ou null (on garde celles de la série). */
-    private suspend fun seasonPlatforms(tvId: Int, anime: MalAnime, titles: List<String>): List<String>? {
+    private suspend fun seasonPlatforms(tvId: Int, query: TmdbQuery): List<String>? {
         val seasons = runCatching { Http.json.decodeFromString<TmdbTvDetails>(tmdb("tv/$tvId") {}).seasons }.getOrNull() ?: return null
-        val season = matchSeason(anime, titles, seasons) ?: return null
+        val season = matchSeason(query, seasons) ?: return null
         val france = runCatching {
             Http.json.decodeFromString<TmdbProviders>(tmdb("tv/$tvId/season/${season.number}/watch/providers") {}).results["FR"]
         }.getOrNull()
@@ -175,10 +245,11 @@ class WatchPlatformsRepository(context: Context, private val settings: Settings)
     }
 
     /** Saison par son nom ("Steel Ball Run", "Season 3"…) contenu dans un titre MAL, sinon par l'année de diffusion. */
-    private fun matchSeason(anime: MalAnime, titles: List<String>, seasons: List<TmdbSeasonInfo>): TmdbSeasonInfo? {
+    private fun matchSeason(query: TmdbQuery, seasons: List<TmdbSeasonInfo>): TmdbSeasonInfo? {
+        val titles = query.titles
         val candidates = seasons.filter { it.number > 0 }
         fun words(text: String) = text.lowercase().split(Regex("[^\\p{L}\\p{N}]+")).filter { it.isNotBlank() }
-        val titleWords = (titles + anime.allTitles).map { words(it).toSet() }
+        val titleWords = (titles + query.allTitles).map { words(it).toSet() }
         val parts = titles.flatMap { listOf(it, it.substringAfter(':', ""), it.substringBefore(':')) }
             .map { it.trim() }.filter { it.length >= 3 }
         val byName = candidates.map { season ->
@@ -188,7 +259,7 @@ class WatchPlatformsRepository(context: Context, private val settings: Settings)
             season to (if (contained) maxOf(similarity, 0.9) else similarity)
         }.maxByOrNull { it.second }
         if (byName != null && byName.second >= 0.6) return byName.first
-        val year = anime.startYear ?: return null
+        val year = query.year ?: return null
         return candidates.firstOrNull { it.airDate?.take(4)?.toIntOrNull() == year }
     }
 
@@ -274,7 +345,11 @@ class WatchPlatformsRepository(context: Context, private val settings: Settings)
 
     suspend fun clear() {
         _found.value = emptyMap()
-        writeLock.withLock { file.delete() }
+        _catalog.value = emptyMap()
+        writeLock.withLock {
+            file.delete()
+            catalogFile.delete()
+        }
     }
 
     private companion object {
