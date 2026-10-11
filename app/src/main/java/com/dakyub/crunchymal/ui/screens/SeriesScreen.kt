@@ -1,6 +1,8 @@
 package com.dakyub.crunchymal.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -272,7 +274,8 @@ fun SeriesScreen(seriesId: String, onOpenSeries: (SeriesRef) -> Unit = {}, onOpe
                         }
                     }
                     item {
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        // Rangée défilante : les boutons hors écran restent accessibles à la télécommande.
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
                             val nextId = summary?.nextEpisodeId
                             Button(onClick = {
                                 if (nextId != null) OfficialApp.openEpisode(context, nextId, series.id) else OfficialApp.openSeries(context, series.id)
@@ -406,7 +409,7 @@ fun SeriesScreen(seriesId: String, onOpenSeries: (SeriesRef) -> Unit = {}, onOpe
 }
 
 @Composable
-private fun MalCorrectionDialog(malKey: String, initialQuery: String, onDismiss: () -> Unit) {
+internal fun MalCorrectionDialog(malKey: String, initialQuery: String, onDismiss: () -> Unit) {
     val mal = LocalGraph.current.mal
     val scope = rememberCoroutineScope()
     var query by remember { mutableStateOf(initialQuery) }

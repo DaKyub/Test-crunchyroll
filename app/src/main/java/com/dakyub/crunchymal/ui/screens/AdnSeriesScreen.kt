@@ -1,5 +1,7 @@
 package com.dakyub.crunchymal.ui.screens
 
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -187,6 +189,14 @@ fun AdnSeriesScreen(showId: String, onOpenSeries: (SeriesRef) -> Unit = {}, onOp
     if (malListOpen && show != null) {
         MalListDialog(choices = listOf(MalEntryChoice("Série", show.toRef().malKey)), onDismiss = { malListOpen = false })
     }
+    var correcting by remember { mutableStateOf(false) }
+    if (correcting && show != null) {
+        MalCorrectionDialog(
+            malKey = show.toRef().malKey,
+            initialQuery = show.originalTitle?.takeIf { it.isNotBlank() && it.none { c -> c.code > 0x2E80 } } ?: show.title,
+            onDismiss = { correcting = false },
+        )
+    }
 
     when {
         state.loading && show == null -> CenteredMessage("Chargement…")
@@ -256,7 +266,8 @@ fun AdnSeriesScreen(showId: String, onOpenSeries: (SeriesRef) -> Unit = {}, onOp
                                 // Focus sur le résumé : la fiche remonte tout en haut (titre, note MAL).
                                 ExpandableSynopsis(it, onFocused = { scope.launch { delay(150); listState.animateScrollToItem(0) } })
                             }
-                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            // Rangée défilante : les boutons hors écran restent accessibles à la télécommande.
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
                                 Button(onClick = { if (next != null) AdnApp.open(context, show, next.video) else AdnApp.openShow(context, show) }) {
                                     val episode = next?.video?.let { v -> v.number?.takeIf { it.isNotBlank() } ?: v.label }
                                     Text(
@@ -279,6 +290,7 @@ fun AdnSeriesScreen(showId: String, onOpenSeries: (SeriesRef) -> Unit = {}, onOp
                                     ) { Text(if (inList) "✓ Watchlist ADN" else "+ Watchlist ADN") }
                                 }
                                 OutlinedButton(onClick = { malListOpen = true }) { Text("Ma liste MAL") }
+                                OutlinedButton(onClick = { correcting = true }) { Text("Corriger MAL") }
                                 if (adnLoggedIn) {
                                     OutlinedButton(onClick = { vm.refreshProgress() }) { Text("↻") }
                                 }
