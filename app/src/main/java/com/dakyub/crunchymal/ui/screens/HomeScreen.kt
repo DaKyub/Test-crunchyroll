@@ -1,5 +1,9 @@
 package com.dakyub.crunchymal.ui.screens
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
+import com.dakyub.crunchymal.ui.components.nextCompanionFilter
+import com.dakyub.crunchymal.ui.components.CompanionFilter
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -109,8 +113,10 @@ data class HomeFilters(
     val sort: HomeSort = HomeSort.DEFAULT,
     val statuses: Set<WatchStatus> = emptySet(),
     val minScore: Double? = null,
+    val companion: CompanionFilter? = null,
 ) {
-    val needsMal: Boolean get() = sort == HomeSort.MAL || minScore != null
+    /** Le filtre « Vu avec » a besoin de la fiche MAL de chaque série (les marques sont des tags MAL). */
+    val needsMal: Boolean get() = sort == HomeSort.MAL || minScore != null || companion != null
 }
 
 data class HomeVisible(val rows: List<HomeRow> = emptyList(), val progressKnown: Int = 0, val progressNeeded: Int = 0)
@@ -121,13 +127,17 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
     private var progressJob: Job? = null
 
     /** Rangées après filtres (statut, note MAL) et tri ; les rangées vides disparaissent. */
-    val visible = combine(state, filters, graph.progress.summaries, graph.mal.records, graph.mal.myListSeenIds) { st, f, summaries, mal, malSeen ->
+    private val seenAndMarks = combine(graph.mal.myListSeenIds, graph.companions.byMalId) { seen, marks -> seen to marks }
+
+    val visible = combine(state, filters, graph.progress.summaries, graph.mal.records, seenAndMarks) { st, f, summaries, mal, seenMarks ->
+        val (malSeen, marks) = seenMarks
         fun statusOf(item: CardItem) = summaries[item.series.progressKey]?.status
         val rows = st.rows.mapNotNull { row ->
             val items = row.items
                 .filter { f.statuses.accepts(statusOf(it)) }
                 .filter { item -> f.minScore == null || (mal[item.series.malKey]?.score ?: -1.0) >= f.minScore }
                 .filter { item -> row.minMal == null || (mal[item.series.malKey]?.score ?: -1.0) >= row.minMal }
+                .filter { item -> f.companion?.accepts(mal[item.series.malKey]?.malId?.let { marks[it] }.orEmpty()) ?: true }
                 // Pépites : on retire aussi ce qui est déjà commencé (progression) ou vu d'après la liste MAL.
                 .filter { item ->
                     row.minMal == null || (
@@ -162,6 +172,11 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
 
     fun toggleStatus(status: WatchStatus) {
         filters.value = filters.value.copy(statuses = filters.value.statuses.toggle(status))
+        applyFilterNeeds()
+    }
+
+    fun nextCompanion() {
+        filters.value = filters.value.copy(companion = nextCompanionFilter(filters.value.companion, graph.companions.people.value))
         applyFilterNeeds()
     }
 
@@ -457,6 +472,7 @@ fun HomeScreen(onOpenSeries: (SeriesRef) -> Unit) {
     val filters by vm.filters.collectAsState()
     val providers by graph.providers.selected.collectAsState()
     val adnLoggedIn by graph.adn.loggedIn.collectAsState()
+    val malLoggedIn by graph.malAuth.loggedIn.collectAsState()
     LaunchedEffect(providers, adnLoggedIn) { vm.ensure(providers, adnLoggedIn) }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.onResume() }
     val context = LocalContext.current
@@ -474,9 +490,11 @@ fun HomeScreen(onOpenSeries: (SeriesRef) -> Unit) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
                     ) {
                         CycleButton("Tri", filters.sort.label, vm::nextSort)
                         CycleButton("MAL ≥", filters.minScore?.toString() ?: "toutes", vm::nextMinScore)
+                        if (malLoggedIn) CycleButton("Vu avec", filters.companion?.label ?: "toutes", vm::nextCompanion)
                         if (visible.progressNeeded > 0) {
                             Text(
                                 "progression ${visible.progressKnown}/${visible.progressNeeded}",
