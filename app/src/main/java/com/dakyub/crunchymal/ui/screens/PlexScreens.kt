@@ -93,6 +93,9 @@ private fun PlexItem.status(): WatchStatus = when {
     else -> WatchStatus.IN_PROGRESS
 }
 
+/** Puce « Toutes » : séries de toutes les bibliothèques de séries réunies. */
+private val AllLibraries = PlexDirectory(key = "", title = "Toutes", type = "show")
+
 data class PlexUi(
     val loading: Boolean = true,
     val error: String? = null,
@@ -130,9 +133,14 @@ class PlexViewModel(private val graph: Graph) : ViewModel() {
             ui.value = ui.value.copy(loading = true, error = null)
             runCatching {
                 val libraries = ui.value.libraries.ifEmpty { graph.plex.libraries() }
-                val selected = library ?: libraries.firstOrNull()
+                // Par défaut, toutes les bibliothèques de séries ensemble.
+                val selected = library ?: if (libraries.size > 1) AllLibraries else libraries.firstOrNull()
                 val onDeck = async { runCatching { graph.plex.onDeck() }.getOrDefault(emptyList()) }
-                val shows = selected?.let { graph.plex.shows(it.key) }.orEmpty()
+                val shows = when {
+                    selected == null -> emptyList()
+                    selected == AllLibraries -> libraries.flatMap { graph.plex.shows(it.key) }.distinctBy { it.ratingKey }
+                    else -> graph.plex.shows(selected.key)
+                }
                 ui.value = ui.value.copy(loading = false, libraries = libraries, library = selected, shows = shows, onDeck = onDeck.await())
                 shows.forEach { graph.mal.request("plex:${it.ratingKey}", it.showRef(graph.plex).malTitles) }
             }.onFailure { ui.value = ui.value.copy(loading = false, error = it.message ?: "Serveur Plex injoignable") }
@@ -176,7 +184,7 @@ fun PlexScreen(onOpenPlexShow: (String) -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 2.dp)) {
                 Text(graph.plex.serverName, style = MaterialTheme.typography.labelLarge)
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(ui.libraries) { library ->
+                    items(if (ui.libraries.size > 1) listOf(AllLibraries) + ui.libraries else ui.libraries) { library ->
                         FilterChip(selected = library == ui.library, onClick = { vm.load(library) }) { Text(library.title) }
                     }
                 }

@@ -105,6 +105,8 @@ data class PlexItem(
 private data class PlexContainer(
     @SerialName("Directory") val directories: List<PlexDirectory> = emptyList(),
     @SerialName("Metadata") val items: List<PlexItem> = emptyList(),
+    /** Nombre total d'éléments quand le serveur renvoie la liste par pages. */
+    val totalSize: Int? = null,
 )
 
 @Serializable
@@ -231,14 +233,32 @@ class PlexApi(context: Context) {
     /** Bibliothèques de séries. */
     suspend fun libraries(): List<PlexDirectory> = get("/library/sections").directories.filter { it.type == "show" }
 
-    suspend fun shows(sectionKey: String): List<PlexItem> = get("/library/sections/$sectionKey/all?type=2").items
+    suspend fun shows(sectionKey: String): List<PlexItem> = getAll("/library/sections/$sectionKey/all?type=2")
+
+    /**
+     * Liste complète, lue par pages de [PAGE] : certains serveurs n'envoient qu'une partie des éléments
+     * d'une grande bibliothèque si on ne demande pas explicitement la suite.
+     */
+    private suspend fun getAll(path: String): List<PlexItem> {
+        val out = mutableListOf<PlexItem>()
+        var start = 0
+        while (true) {
+            val separator = if ('?' in path) '&' else '?'
+            val page = get("$path${separator}X-Plex-Container-Start=$start&X-Plex-Container-Size=$PAGE")
+            out += page.items
+            start += page.items.size
+            val total = page.totalSize ?: break
+            if (page.items.isEmpty() || start >= total) break
+        }
+        return out.distinctBy { it.ratingKey }
+    }
 
     /** Séries d'une bibliothèque avec leurs identifiants externes (TMDB…). */
     suspend fun showsWithGuids(sectionKey: String): List<PlexItem> =
-        get("/library/sections/$sectionKey/all?type=2&includeGuids=1").items
+        getAll("/library/sections/$sectionKey/all?type=2&includeGuids=1")
 
     /** Toutes les saisons d'une bibliothèque de séries. */
-    suspend fun seasons(sectionKey: String): List<PlexItem> = get("/library/sections/$sectionKey/all?type=3").items
+    suspend fun seasons(sectionKey: String): List<PlexItem> = getAll("/library/sections/$sectionKey/all?type=3")
 
     /** « Reprendre » : épisodes en cours ou suivants (On Deck). */
     suspend fun onDeck(): List<PlexItem> = get("/library/onDeck").items.filter { it.type == "episode" }
@@ -246,7 +266,7 @@ class PlexApi(context: Context) {
     suspend fun item(ratingKey: String): PlexItem? = get("/library/metadata/$ratingKey").items.firstOrNull()
 
     /** Tous les épisodes d'une série, dans l'ordre. */
-    suspend fun episodes(ratingKey: String): List<PlexItem> = get("/library/metadata/$ratingKey/allLeaves").items
+    suspend fun episodes(ratingKey: String): List<PlexItem> = getAll("/library/metadata/$ratingKey/allLeaves")
 
     /** En-têtes du contrôle à distance Plex (« Plex Companion ») : sondage du diagnostic. */
     private fun companionRequest(url: String) = Request.Builder().url(url)
@@ -314,6 +334,14 @@ class PlexApi(context: Context) {
         }
 
         lines += ""
+        val sections = runCatching { get("/library/sections").directories }
+        sections.exceptionOrNull()?.let { lines += "Bibliothèques : erreur ${it.message?.take(120)}" }
+        sections.getOrDefault(emptyList()).forEach { section ->
+            val count = if (section.type == "show") runCatching { getAll("/library/sections/${section.key}/all?type=2").size }.getOrNull() else null
+            lines += "Bibliothèque « ${section.title} » · type ${section.type}" + (count?.let { " · $it séries lues" } ?: "")
+        }
+
+        lines += ""
         val accountDevices = runCatching { devices() }
         accountDevices.exceptionOrNull()?.let { lines += "plex.tv : erreur ${it.message?.take(120)}" }
         val list = accountDevices.getOrDefault(emptyList())
@@ -336,5 +364,9 @@ class PlexApi(context: Context) {
         if (path.isNullOrBlank() || serverUri.isBlank()) return null
         val encoded = URLEncoder.encode(path, "UTF-8")
         return "$serverUri/photo/:/transcode?width=$width&height=$height&minSize=1&upscale=1&url=$encoded&X-Plex-Token=$serverToken"
+    }
+
+    private companion object {
+        const val PAGE = 300
     }
 }
