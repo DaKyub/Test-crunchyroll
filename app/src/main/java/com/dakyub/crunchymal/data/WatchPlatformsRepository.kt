@@ -211,9 +211,9 @@ class WatchPlatformsRepository(context: Context, private val settings: Settings)
     }
 
     /** Plateformes en France d'après TMDB, ou null si la série n'y est pas trouvée. */
-    private suspend fun fromTmdb(query: TmdbQuery): List<String>? {
-        val kind = if (query.movie) "movie" else "tv"
-        val titles = query.titles
+    private suspend fun fromTmdb(search: TmdbQuery): List<String>? {
+        val kind = if (search.movie) "movie" else "tv"
+        val titles = search.titles
         val queries = titles.flatMap { listOf(it, TitleMatcher.baseTitle(it)) }.filter { it.length >= 2 }.distinct().take(4)
         for (query in queries) {
             val hits = Http.json.decodeFromString<TmdbHits>(tmdb("search/$kind") { addQueryParameter("query", query) }).results
@@ -225,7 +225,7 @@ class WatchPlatformsRepository(context: Context, private val settings: Settings)
             // Titre MAL ≠ titre TMDB : la fiche MAL est sans doute une saison d'une série TMDB plus large
             // (Steel Ball Run dans JoJo) ; on prend alors les plateformes de cette saison.
             val showSimilarity = best.names.maxOfOrNull { n -> titles.maxOf { TitleMatcher.similarity(it, n) } } ?: 0.0
-            if (kind == "tv" && query.seasonAware && showSimilarity < 0.9) seasonPlatforms(best.id, query)?.let { return it }
+            if (kind == "tv" && search.seasonAware && showSimilarity < 0.9) seasonPlatforms(best.id, search)?.let { return it }
             val france = Http.json.decodeFromString<TmdbProviders>(tmdb("$kind/${best.id}/watch/providers") {}).results["FR"]
             return france?.platforms().orEmpty()
         }
