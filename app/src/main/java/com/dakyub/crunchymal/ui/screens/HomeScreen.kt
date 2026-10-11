@@ -1,5 +1,7 @@
 package com.dakyub.crunchymal.ui.screens
 
+import com.dakyub.crunchymal.PlexApp
+import com.dakyub.crunchymal.data.plexShowKey
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
 import com.dakyub.crunchymal.ui.components.nextCompanionFilter
@@ -215,8 +217,8 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
     private var done = BooleanArray(0)
     private var firstError: String? = null
     private var lastResumeRefresh = 0L
+    /** « Reprendre » unique : Crunchyroll, ADN et Plex mêlés par date de visionnage. */
     private val continueLoader = continueWatching()
-    private val adnContinueLoader = adnContinueWatching()
     private val newEpisodesLoader = newEpisodesRow()
     private val gemsLoader = gemsRow()
     private val adnGemsLoader = adnGemsRow()
@@ -242,13 +244,13 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
                 list += official.drop(2)
             }
             if (Provider.ADN in providers) {
-                if (adnLoggedIn) {
-                    // « ADN · Reprendre » juste après la rangée Crunchyroll équivalente (ou en tête).
-                    val crContinue = list.indexOfFirst { it.second === continueLoader }
-                    list.add(crContinue + 1, "ADN · Reprendre" to adnContinueLoader)
-                    if (Provider.CRUNCHYROLL !in providers) list.add(0, "Nouveaux épisodes pour toi" to newEpisodesLoader)
-                }
+                if (adnLoggedIn && Provider.CRUNCHYROLL !in providers) list.add(0, "Nouveaux épisodes pour toi" to newEpisodesLoader)
                 list += adnLoaders()
+            }
+            // « Reprendre » (tous services) : à sa place dans le fil Crunchyroll, sinon juste après les nouveaux épisodes.
+            if (list.none { it.second === continueLoader }) {
+                val after = list.indexOfFirst { it.second === newEpisodesLoader }
+                list.add(after + 1, "Reprendre" to continueLoader)
             }
 
             // Les rangées s'affichent au fur et à mesure, dans l'ordre du fil officiel.
@@ -279,7 +281,7 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
             publish()
             applyFilterNeeds()
             // Chaîne de l'écran d'accueil Android TV : nouveaux épisodes puis reprises.
-            val channelItems = listOf(newEpisodesLoader, continueLoader, adnContinueLoader).flatMap { loader ->
+            val channelItems = listOf(newEpisodesLoader, continueLoader).flatMap { loader ->
                 list.indexOfFirst { it.second === loader }.takeIf { it >= 0 }?.let { res.getOrNull(it) }.orEmpty()
             }
             if (channelItems.isNotEmpty()) launch { graph.homeChannel.publish(channelItems) }
@@ -305,7 +307,7 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
     fun onResume() {
         if (System.currentTimeMillis() - lastResumeRefresh < 20_000) return
         lastResumeRefresh = System.currentTimeMillis()
-        for (loader in listOf(continueLoader, adnContinueLoader)) {
+        for (loader in listOf(continueLoader)) {
             val index = loaders.indexOfFirst { it.second === loader }
             if (index < 0) continue
             viewModelScope.launch {
@@ -321,9 +323,7 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
 
     private fun row(block: suspend () -> List<CardItem>): suspend () -> List<CardItem> = block
 
-    private fun continueWatching(): suspend () -> List<CardItem> = { graph.crContinueCards() }
-
-    private fun adnContinueWatching(): suspend () -> List<CardItem> = { graph.adnContinueCards(viewModelScope) }
+    private fun continueWatching(): suspend () -> List<CardItem> = { graph.resumeCards(viewModelScope, graph.providers.selected.value) }
 
     private fun newEpisodesRow(): suspend () -> List<CardItem> = { graph.newEpisodeCards(graph.providers.selected.value) }
 
@@ -350,7 +350,7 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
             val title = item.title.ifBlank { item.sourceMediaTitle }
             when (item.resourceType) {
                 "dynamic_collection" -> when (item.responseType) {
-                    "history" -> title.ifBlank { "Continuer à regarder" } to continueLoader
+                    "history" -> "Reprendre" to continueLoader
                     "watchlist" -> title.ifBlank { "Ma watchlist" } to watchlistRow()
                     "recommendations" -> title.ifBlank { "Recommandé pour vous" } to row {
                         api.recommendations().map { it.toCard() }
@@ -456,7 +456,7 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
     }
 
     private fun fallbackLoaders(): List<Pair<String, suspend () -> List<CardItem>>> = listOf(
-        "Continuer à regarder" to continueLoader,
+        "Reprendre" to continueLoader,
         "Ma watchlist" to watchlistRow(),
         "Populaires" to row { graph.api.browse("popularity").map { it.toSeriesCard() } },
         "Nouveautés" to row { graph.api.browse("newly_added").map { it.toSeriesCard() } },
@@ -464,7 +464,7 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
 }
 
 @Composable
-fun HomeScreen(onOpenSeries: (SeriesRef) -> Unit) {
+fun HomeScreen(onOpenSeries: (SeriesRef) -> Unit, onOpenPlexShow: (String) -> Unit = {}) {
     val graph = LocalGraph.current
     val vm = viewModel { HomeViewModel(graph) }
     val state by vm.state.collectAsState()
@@ -537,12 +537,17 @@ fun HomeScreen(onOpenSeries: (SeriesRef) -> Unit) {
                             MediaCard(
                                 item = item,
                                 onClick = {
+                                    val plexShow = item.series.plexShowKey
                                     when {
+                                        plexShow != null -> onOpenPlexShow(plexShow)
                                         item.series.id.isNotBlank() -> onOpenSeries(item.series)
                                         item.episodeId != null -> playEpisode(context, item.series, item.episodeId)
                                     }
                                 },
-                                onLongClick = item.episodeId?.let { id -> { playEpisode(context, item.series, id) } },
+                                // Appui long : lecture directe (épisodes Plex dans l'app Plex).
+                                onLongClick = item.plexEpisodeKey?.let { key ->
+                                    { PlexApp.open(context, graph.plex.machineId, key, graph.settings.plexLinkFormat) }
+                                } ?: item.episodeId?.let { id -> { playEpisode(context, item.series, id) } },
                             )
                         }
                     }

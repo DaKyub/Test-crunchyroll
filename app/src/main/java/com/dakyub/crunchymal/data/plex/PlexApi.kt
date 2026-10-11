@@ -96,6 +96,8 @@ data class PlexItem(
     val viewCount: Int = 0,
     val viewOffset: Long = 0,
     val duration: Long = 0,
+    /** Dernier visionnage (secondes depuis 1970), 0 si jamais vu. */
+    val lastViewedAt: Long = 0,
 ) {
     val watched: Boolean get() = viewCount > 0
     val episodeLabel: String get() = "S${parentIndex ?: "?"} E${index ?: "?"}"

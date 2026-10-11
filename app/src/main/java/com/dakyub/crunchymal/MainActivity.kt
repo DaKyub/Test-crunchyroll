@@ -176,7 +176,7 @@ private fun MainTabs(onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (Int) -> Unit
             UpdateBanner()
         }
         when (selected) {
-            0 -> HomeScreen(onOpenSeries)
+            0 -> HomeScreen(onOpenSeries, onOpenPlexShow)
             1 -> WatchlistScreen(onOpenSeries, SeriesListSource.STARTED)
             2 -> BrowseScreen(onOpenSeries, onOpenMal)
             3 -> CalendarScreen(onOpenSeries)

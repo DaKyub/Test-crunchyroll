@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal.ui.screens
 
+import com.dakyub.crunchymal.data.SeriesRef
 import com.dakyub.crunchymal.Graph
 import com.dakyub.crunchymal.data.CardItem
 import com.dakyub.crunchymal.data.DateUtils
@@ -36,12 +37,71 @@ suspend fun Graph.crContinueCards(): List<CardItem> {
     }
 }
 
+/** Carte « Reprendre » et date de son dernier visionnage (ms, 0 = inconnue). */
+private typealias Dated = Pair<CardItem, Long>
+
+/** Date inconnue : celle de l'élément précédent du même service (chaque liste va déjà du plus récent au plus ancien). */
+private fun List<Dated>.filled(): List<Dated> {
+    var last = Long.MAX_VALUE
+    return map { (card, date) ->
+        val value = if (date > 0) date else last
+        last = value
+        card to value
+    }
+}
+
+/**
+ * « Reprendre » unique : Crunchyroll, ADN et Plex mêlés, du plus récemment regardé au plus ancien.
+ * Lève l'erreur d'un service seulement si aucun n'a rien renvoyé.
+ */
+suspend fun Graph.resumeCards(background: CoroutineScope, providers: Set<Provider>): List<CardItem> = coroutineScope {
+    val crPart = async {
+        if (Provider.CRUNCHYROLL !in providers || !auth.loggedIn.value) return@async Result.success(emptyList<Dated>())
+        runCatching {
+            val cards = crContinueCards()
+            // Dates de l'historique Crunchyroll (en cache ; on ne les attend pas plus de 4 s).
+            val played = withTimeoutOrNull(4_000) { runCatching { history.lastPlayed() }.getOrNull() }.orEmpty()
+            cards.map { it to (DateUtils.parse(played[it.series.id])?.time ?: 0L) }
+        }
+    }
+    val adnPart = async {
+        if (Provider.ADN !in providers || !adn.loggedIn.value) Result.success(emptyList()) else runCatching { adnContinueDated(background) }
+    }
+    val plexPart = async { if (!plex.connected.value) Result.success(emptyList()) else runCatching { plexResumeCards() } }
+    val parts = listOf(crPart.await(), adnPart.await(), plexPart.await())
+    val merged = parts.flatMap { it.getOrDefault(emptyList()).filled() }.sortedByDescending { it.second }.map { it.first }
+    if (merged.isEmpty()) parts.firstNotNullOfOrNull { it.exceptionOrNull() }?.let { throw it }
+    merged
+}
+
+/** « Reprendre » Plex (On Deck) : épisodes en cours ou suivants, ouverts dans l'app Plex. */
+suspend fun Graph.plexResumeCards(): List<Pair<CardItem, Long>> = plex.onDeck().map { episode ->
+    val showKey = episode.grandparentRatingKey.orEmpty()
+    CardItem(
+        series = SeriesRef(
+            id = "plex-$showKey",
+            title = episode.grandparentTitle ?: episode.title,
+            wideUrl = plex.image(episode.thumb, 400, 225),
+            posterUrl = plex.image(episode.grandparentThumb, 240, 360),
+            malKeyOverride = "plex:$showKey",
+        ),
+        subtitle = (if (episode.viewOffset > 0) "Continuer" else "Suite") + " · ${episode.episodeLabel} · ${episode.title}",
+        episodeId = CardItem.PLEX_EPISODE + episode.ratingKey,
+        progress = episode.duration.takeIf { it > 0 }?.let { (episode.viewOffset.toFloat() / it).coerceIn(0f, 1f) }?.takeIf { it > 0f },
+        wide = true,
+        badges = listOf("Plex"),
+    ) to episode.lastViewedAt * 1000
+}
+
 /**
  * « Reprendre » ADN : dernière vidéo de chaque série de l'historique, ou la suivante si elle a été finie.
  * [background] : portée où la recherche de l'épisode suivant peut se terminer (et rester en cache)
  * quand la rangée ne l'attend plus.
  */
-suspend fun Graph.adnContinueCards(background: CoroutineScope): List<CardItem> {
+suspend fun Graph.adnContinueCards(background: CoroutineScope): List<CardItem> = adnContinueDated(background).map { it.first }
+
+/** Comme [adnContinueCards], avec la date du dernier visionnage de chaque série. */
+private suspend fun Graph.adnContinueDated(background: CoroutineScope): List<Pair<CardItem, Long>> {
     val recent = adn.viewingHistory()
         .filter { it.show != null }
         .sortedByDescending { it.user?.watchDate.orEmpty() }
@@ -52,8 +112,9 @@ suspend fun Graph.adnContinueCards(background: CoroutineScope): List<CardItem> {
             async {
                 val show = video.show!!
                 val user = video.user
+                val watchedAt = DateUtils.parse(user?.watchDate)?.time ?: 0L
                 if (user != null && !video.watched) {
-                    adnEpisodeCard(show, video, "Continuer", if (video.duration > 0) user.stoptime.toFloat() / video.duration else null)
+                    adnEpisodeCard(show, video, "Continuer", if (video.duration > 0) user.stoptime.toFloat() / video.duration else null) to watchedAt
                 } else {
                     // Épisode suivant : il faut la liste des épisodes, parfois très longue (One Piece) ;
                     // la rangée ne l'attend que 8 s.
@@ -63,7 +124,7 @@ suspend fun Graph.adnContinueCards(background: CoroutineScope): List<CardItem> {
                     val episodes = withTimeoutOrNull(8_000) { pending.await() }.orEmpty()
                     val index = episodes.indexOfFirst { it.video.id == video.id }
                     val next = if (index >= 0) episodes.drop(index + 1).firstOrNull { it.available } else null
-                    next?.let { adnEpisodeCard(show, it.video, "Suite", null) }
+                    next?.let { adnEpisodeCard(show, it.video, "Suite", null) to watchedAt }
                 }
             }
         }.awaitAll().filterNotNull()

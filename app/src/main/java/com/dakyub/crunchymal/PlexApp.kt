@@ -23,16 +23,21 @@ object PlexApp {
         "plex://play/?metadataKey=%2Flibrary%2Fmetadata%2F{key}&server={server}",
     )
 
-    fun open(context: Context, machineId: String, ratingKey: String, format: Int) {
+    /** Intent qui ouvre l'épisode [ratingKey] dans l'app Plex (format de lien [format]). */
+    fun intent(machineId: String, ratingKey: String, format: Int): Intent {
         val itemUri = "server://$machineId/com.plexapp.plugins.library/library/metadata/$ratingKey"
         val uri = formats[format.coerceIn(formats.indices)]
             .replace("{uri}", URLEncoder.encode(itemUri, "UTF-8"))
             .replace("{rawUri}", itemUri)
             .replace("{server}", machineId)
             .replace("{key}", ratingKey)
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(uri))
+        return Intent(Intent.ACTION_VIEW, Uri.parse(uri))
             .setPackage(PACKAGE)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+
+    fun open(context: Context, machineId: String, ratingKey: String, format: Int) {
+        val intent = intent(machineId, ratingKey, format)
         try {
             context.startActivity(intent)
         } catch (_: ActivityNotFoundException) {

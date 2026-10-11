@@ -25,8 +25,7 @@ import com.dakyub.crunchymal.data.Provider
 import com.dakyub.crunchymal.episodeIntent
 import com.dakyub.crunchymal.seriesIntent
 import android.content.Intent
-import com.dakyub.crunchymal.ui.screens.adnContinueCards
-import com.dakyub.crunchymal.ui.screens.crContinueCards
+import com.dakyub.crunchymal.ui.screens.resumeCards
 import com.dakyub.crunchymal.ui.screens.newEpisodeCards
 import kotlinx.coroutines.coroutineScope
 import java.util.concurrent.TimeUnit
@@ -71,10 +70,8 @@ class NewEpisodesWorker(context: Context, params: WorkerParameters) : CoroutineW
         val newEpisodes = runCatching { graph.newEpisodeCards(providers) }.getOrElse { return Result.retry() }
         if (settings.newEpisodeNotifications) notifyNew(applicationContext, newEpisodes)
         if (settings.homeChannel) {
-            val resume = coroutineScope {
-                (if (Provider.CRUNCHYROLL in providers) runCatching { graph.crContinueCards() }.getOrDefault(emptyList()) else emptyList()) +
-                    (if (Provider.ADN in providers) runCatching { graph.adnContinueCards(this) }.getOrDefault(emptyList()) else emptyList())
-            }
+            // « Reprendre » unifié (Crunchyroll, ADN et Plex), comme sur l'accueil de l'app.
+            val resume = coroutineScope { runCatching { graph.resumeCards(this, providers) }.getOrDefault(emptyList()) }
             graph.homeChannel.publish(newEpisodes + resume)
         }
         return Result.success()

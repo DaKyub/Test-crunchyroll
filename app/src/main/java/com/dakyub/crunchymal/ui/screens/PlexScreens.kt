@@ -1,5 +1,9 @@
 package com.dakyub.crunchymal.ui.screens
 
+import androidx.compose.runtime.produceState
+import com.dakyub.crunchymal.PlatformApps
+import com.dakyub.crunchymal.data.Provider
+import com.dakyub.crunchymal.data.MissingSeason
 import com.dakyub.crunchymal.data.plex.PlexMatch
 import com.dakyub.crunchymal.ui.components.nextCompanionFilter
 import com.dakyub.crunchymal.ui.components.CompanionFilter
@@ -148,6 +152,8 @@ class PlexViewModel(private val graph: Graph) : ViewModel() {
                 }
                 ui.value = ui.value.copy(loading = false, libraries = libraries, library = selected, shows = shows, onDeck = onDeck.await())
                 shows.forEach { graph.mal.request("plex:${it.ratingKey}", it.showRef(graph).malTitles) }
+                // Épisodes vus sur Plex reportés sur MAL (synchro auto), sans ouvrir chaque fiche.
+                launch { graph.plexLibrary.syncWatched(shows.associate { it.ratingKey to it.viewedLeafCount }) }
             }.onFailure { ui.value = ui.value.copy(loading = false, error = it.message ?: "Serveur Plex injoignable") }
         }
     }
@@ -436,8 +442,65 @@ fun PlexShowScreen(ratingKey: String, onOpenSeries: (SeriesRef) -> Unit, onOpenM
                         }
                     }
                 }
+                // Saisons qui manquent sur le serveur, et où les regarder.
+                item { MissingSeasons(ratingKey, seasons.map { it.first }.toSet(), record?.malId, onOpenSeries) }
                 // Recommandations des membres MAL, avec où les regarder.
                 item { MalRecommendationsRow(record?.malId, onOpenSeries, onOpenMal) }
+            }
+        }
+    }
+}
+
+/**
+ * Saisons diffusées absentes du serveur Plex (d'après TMDB) : où les regarder en France, avec les fiches
+ * Crunchyroll / ADN de la série si l'app les trouve et les apps des autres plateformes.
+ */
+@Composable
+private fun MissingSeasons(ratingKey: String, present: Set<Int>, malId: Int?, onOpenSeries: (SeriesRef) -> Unit) {
+    val graph = LocalGraph.current
+    val shows by graph.plexLibrary.shows.collectAsState()
+    val tmdbId = shows.firstOrNull { it.ratingKey == ratingKey }?.tmdbId ?: return
+    if (present.isEmpty()) return
+    val missing by produceState<List<MissingSeason>?>(null, tmdbId, present) {
+        value = runCatching { graph.watchPlatforms.missingSeasons(tmdbId, present) }.getOrDefault(emptyList())
+    }
+    val list = missing?.takeIf { it.isNotEmpty() } ?: return
+    val availability by graph.availability.found.collectAsState()
+    val crLoggedIn by graph.auth.loggedIn.collectAsState()
+    LaunchedEffect(malId) {
+        val id = malId ?: return@LaunchedEffect
+        runCatching { graph.mal.details(id) }.getOrNull()?.let { graph.availability.request(it, crunchyrollEnabled = crLoggedIn) }
+    }
+    val found = malId?.let { availability[it] }
+    val context = LocalContext.current
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Saisons absentes de ton serveur Plex", style = MaterialTheme.typography.titleMedium)
+        list.forEach { season ->
+            val named = season.name.takeIf { !Regex("""(?i)^(season|saison)\s*\d+$""").matches(it.trim()) }
+            Text(
+                "Saison ${season.number}" + (named?.let { " « $it »" } ?: "") + (season.year?.let { " · $it" } ?: "") + " — " +
+                    season.platforms.joinToString(", ").ifBlank { "plateformes non renseignées sur TMDB" },
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+        val others = list.flatMap { it.platforms }.distinct().filter { it != "Crunchyroll" && it != "ADN" }
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            found?.crunchyroll?.takeIf { crLoggedIn }?.let { cr ->
+                item {
+                    OutlinedButton(onClick = {
+                        onOpenSeries(SeriesRef(cr.id, cr.title, cr.slug, cr.posterUrl, provider = Provider.CRUNCHYROLL))
+                    }) { Text("Fiche Crunchyroll") }
+                }
+            }
+            found?.adn?.let { adn ->
+                item {
+                    OutlinedButton(onClick = {
+                        onOpenSeries(SeriesRef(adn.id, adn.title, posterUrl = adn.posterUrl, provider = Provider.ADN))
+                    }) { Text("Fiche ADN") }
+                }
+            }
+            items(others) { platform ->
+                OutlinedButton(onClick = { PlatformApps.open(context, platform) }) { Text("▶ $platform") }
             }
         }
     }

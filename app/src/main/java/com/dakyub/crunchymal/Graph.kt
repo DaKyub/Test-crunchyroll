@@ -51,10 +51,10 @@ class Graph(context: Context) {
     val history = HistoryRepository(context, api)
     val started = StartedSeriesRepository(api, history, adn, adnWatchlist)
     val malSync = MalSync(mal, settings)
-    val homeChannel = HomeChannel(context, settings)
+    val homeChannel = HomeChannel(context, settings) { key -> PlexApp.intent(plex.machineId, key, settings.plexLinkFormat) }
     val arrivals = ArrivalWatcher(context, api, adn, mal)
     val plex = PlexApi(context)
-    val plexLibrary = PlexLibrary(context, plex, mal, watchPlatforms)
+    val plexLibrary = PlexLibrary(context, plex, mal, watchPlatforms, malSync)
     val companions = CompanionsRepository(settings, mal)
     val tagServer = TagServer(context, mal, companions)
 

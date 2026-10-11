@@ -26,7 +26,12 @@ import kotlinx.coroutines.withContext
  * lance directement l'épisode dans l'app Crunchyroll ou ADN. Mise à jour à chaque chargement de
  * l'accueil et par la tâche en arrière-plan.
  */
-class HomeChannel(private val context: Context, private val settings: Settings) {
+class HomeChannel(
+    private val context: Context,
+    private val settings: Settings,
+    /** Intent d'un épisode Plex (« Reprendre » unifié) à partir de sa clé. */
+    private val plexIntent: (String) -> Intent? = { null },
+) {
     private val prefs = context.getSharedPreferences("home_channel", Context.MODE_PRIVATE)
     private val mutex = Mutex()
 
@@ -49,7 +54,9 @@ class HomeChannel(private val context: Context, private val settings: Settings) 
                     .distinctBy { it.episodeId }
                     .take(MAX_PROGRAMS)
                     .mapNotNull { item ->
-                        val intent = episodeIntent(context, item.series, item.episodeId!!) ?: return@mapNotNull null
+                        val intent = item.plexEpisodeKey?.let(plexIntent)
+                            ?: episodeIntent(context, item.series, item.episodeId!!)
+                            ?: return@mapNotNull null
                         val program = PreviewProgram.Builder()
                             .setChannelId(channelId)
                             .setType(TvContractCompat.PreviewPrograms.TYPE_TV_EPISODE)

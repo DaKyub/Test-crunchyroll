@@ -53,4 +53,14 @@ data class CardItem(
     val badges: List<String> = emptyList(),
 ) {
     val imageUrl: String? get() = if (wide) series.wideUrl ?: series.posterUrl else series.posterUrl ?: series.wideUrl
+
+    /** Épisode Plex (« plex:<ratingKey> ») : il s'ouvre dans l'app Plex, pas dans Crunchyroll / ADN. */
+    val plexEpisodeKey: String? get() = episodeId?.takeIf { it.startsWith(PLEX_EPISODE) }?.removePrefix(PLEX_EPISODE)
+
+    companion object {
+        const val PLEX_EPISODE = "plex:"
+    }
 }
+
+/** Série Plex (identifiant « plex-<ratingKey> ») : sa fiche est l'écran Plex de l'app. */
+val SeriesRef.plexShowKey: String? get() = id.takeIf { it.startsWith("plex-") }?.removePrefix("plex-")

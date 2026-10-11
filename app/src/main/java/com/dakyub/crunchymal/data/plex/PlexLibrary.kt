@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal.data.plex
 
+import com.dakyub.crunchymal.data.mal.MalSync
 import android.content.Context
 import com.dakyub.crunchymal.data.Http
 import com.dakyub.crunchymal.data.WatchPlatformsRepository
@@ -43,6 +44,9 @@ data class PlexShowEntry(
     val tmdbOriginalTitle: String? = null,
     /** Fiche MAL déjà recherchée de nouveau avec le titre anglais. */
     val malRetried: Boolean = false,
+    /** Épisodes vus sur Plex, et nombre déjà reporté sur MAL (synchro auto). */
+    val watched: Int = 0,
+    val syncedWatched: Int = 0,
 ) {
     /** Titres pour MAL et pour reconnaître la série ailleurs : anglais d'abord, titre Plex en dernier. */
     val malTitles: List<String>
@@ -84,6 +88,7 @@ class PlexLibrary(
     private val plex: PlexApi,
     private val mal: MalRepository,
     private val platforms: WatchPlatformsRepository,
+    private val malSync: MalSync,
 ) {
     private val file = File(context.filesDir, "plex_library.json")
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -176,6 +181,8 @@ class PlexLibrary(
                     englishTitle = old?.englishTitle,
                     tmdbOriginalTitle = old?.tmdbOriginalTitle,
                     malRetried = old?.malRetried ?: false,
+                    watched = show.viewedLeafCount,
+                    syncedWatched = previousEntry?.syncedWatched ?: 0,
                 )
             }
         }.distinctBy { it.ratingKey }
@@ -227,6 +234,33 @@ class PlexLibrary(
             _shows.value = _shows.value.map { if (it.ratingKey in retried) it.copy(malRetried = true) else it }
             save()
         }
+        syncLocked(_shows.value.associate { it.ratingKey to it.watched })
+    }
+
+    /**
+     * Synchro MAL depuis Plex : le nombre d'épisodes vus sur Plex ([watched], par série) est reporté sur la
+     * fiche MAL (réglage « Synchro auto de ma liste MAL »), sans jamais reculer. Les séries dont la fiche MAL
+     * n'est pas encore connue le seront au passage suivant.
+     */
+    suspend fun syncWatched(watched: Map<String, Int>) = mutex.withLock { syncLocked(watched) }
+
+    private suspend fun syncLocked(watched: Map<String, Int>) {
+        if (!malSync.enabled) return
+        val records = mal.records.value
+        var changed = false
+        for ((ratingKey, count) in watched) {
+            if (count <= 0) continue
+            val entry = _shows.value.firstOrNull { it.ratingKey == ratingKey }
+            if (entry != null && entry.syncedWatched >= count) continue
+            val malId = records["plex:$ratingKey"]?.malId ?: continue
+            if (runCatching { malSync.sync(malId, count) }.isFailure) continue
+            _shows.value = _shows.value.map {
+                if (it.ratingKey == ratingKey) it.copy(syncedWatched = count, watched = maxOf(it.watched, count)) else it
+            }
+            changed = true
+            delay(400)
+        }
+        if (changed) save()
     }
 
     private fun save() {

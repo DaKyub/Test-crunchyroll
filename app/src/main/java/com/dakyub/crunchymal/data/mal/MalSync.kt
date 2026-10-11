@@ -9,6 +9,9 @@ import java.util.concurrent.ConcurrentHashMap
  * Ne fait jamais reculer MAL, et respecte les séries « Terminé » (revisionnage) et « Abandonné ».
  */
 class MalSync(private val mal: MalRepository, private val settings: Settings) {
+    /** Synchro active : réglage activé et compte MAL connecté. */
+    val enabled: Boolean get() = settings.malAutoSync && mal.auth.loggedIn.value
+
     /** Dernier nombre d'épisodes traité par fiche MAL pendant la session (évite les appels répétés). */
     private val handled = ConcurrentHashMap<Int, Int>()
 

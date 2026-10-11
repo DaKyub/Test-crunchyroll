@@ -103,6 +103,9 @@ private data class TmdbFind(@SerialName("tv_results") val tvResults: List<TmdbSh
 /** Fiche TMDB d'une série : titre anglais, titre original et nombre de saisons (hors spéciaux). */
 data class TmdbTvInfo(val name: String, val originalName: String, val seasons: Int)
 
+/** Saison absente du serveur Plex, et où la regarder en France d'après TMDB. */
+data class MissingSeason(val number: Int, val name: String, val year: Int?, val platforms: List<String>)
+
 /**
  * Recherche TMDB : [titles] à essayer, [allTitles] (noms de saison), film ou série, année de diffusion.
  * [seasonAware] : si le titre ne correspond qu'en partie, prendre les plateformes de la saison concernée.
@@ -358,7 +361,26 @@ class WatchPlatformsRepository(context: Context, private val settings: Settings)
     suspend fun tvInfo(tvId: Int): TmdbTvInfo? {
         if (settings.tmdbKey.isBlank()) return null
         val details = runCatching { Http.json.decodeFromString<TmdbTvDetails>(tmdb("tv/$tvId") {}) }.getOrNull() ?: return null
-        return TmdbTvInfo(details.name, details.originalName, details.numberOfSeasons)
+        // Saisons déjà diffusées seulement : une saison annoncée ne doit pas faire « Plex 1/2 ».
+        val today = DateUtils.isoUtc().take(10)
+        val aired = details.seasons.count { it.number > 0 && it.airDate?.take(10)?.let { date -> date <= today } == true }
+        return TmdbTvInfo(details.name, details.originalName, aired.takeIf { it > 0 } ?: details.numberOfSeasons)
+    }
+
+    /** Saisons diffusées de la série TMDB [tvId] absentes de [present], avec leurs plateformes en France. */
+    suspend fun missingSeasons(tvId: Int, present: Set<Int>): List<MissingSeason> {
+        if (settings.tmdbKey.isBlank()) return emptyList()
+        val details = runCatching { Http.json.decodeFromString<TmdbTvDetails>(tmdb("tv/$tvId") {}) }.getOrNull() ?: return emptyList()
+        val today = DateUtils.isoUtc().take(10)
+        return details.seasons
+            .filter { it.number > 0 && it.number !in present && it.airDate?.take(10)?.let { date -> date <= today } == true }
+            .take(12)
+            .map { season ->
+                val france = runCatching {
+                    Http.json.decodeFromString<TmdbProviders>(tmdb("tv/$tvId/season/${season.number}/watch/providers") {}).results["FR"]
+                }.getOrNull()
+                MissingSeason(season.number, season.name, season.airDate?.take(4)?.toIntOrNull(), france?.platforms().orEmpty())
+            }
     }
 
     /** Identifiant TMDB d'une série à partir d'un identifiant TVDB ([source] « tvdb_id ») ou IMDb (« imdb_id »). */
