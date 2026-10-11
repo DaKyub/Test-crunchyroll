@@ -238,16 +238,7 @@ fun SettingsScreen() {
                             settings.plexLinkFormat = linkFormat
                         }
                     }
-                    var playerStatus by remember { mutableStateOf<String?>(null) }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
-                        OutlinedButton(onClick = {
-                            playerStatus = "Recherche de l'app Plex…"
-                            scope.launch {
-                                val player = graph.plex.discoverPlayer()
-                                playerStatus = player?.let { "Contrôle à distance de Plex trouvé (${it.name}) ✓" }
-                                    ?: "Plex ne répond pas : ouvre l'app Plex, reviens ici avec Retour, et réessaie. Sinon, envoie le diagnostic Plex."
-                            }
-                        }) { Text("Tester le contrôle à distance") }
                         OutlinedButton(onClick = { sendDiagnostic("Diagnostic Plex") { graph.plex.diagnostic(context) } }) {
                             Text("Envoyer un diagnostic Plex")
                         }
@@ -270,10 +261,9 @@ fun SettingsScreen() {
                             }
                         }) { Text("Analyser l'app Plex") }
                     }
-                    playerStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                     Text(
-                        "Les épisodes sont lancés par le contrôle à distance de Plex (comme un cast depuis le téléphone) : l'app Plex " +
-                            "doit l'autoriser. Sinon, le lien choisi ci-dessus est utilisé (il n'ouvre parfois que l'accueil de Plex).",
+                        "Les épisodes s'ouvrent dans l'app Plex par un lien (format 1 d'après l'analyse de l'app Plex). " +
+                            "Si un épisode n'ouvre que l'accueil de Plex, passe au format suivant et réessaie.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
