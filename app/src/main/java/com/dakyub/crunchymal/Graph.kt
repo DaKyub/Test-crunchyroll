@@ -2,6 +2,7 @@ package com.dakyub.crunchymal
 
 import android.content.Context
 import androidx.compose.runtime.staticCompositionLocalOf
+import com.dakyub.crunchymal.data.ArrivalWatcher
 import com.dakyub.crunchymal.data.AvailabilityRepository
 import com.dakyub.crunchymal.data.DiagnosticsUploader
 import com.dakyub.crunchymal.data.HistoryRepository
@@ -47,6 +48,7 @@ class Graph(context: Context) {
     val started = StartedSeriesRepository(api, history, adn, adnWatchlist)
     val malSync = MalSync(mal, settings)
     val homeChannel = HomeChannel(context, settings)
+    val arrivals = ArrivalWatcher(context, api, adn, mal)
 
     /** Calcule (si besoin) la progression d'une série, quel que soit son service. */
     suspend fun ensureProgress(ref: SeriesRef, force: Boolean = false) = when (ref.provider) {

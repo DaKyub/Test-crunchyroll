@@ -1,5 +1,16 @@
 package com.dakyub.crunchymal.ui.screens
 
+import android.content.Intent
+import android.speech.RecognizerIntent
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Row
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalContext
+import androidx.tv.material3.OutlinedButton
+import androidx.tv.material3.Text
+import java.util.Locale
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -81,9 +92,28 @@ fun SearchScreen(onOpenSeries: (SeriesRef) -> Unit) {
     val vm = viewModel { SearchViewModel(graph) }
     val query by vm.query.collectAsState()
     val ui by vm.ui.collectAsState()
+    val context = LocalContext.current
+    // Recherche vocale : reconnaissance de la parole d'Android TV (micro de la télécommande).
+    val speech = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val text = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+        if (!text.isNullOrBlank()) {
+            vm.query.value = text
+            vm.submit()
+        }
+    }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 48.dp, vertical = 16.dp)) {
-        TvTextField(query, { vm.query.value = it }, "Rechercher une série…", onSubmit = vm::submit)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            TvTextField(query, { vm.query.value = it }, "Rechercher une série…", modifier = Modifier.weight(1f), onSubmit = vm::submit)
+            OutlinedButton(onClick = {
+                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                    .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                    .putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.FRANCE.toLanguageTag())
+                    .putExtra(RecognizerIntent.EXTRA_PROMPT, "Dis le titre de la série")
+                runCatching { speech.launch(intent) }
+                    .onFailure { Toast.makeText(context, "Reconnaissance vocale indisponible sur cet appareil", Toast.LENGTH_LONG).show() }
+            }) { Text("🎤 Dicter") }
+        }
         when {
             ui.loading -> CenteredMessage("Recherche…")
             ui.error != null -> CenteredMessage("Erreur : ${ui.error}")

@@ -130,6 +130,7 @@ fun SettingsScreen() {
             var malSync by remember { mutableStateOf(settings.malAutoSync) }
             var channel by remember { mutableStateOf(settings.homeChannel) }
             var notifications by remember { mutableStateOf(settings.newEpisodeNotifications) }
+            var arrivals by remember { mutableStateOf(settings.arrivalAlerts) }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
                 FilterChip(selected = malSync, onClick = { malSync = !malSync; settings.malAutoSync = malSync }) {
                     Text(if (malSync) "✓ Synchro auto de ma liste MAL" else "Synchro auto de ma liste MAL")
@@ -145,6 +146,9 @@ fun SettingsScreen() {
                 FilterChip(selected = notifications, onClick = { notifications = !notifications; settings.newEpisodeNotifications = notifications }) {
                     Text(if (notifications) "✓ Notifications nouveaux épisodes" else "Notifications nouveaux épisodes")
                 }
+                FilterChip(selected = arrivals, onClick = { arrivals = !arrivals; settings.arrivalAlerts = arrivals }) {
+                    Text(if (arrivals) "✓ Alertes « À voir » disponibles" else "Alertes « À voir » disponibles")
+                }
             }
         }
         item {
@@ -152,7 +156,8 @@ fun SettingsScreen() {
                 "Synchro MAL : à l'ouverture d'une fiche, les épisodes vus sont reportés sur ta liste MAL (jamais en arrière ; " +
                     "les séries « Terminé » ou « Abandonné » ne sont pas modifiées). Chaîne : remplie à chaque ouverture de l'accueil ; " +
                     "si elle n'apparaît pas, ajoute « CrunchyMAL » dans Paramètres Android TV → Écran d'accueil → Chaînes. " +
-                    "Notifications : vérification toutes les 4 h des séries de ta watchlist.",
+                    "Notifications : vérification toutes les 4 h des séries de ta watchlist. Alertes : quand un anime « À voir » " +
+                    "de ta liste MAL arrive sur Crunchyroll ou ADN (vérifié toutes les 12 h, à partir du deuxième passage).",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

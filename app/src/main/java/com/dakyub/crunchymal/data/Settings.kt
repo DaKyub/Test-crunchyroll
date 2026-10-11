@@ -73,6 +73,11 @@ class Settings(context: Context) {
         get() = prefs.getBoolean("home_channel", true)
         set(value) = prefs.edit().putBoolean("home_channel", value).apply()
 
+    /** Notification quand un anime « À voir » de la liste MAL arrive sur Crunchyroll / ADN. */
+    var arrivalAlerts: Boolean
+        get() = prefs.getBoolean("arrival_alerts", true)
+        set(value) = prefs.edit().putBoolean("arrival_alerts", value).apply()
+
     /** Notification quand une série suivie sort un nouvel épisode. */
     var newEpisodeNotifications: Boolean
         get() = prefs.getBoolean("new_episode_notifications", true)

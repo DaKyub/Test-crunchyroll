@@ -14,6 +14,17 @@ fun playEpisode(context: Context, series: SeriesRef, episodeId: String) {
     }
 }
 
+/** Intent qui ouvre la fiche d'une série dans l'app officielle (alertes de disponibilité). */
+fun seriesIntent(context: Context, provider: Provider, seriesId: String): Intent? {
+    val intent = when (provider) {
+        Provider.CRUNCHYROLL -> Intent(Intent.ACTION_VIEW, Uri.parse("crunchyroll://series/$seriesId")).setPackage(OfficialApp.PACKAGE)
+        Provider.ADN -> AdnApp.packageName(context)?.let {
+            Intent(Intent.ACTION_VIEW, Uri.parse("anidn://show/$seriesId")).setPackage(it)
+        }
+    }
+    return intent?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+}
+
 /** Intent qui lance l'épisode dans l'app officielle (chaîne de l'écran d'accueil, notifications). */
 fun episodeIntent(context: Context, series: SeriesRef, episodeId: String): Intent? {
     val intent = when (series.provider) {

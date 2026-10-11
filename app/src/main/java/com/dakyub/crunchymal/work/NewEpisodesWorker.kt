@@ -23,6 +23,8 @@ import com.dakyub.crunchymal.R
 import com.dakyub.crunchymal.data.CardItem
 import com.dakyub.crunchymal.data.Provider
 import com.dakyub.crunchymal.episodeIntent
+import com.dakyub.crunchymal.seriesIntent
+import android.content.Intent
 import com.dakyub.crunchymal.ui.screens.adnContinueCards
 import com.dakyub.crunchymal.ui.screens.crContinueCards
 import com.dakyub.crunchymal.ui.screens.newEpisodeCards
@@ -37,7 +39,7 @@ class NewEpisodesWorker(context: Context, params: WorkerParameters) : CoroutineW
     override suspend fun doWork(): Result {
         val graph = (applicationContext as CrunchyMalApp).graph
         val settings = graph.settings
-        if (!settings.newEpisodeNotifications && !settings.homeChannel) return Result.success()
+        if (!settings.newEpisodeNotifications && !settings.homeChannel && !settings.arrivalAlerts) return Result.success()
         val selected = graph.providers.selected.value
         val providers = selected.filter { provider ->
             when (provider) {
@@ -47,6 +49,25 @@ class NewEpisodesWorker(context: Context, params: WorkerParameters) : CoroutineW
         }.toSet()
         if (providers.isEmpty()) return Result.success()
 
+        // Alertes de disponibilité (liste MAL « À voir »), au plus toutes les 12 h.
+        val prefs = applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (settings.arrivalAlerts && System.currentTimeMillis() - prefs.getLong("arrivals_checked", 0) > 12 * 3600_000L) {
+            runCatching { graph.arrivals.check(providers) }.onSuccess { arrivals ->
+                prefs.edit().putLong("arrivals_checked", System.currentTimeMillis()).apply()
+                arrivals.forEach { arrival ->
+                    notify(
+                        applicationContext,
+                        channel = ARRIVALS,
+                        id = "arrival:${arrival.provider}:${arrival.seriesId}".hashCode(),
+                        title = "Disponible sur ${arrival.provider.label} : ${arrival.title}",
+                        text = "Dans ta liste MAL « À voir »",
+                        intent = seriesIntent(applicationContext, arrival.provider, arrival.seriesId),
+                    )
+                }
+            }
+        }
+
+        if (!settings.newEpisodeNotifications && !settings.homeChannel) return Result.success()
         val newEpisodes = runCatching { graph.newEpisodeCards(providers) }.getOrElse { return Result.retry() }
         if (settings.newEpisodeNotifications) notifyNew(applicationContext, newEpisodes)
         if (settings.homeChannel) {
@@ -62,6 +83,7 @@ class NewEpisodesWorker(context: Context, params: WorkerParameters) : CoroutineW
     companion object {
         private const val WORK = "new_episodes"
         private const val CHANNEL = "new_episodes"
+        private const val ARRIVALS = "arrivals"
         private const val PREFS = "notified_episodes"
 
         fun schedule(context: Context) {
@@ -75,8 +97,6 @@ class NewEpisodesWorker(context: Context, params: WorkerParameters) : CoroutineW
          * Une notification par nouvel épisode jamais signalé. Au tout premier passage, les épisodes
          * déjà sortis sont seulement mémorisés (pas de rafale de notifications à l'installation).
          */
-        // La permission (Android 13+) est vérifiée juste avant l'envoi.
-        @SuppressLint("MissingPermission")
         fun notifyNew(context: Context, cards: List<CardItem>) {
             val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             val known = prefs.getStringSet("ids", emptySet()).orEmpty()
@@ -87,32 +107,40 @@ class NewEpisodesWorker(context: Context, params: WorkerParameters) : CoroutineW
                 .putStringSet("ids", (known + fresh.mapNotNull { it.episodeId }).toList().takeLast(500).toSet())
                 .apply()
             if (firstRun || fresh.isEmpty()) return
+            fresh.take(5).forEach { card ->
+                val episodeId = card.episodeId ?: return@forEach
+                notify(
+                    context,
+                    channel = CHANNEL,
+                    id = episodeId.hashCode(),
+                    title = "Nouvel épisode : ${card.series.title}",
+                    text = card.subtitle?.removePrefix("Nouveau : ").orEmpty(),
+                    intent = episodeIntent(context, card.series, episodeId),
+                )
+            }
+        }
+
+        /** Envoie une notification qui ouvre [intent] (si la permission de notifier est accordée). */
+        @SuppressLint("MissingPermission")
+        private fun notify(context: Context, channel: String, id: Int, title: String, text: String, intent: Intent?) {
+            if (intent == null) return
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
                 ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
             ) return
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val channel = NotificationChannel(CHANNEL, "Nouveaux épisodes", NotificationManager.IMPORTANCE_DEFAULT)
-                context.getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+                val name = if (channel == ARRIVALS) "Arrivées de ta liste MAL" else "Nouveaux épisodes"
+                context.getSystemService(NotificationManager::class.java)
+                    .createNotificationChannel(NotificationChannel(channel, name, NotificationManager.IMPORTANCE_DEFAULT))
             }
-            val manager = NotificationManagerCompat.from(context)
-            fresh.take(5).forEach { card ->
-                val episodeId = card.episodeId ?: return@forEach
-                val intent = episodeIntent(context, card.series, episodeId) ?: return@forEach
-                val pending = PendingIntent.getActivity(
-                    context,
-                    episodeId.hashCode(),
-                    intent,
-                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-                )
-                val notification = NotificationCompat.Builder(context, CHANNEL)
-                    .setSmallIcon(R.drawable.ic_launcher)
-                    .setContentTitle("Nouvel épisode : ${card.series.title}")
-                    .setContentText(card.subtitle?.removePrefix("Nouveau : ").orEmpty())
-                    .setContentIntent(pending)
-                    .setAutoCancel(true)
-                    .build()
-                runCatching { manager.notify(episodeId.hashCode(), notification) }
-            }
+            val pending = PendingIntent.getActivity(context, id, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            val notification = NotificationCompat.Builder(context, channel)
+                .setSmallIcon(R.drawable.ic_launcher)
+                .setContentTitle(title)
+                .setContentText(text)
+                .setContentIntent(pending)
+                .setAutoCancel(true)
+                .build()
+            runCatching { NotificationManagerCompat.from(context).notify(id, notification) }
         }
     }
 }
