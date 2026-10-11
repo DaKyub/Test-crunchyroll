@@ -209,7 +209,7 @@ fun PlexScreen(onOpenPlexShow: (String) -> Unit) {
                                 wide = true,
                                 badges = listOf("Plex"),
                             ),
-                            onClick = { PlexApp.open(context, graph.plex.machineId, episode.ratingKey, graph.settings.plexLinkFormat) },
+                            onClick = { PlexApp.play(context, graph.plex, episode.ratingKey, episode.viewOffset, graph.settings.plexLinkFormat) },
                             onLongClick = { if (showKey.isNotBlank()) onOpenPlexShow(showKey) },
                         )
                     }
@@ -354,7 +354,7 @@ fun PlexShowScreen(ratingKey: String, onOpenSeries: (SeriesRef) -> Unit, onOpenM
                             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
                                 Button(onClick = {
                                     val episode = next ?: state.episodes.firstOrNull()
-                                    if (episode != null) PlexApp.open(context, graph.plex.machineId, episode.ratingKey, graph.settings.plexLinkFormat)
+                                    if (episode != null) PlexApp.play(context, graph.plex, episode.ratingKey, episode.viewOffset, graph.settings.plexLinkFormat)
                                 }) {
                                     Text(
                                         when {
@@ -404,7 +404,7 @@ fun PlexShowScreen(ratingKey: String, onOpenSeries: (SeriesRef) -> Unit, onOpenM
                                         },
                                         wide = true,
                                     ),
-                                    onClick = { PlexApp.open(context, graph.plex.machineId, episode.ratingKey, graph.settings.plexLinkFormat) },
+                                    onClick = { PlexApp.play(context, graph.plex, episode.ratingKey, episode.viewOffset, graph.settings.plexLinkFormat) },
                                     showMal = false,
                                 )
                             }

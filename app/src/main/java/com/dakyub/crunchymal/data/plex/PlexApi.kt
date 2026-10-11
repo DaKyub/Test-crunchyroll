@@ -2,7 +2,9 @@ package com.dakyub.crunchymal.data.plex
 
 import android.content.Context
 import com.dakyub.crunchymal.data.Http
+import com.dakyub.crunchymal.data.HttpException
 import com.dakyub.crunchymal.data.fetch
+import com.dakyub.crunchymal.server.LocalNetwork
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -119,6 +121,7 @@ class PlexApi(context: Context) {
     val machineId: String get() = prefs.getString("machine_id", "").orEmpty()
     private val serverUri: String get() = prefs.getString("server_uri", "").orEmpty()
     private val serverToken: String get() = prefs.getString("server_token", "").orEmpty()
+    private val accountToken: String get() = prefs.getString("account_token", "").orEmpty()
 
     private val clientId: String
         get() = prefs.getString("client_id", null) ?: UUID.randomUUID().toString().also {
@@ -205,6 +208,76 @@ class PlexApi(context: Context) {
 
     /** Tous les épisodes d'une série, dans l'ordre. */
     suspend fun episodes(ratingKey: String): List<PlexItem> = get("/library/metadata/$ratingKey/allLeaves").items
+
+    /** App Plex de cet appareil vue comme lecteur Plex : identifiant, nom et adresse de son contrôle à distance. */
+    data class Player(val id: String, val name: String, val base: String)
+
+    private var commandId = 0
+
+    /** En-têtes du contrôle à distance Plex (« Plex Companion », utilisé quand on caste depuis un téléphone). */
+    private fun companionRequest(url: String) = Request.Builder().url(url)
+        .header("X-Plex-Client-Identifier", clientId)
+        .header("X-Plex-Product", "CrunchyMAL")
+        .header("X-Plex-Device-Name", "CrunchyMAL")
+        .apply { accountToken.takeIf { it.isNotBlank() }?.let { header("X-Plex-Token", it) } }
+
+    /**
+     * L'app Plex de la Shield, si elle est ouverte et accepte le contrôle à distance (port 32500), sinon null.
+     */
+    suspend fun localPlayer(): Player? = withContext(Dispatchers.IO) {
+        for (host in listOfNotNull("127.0.0.1", LocalNetwork.ipv4()).distinct()) {
+            val base = "http://$host:32500"
+            val body = runCatching {
+                quick.newCall(companionRequest("$base/resources").build()).execute().use { if (it.isSuccessful) it.body?.string() else null }
+            }.getOrNull() ?: continue
+            // Réponse XML (<Player machineIdentifier="…" title="…">) ou JSON selon les versions.
+            val id = Regex("""machineIdentifier"?\s*[=:]\s*"([^"]+)"""").find(body)?.groupValues?.get(1) ?: continue
+            val name = Regex("""title"?\s*[=:]\s*"([^"]+)"""").find(body)?.groupValues?.get(1) ?: "Plex"
+            return@withContext Player(id, name, base)
+        }
+        null
+    }
+
+    /** File de lecture sur le serveur (les épisodes suivants s'enchaînent), ou null si refusée. */
+    private suspend fun createPlayQueue(ratingKey: String): String? = runCatching {
+        val url = (serverUri + "/playQueues").toHttpUrl().newBuilder()
+            .addQueryParameter("type", "video")
+            .addQueryParameter("uri", "server://$machineId/com.plexapp.plugins.library/library/metadata/$ratingKey")
+            .addQueryParameter("shuffle", "0")
+            .addQueryParameter("repeat", "0")
+            .addQueryParameter("continuous", "1")
+            .addQueryParameter("own", "1")
+            .build()
+        val body = Http.client.fetch(
+            Request.Builder().url(url).post(ByteArray(0).toRequestBody(null))
+                .header("Accept", "application/json")
+                .header("X-Plex-Token", serverToken)
+                .header("X-Plex-Client-Identifier", clientId)
+                .build()
+        )
+        Regex("\"playQueueID\"\\s*:\\s*(\\d+)").find(body)?.groupValues?.get(1)
+    }.getOrNull()
+
+    /** Demande au lecteur [player] de lire l'épisode à partir de [offsetMs] (comme un cast depuis le téléphone). */
+    suspend fun playOn(player: Player, ratingKey: String, offsetMs: Long) = withContext(Dispatchers.IO) {
+        val server = serverUri.toHttpUrl()
+        val queue = createPlayQueue(ratingKey)
+        val url = "${player.base}/player/playback/playMedia".toHttpUrl().newBuilder()
+            .addQueryParameter("key", "/library/metadata/$ratingKey")
+            .addQueryParameter("offset", offsetMs.coerceAtLeast(0).toString())
+            .addQueryParameter("machineIdentifier", machineId)
+            .addQueryParameter("address", server.host)
+            .addQueryParameter("port", server.port.toString())
+            .addQueryParameter("protocol", server.scheme)
+            .addQueryParameter("token", serverToken)
+            .addQueryParameter("type", "video")
+            .addQueryParameter("commandID", (++commandId).toString())
+            .apply { queue?.let { addQueryParameter("containerKey", "/playQueues/$it?window=100&own=1") } }
+            .build()
+        quick.newCall(companionRequest(url.toString()).header("X-Plex-Target-Client-Identifier", player.id).build()).execute().use {
+            if (!it.isSuccessful) throw HttpException(it.code, it.body?.string().orEmpty())
+        }
+    }
 
     /** Image redimensionnée par le serveur (affiche, vignette d'épisode). */
     fun image(path: String?, width: Int, height: Int): String? {

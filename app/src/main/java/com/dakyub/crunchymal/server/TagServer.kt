@@ -21,8 +21,6 @@ import kotlinx.serialization.encodeToString
 import java.io.BufferedInputStream
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
-import java.net.Inet4Address
-import java.net.NetworkInterface
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.URLDecoder
@@ -96,7 +94,7 @@ class TagServer(
     @Synchronized
     private fun open() {
         if (socket != null) return
-        val ip = lanAddress()
+        val ip = LocalNetwork.ipv4()
         if (ip == null) {
             _state.value = State(error = "Aucune adresse sur le réseau local (Wi-Fi ou Ethernet) n'a été trouvée.")
             return
@@ -274,18 +272,6 @@ class TagServer(
         }
         return bytes.copyOf(read)
     }
-
-    /** Adresse IPv4 de la Shield sur le réseau local (Wi-Fi ou Ethernet). */
-    private fun lanAddress(): String? = runCatching {
-        NetworkInterface.getNetworkInterfaces().toList()
-            .filter { it.isUp && !it.isLoopback && !it.isVirtual }
-            .sortedBy { if (it.name.startsWith("wlan") || it.name.startsWith("eth")) 0 else 1 }
-            .flatMap { it.inetAddresses.toList() }
-            .filterIsInstance<Inet4Address>()
-            .filter { !it.isLoopbackAddress }
-            .sortedBy { if (it.isSiteLocalAddress) 0 else 1 }
-            .firstOrNull()?.hostAddress
-    }.getOrNull()
 
     private fun randomToken(): String {
         val alphabet = "abcdefghjkmnpqrstuvwxyz23456789"
