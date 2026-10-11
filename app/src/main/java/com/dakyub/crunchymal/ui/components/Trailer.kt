@@ -39,15 +39,27 @@ fun TrailerButton(titles: List<String>, movie: Boolean = false, tmdbId: Int? = n
     ) { Text(if (busy) "Recherche…" else "▶ Bande-annonce") }
 }
 
-/** Ouvre la vidéo YouTube [key] dans l'app YouTube (Android TV), sinon dans ce qui sait lire le lien. */
+/**
+ * Ouvre la vidéo YouTube [key] : lien « watch » dans l'app YouTube pour Android TV (le lien vnd.youtube n'y
+ * ouvre que l'accueil), puis l'app YouTube mobile, puis toute app qui sait lire le lien.
+ */
 fun openYoutube(context: Context, key: String) {
-    val links = listOf("vnd.youtube:$key", "https://www.youtube.com/watch?v=$key")
-    for (link in links) {
+    val watch = Uri.parse("https://www.youtube.com/watch?v=$key")
+    val attempts = listOf(
+        Intent(Intent.ACTION_VIEW, watch).setPackage(YOUTUBE_TV),
+        Intent(Intent.ACTION_VIEW, watch).setPackage(YOUTUBE),
+        Intent(Intent.ACTION_VIEW, watch),
+        Intent(Intent.ACTION_VIEW, Uri.parse("vnd.youtube:$key")),
+    )
+    for (intent in attempts) {
         try {
-            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(link)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             return
         } catch (_: ActivityNotFoundException) {
         }
     }
     Toast.makeText(context, "Aucune app ne sait lire YouTube sur cet appareil.", Toast.LENGTH_LONG).show()
 }
+
+private const val YOUTUBE_TV = "com.google.android.youtube.tv"
+private const val YOUTUBE = "com.google.android.youtube"

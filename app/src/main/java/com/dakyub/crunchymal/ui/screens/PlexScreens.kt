@@ -1,5 +1,7 @@
 package com.dakyub.crunchymal.ui.screens
 
+import com.dakyub.crunchymal.data.ratings.firstEpisodeNumber
+import com.dakyub.crunchymal.ui.components.rememberSeasonRatings
 import com.dakyub.crunchymal.ui.components.TrailerButton
 import androidx.compose.runtime.produceState
 import com.dakyub.crunchymal.PlatformApps
@@ -326,9 +328,13 @@ fun PlexShowScreen(ratingKey: String, onOpenSeries: (SeriesRef) -> Unit, onOpenM
     val libraryShows by graph.plexLibrary.shows.collectAsState()
     var malListOpen by remember { mutableStateOf(false) }
     var correcting by remember { mutableStateOf(false) }
+    // Correction MAL d'une saison (appui long sur sa puce) : clé MAL et recherche proposée.
+    var correctingSeason by remember { mutableStateOf<Pair<String, String>?>(null) }
+    val malRecords by graph.mal.records.collectAsState()
     val show = state.show
     if (malListOpen) MalListDialog(choices = listOf(MalEntryChoice("Série", malKey)), onDismiss = { malListOpen = false })
     if (correcting && show != null) MalCorrectionDialog(malKey = malKey, initialQuery = show.title, onDismiss = { correcting = false })
+    correctingSeason?.let { (key, query) -> MalCorrectionDialog(malKey = key, initialQuery = query, onDismiss = { correctingSeason = null }) }
 
     when {
         state.loading && show == null -> CenteredMessage("Chargement…")
@@ -406,23 +412,53 @@ fun PlexShowScreen(ratingKey: String, onOpenSeries: (SeriesRef) -> Unit, onOpenM
                         }
                     }
                 }
-                if (seasons.size > 1) {
+                // Titre anglais (TMDB) pour chercher les saisons sur MAL et les notes des épisodes.
+                val englishTitle = graph.plexLibrary.extraTitles(ratingKey).firstOrNull()
+                if (seasons.isNotEmpty()) {
                     item {
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             itemsIndexed(seasons) { index, (number, episodes) ->
+                                // Saison 1 : fiche MAL de la série ; les suivantes ont leur propre fiche MAL.
+                                val key = if (index == 0 && number <= 1) malKey else "plexseason:$ratingKey:$number"
+                                val titles = if (key == malKey) ref.malTitles else plexSeasonMalTitles(englishTitle ?: show.title, show.title, number)
                                 FilterChip(
                                     selected = index == state.selectedSeason,
                                     onClick = { vm.selectSeason(index) },
+                                    onLongClick = { correctingSeason = key to (titles.firstOrNull() ?: show.title) },
                                     colors = seasonChipColors(PlexOrange),
-                                ) { Text("Saison $number · ${episodes.count { it.watched }}/${episodes.size}") }
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Text("Saison $number · ${episodes.count { it.watched }}/${episodes.size}")
+                                        MalBadge(key, titles)
+                                        // Diffusion de la saison d'après MAL (en cours, terminée, pas encore sortie).
+                                        airingLabel(malRecords[key]?.airing)?.let { Text(it, style = MaterialTheme.typography.labelSmall) }
+                                    }
+                                }
                             }
                         }
                     }
                 }
-                season?.let { (_, episodes) ->
+                season?.let { (seasonNumber, episodes) ->
                     item {
+                        // Notes IMDb / TMDB des épisodes de la saison, comme sur les fiches Crunchyroll et ADN.
+                        val ratings = rememberSeasonRatings(
+                            (listOfNotNull(englishTitle) + ref.malTitles).distinct(),
+                            seasonNumber,
+                            episodeCount = episodes.size,
+                            episodesBefore = seasons.take(state.selectedSeason).sumOf { it.second.size },
+                        )
+                        val firstNumber = firstEpisodeNumber(episodes.map { it.index })
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (seasons.size > 1) {
+                            Text(
+                                "Appui long sur une saison pour corriger sa correspondance MAL.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            items(episodes, key = { it.ratingKey }) { episode ->
+                            itemsIndexed(episodes, key = { _, it -> it.ratingKey }) { position, episode ->
+                                val rating = ratings.find(episode.index, position, firstNumber)
                                 MediaCard(
                                     item = CardItem(
                                         series = SeriesRef(
@@ -430,7 +466,10 @@ fun PlexShowScreen(ratingKey: String, onOpenSeries: (SeriesRef) -> Unit, onOpenM
                                             title = "${if (episode.watched) "✓ " else ""}${episode.episodeLabel} · ${episode.title}",
                                             wideUrl = graph.plex.image(episode.thumb, 400, 225),
                                         ),
-                                        subtitle = if (episode.duration > 0) "${episode.duration / 60000} min" else null,
+                                        subtitle = listOfNotNull(
+                                            rating?.label,
+                                            if (episode.duration > 0) "${episode.duration / 60000} min" else null,
+                                        ).joinToString(" · ").ifBlank { null },
                                         progress = when {
                                             episode.watched -> 1f
                                             episode.duration > 0 && episode.viewOffset > 0 -> (episode.viewOffset.toFloat() / episode.duration).coerceIn(0f, 1f)
@@ -442,6 +481,10 @@ fun PlexShowScreen(ratingKey: String, onOpenSeries: (SeriesRef) -> Unit, onOpenM
                                     showMal = false,
                                 )
                             }
+                        }
+                        if (ratings.info.isNotBlank()) {
+                            Text(ratings.info, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                         }
                     }
                 }
@@ -508,3 +551,7 @@ private fun MissingSeasons(ratingKey: String, present: Set<Int>, malId: Int?, on
         }
     }
 }
+
+/** Titres pour chercher la fiche MAL d'une saison Plex (« Titre season 2 », « Titre 2 »). */
+private fun plexSeasonMalTitles(englishTitle: String, plexTitle: String, number: Int): List<String> =
+    listOf(englishTitle, plexTitle).distinct().flatMap { title -> listOf("$title season $number", "$title $number") }.distinct()
