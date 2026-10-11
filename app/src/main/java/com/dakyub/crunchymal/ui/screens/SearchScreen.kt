@@ -1,5 +1,16 @@
 package com.dakyub.crunchymal.ui.screens
 
+import com.dakyub.crunchymal.ui.components.rememberVoiceInput
+import androidx.tv.material3.MaterialTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.background
+import androidx.core.content.ContextCompat
+import android.content.pm.PackageManager
+import android.Manifest
 import android.content.Intent
 import android.speech.RecognizerIntent
 import android.widget.Toast
@@ -93,7 +104,17 @@ fun SearchScreen(onOpenSeries: (SeriesRef) -> Unit) {
     val query by vm.query.collectAsState()
     val ui by vm.ui.collectAsState()
     val context = LocalContext.current
-    // Recherche vocale : reconnaissance de la parole d'Android TV (micro de la télécommande).
+    // Recherche vocale écoutée dans l'app (micro de la télécommande), la fenêtre vocale du système
+    // n'ouvrant pas toujours le micro pour une autre app.
+    val voice = rememberVoiceInput { text ->
+        vm.query.value = text
+        vm.submit()
+    }
+    val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) voice.start()
+        else Toast.makeText(context, "Autorise le micro pour dicter, ou utilise le micro du clavier à l'écran.", Toast.LENGTH_LONG).show()
+    }
+    // Repli si aucun service de reconnaissance n'est utilisable dans l'app : fenêtre vocale du système.
     val speech = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val text = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
         if (!text.isNullOrBlank()) {
@@ -106,13 +127,53 @@ fun SearchScreen(onOpenSeries: (SeriesRef) -> Unit) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             TvTextField(query, { vm.query.value = it }, "Rechercher une série…", modifier = Modifier.weight(1f), onSubmit = vm::submit)
             OutlinedButton(onClick = {
-                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-                    .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                    .putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.FRANCE.toLanguageTag())
-                    .putExtra(RecognizerIntent.EXTRA_PROMPT, "Dis le titre de la série")
-                runCatching { speech.launch(intent) }
-                    .onFailure { Toast.makeText(context, "Reconnaissance vocale indisponible sur cet appareil", Toast.LENGTH_LONG).show() }
-            }) { Text("🎤 Dicter") }
+                when {
+                    voice.listening -> voice.stop()
+                    voice.available -> {
+                        val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+                            PackageManager.PERMISSION_GRANTED
+                        if (granted) voice.start() else micPermission.launch(Manifest.permission.RECORD_AUDIO)
+                    }
+                    else -> {
+                        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                            .putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.FRANCE.toLanguageTag())
+                            .putExtra(RecognizerIntent.EXTRA_PROMPT, "Dis le titre de la série")
+                        runCatching { speech.launch(intent) }
+                            .onFailure { Toast.makeText(context, "Reconnaissance vocale indisponible sur cet appareil", Toast.LENGTH_LONG).show() }
+                    }
+                }
+            }) { Text(if (voice.listening) "■ Terminer" else "🎤 Dicter") }
+        }
+        if (voice.listening || voice.error != null) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.padding(top = 8.dp),
+            ) {
+                if (voice.listening) {
+                    // Jauge du volume capté : elle bouge si le micro entend.
+                    Box(
+                        Modifier
+                            .width(80.dp)
+                            .height(6.dp)
+                            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(3.dp))
+                    ) {
+                        Box(
+                            Modifier
+                                .fillMaxWidth(voice.level)
+                                .height(6.dp)
+                                .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(3.dp))
+                        )
+                    }
+                    Text(
+                        voice.partial?.let { "« $it »" } ?: "Écoute… dis le titre de la série",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                } else {
+                    Text(voice.error.orEmpty(), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+                }
+            }
         }
         when {
             ui.loading -> CenteredMessage("Recherche…")

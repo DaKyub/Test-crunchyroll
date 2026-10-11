@@ -8,12 +8,17 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="com.android.providers.tv.permission.READ_EPG_DATA" />
     <uses-permission android:name="com.android.providers.tv.permission.WRITE_EPG_DATA" />
+    <!-- Dictée dans la recherche (micro de la télécommande). -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <uses-feature
         android:name="android.software.leanback"
         android:required="false" />
     <uses-feature
         android:name="android.hardware.touchscreen"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.microphone"
         android:required="false" />
 
     <!-- Visibilité de l'app officielle (Android 11+) pour pouvoir la lancer. -->
@@ -25,6 +30,10 @@
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+        </intent>
+        <!-- Service de reconnaissance vocale utilisé par la dictée. -->
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
         </intent>
     </queries>
 
