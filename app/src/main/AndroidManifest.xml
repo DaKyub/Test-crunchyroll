@@ -26,6 +26,7 @@
         <package android:name="com.crunchyroll.crunchyroid" />
         <package android:name="fr.anidn" />
         <package android:name="com.plexapp.android" />
+        <package android:name="com.plexapp.mediaserver.smb" />
         <!-- Pour retrouver l'app ADN TV dans le lanceur si son paquet diffère. -->
         <intent>
             <action android:name="android.intent.action.MAIN" />

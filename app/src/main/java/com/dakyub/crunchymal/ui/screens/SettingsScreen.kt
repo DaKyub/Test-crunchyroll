@@ -238,14 +238,19 @@ fun SettingsScreen() {
                         }
                     }
                     var playerStatus by remember { mutableStateOf<String?>(null) }
-                    OutlinedButton(onClick = {
-                        playerStatus = "Recherche de l'app Plex…"
-                        scope.launch {
-                            val player = graph.plex.localPlayer()
-                            playerStatus = player?.let { "Contrôle à distance de Plex trouvé (${it.name}) ✓" }
-                                ?: "Plex ne répond pas : ouvre l'app Plex, active « Autoriser le contrôle à distance » (Advertise as player) dans ses paramètres, puis reviens tester."
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        OutlinedButton(onClick = {
+                            playerStatus = "Recherche de l'app Plex…"
+                            scope.launch {
+                                val player = graph.plex.discoverPlayer()
+                                playerStatus = player?.let { "Contrôle à distance de Plex trouvé (${it.name}) ✓" }
+                                    ?: "Plex ne répond pas : ouvre l'app Plex, reviens ici avec Retour, et réessaie. Sinon, envoie le diagnostic Plex."
+                            }
+                        }) { Text("Tester le contrôle à distance") }
+                        OutlinedButton(onClick = { sendDiagnostic("Diagnostic Plex") { graph.plex.diagnostic(context) } }) {
+                            Text("Envoyer un diagnostic Plex")
                         }
-                    }) { Text("Tester le contrôle à distance") }
+                    }
                     playerStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                     Text(
                         "Les épisodes sont lancés par le contrôle à distance de Plex (comme un cast depuis le téléphone) : l'app Plex " +

@@ -36,7 +36,8 @@ object PlexApp {
             while (player == null && waited < 15) {
                 delay(1000)
                 waited++
-                player = plex.localPlayer()
+                // De temps en temps, recherche complète (découverte réseau, appareils du compte Plex).
+                player = if (waited == 2 || waited == 8) plex.discoverPlayer() else plex.localPlayer()
             }
             val target = player ?: run {
                 Toast.makeText(

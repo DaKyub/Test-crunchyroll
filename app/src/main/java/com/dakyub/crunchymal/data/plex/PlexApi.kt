@@ -44,6 +44,30 @@ private data class PlexResource(
 data class PlexGuid(val id: String = "")
 
 @Serializable
+private data class PlexDeviceConnection(
+    val protocol: String = "",
+    val address: String = "",
+    val port: Int = 0,
+    val local: Boolean = false,
+    val relay: Boolean = false,
+)
+
+/** Appareil du compte Plex (serveur ou lecteur), pour la recherche du lecteur et le diagnostic. */
+@Serializable
+private data class PlexDevice(
+    val name: String = "",
+    val product: String = "",
+    val productVersion: String = "",
+    val platform: String = "",
+    val platformVersion: String = "",
+    val device: String = "",
+    val provides: String = "",
+    val presence: Boolean = false,
+    val owned: Boolean = false,
+    val connections: List<PlexDeviceConnection> = emptyList(),
+)
+
+@Serializable
 data class PlexDirectory(val key: String = "", val title: String = "", val type: String = "")
 
 /** Série, saison ou épisode d'une bibliothèque Plex. */
@@ -237,21 +261,117 @@ class PlexApi(context: Context) {
         .header("X-Plex-Device-Name", "CrunchyMAL")
         .apply { accountToken.takeIf { it.isNotBlank() }?.let { header("X-Plex-Token", it) } }
 
+    /** Adresse du contrôle à distance trouvée par la découverte réseau (si ce n'est pas le port habituel). */
+    @Volatile private var knownBase: String? = null
+
     /**
-     * L'app Plex de la Shield, si elle est ouverte et accepte le contrôle à distance (port 32500), sinon null.
+     * L'app Plex de la Shield, si elle est ouverte et accepte le contrôle à distance (port 32500 ou adresse
+     * déjà découverte), sinon null. Rapide : voir [discoverPlayer] pour une recherche complète.
      */
     suspend fun localPlayer(): Player? = withContext(Dispatchers.IO) {
-        for (host in listOfNotNull("127.0.0.1", LocalNetwork.ipv4()).distinct()) {
-            val base = "http://$host:32500"
-            val body = runCatching {
-                quick.newCall(companionRequest("$base/resources").build()).execute().use { if (it.isSuccessful) it.body?.string() else null }
-            }.getOrNull() ?: continue
-            // Réponse XML (<Player machineIdentifier="…" title="…">) ou JSON selon les versions.
-            val id = Regex("""machineIdentifier"?\s*[=:]\s*"([^"]+)"""").find(body)?.groupValues?.get(1) ?: continue
-            val name = Regex("""title"?\s*[=:]\s*"([^"]+)"""").find(body)?.groupValues?.get(1) ?: "Plex"
-            return@withContext Player(id, name, base)
+        val bases = listOfNotNull(knownBase, "http://127.0.0.1:32500", LocalNetwork.ipv4()?.let { "http://$it:32500" }).distinct()
+        bases.firstNotNullOfOrNull { probePlayer(it) }
+    }
+
+    /**
+     * Recherche complète du lecteur Plex de cet appareil : découverte réseau (GDM), puis appareils « lecteur »
+     * du compte plex.tv ayant une adresse sur cet appareil.
+     */
+    suspend fun discoverPlayer(): Player? = withContext(Dispatchers.IO) {
+        localPlayer()?.let { return@withContext it }
+        val here = setOfNotNull("127.0.0.1", LocalNetwork.ipv4())
+        val candidates = discoverPlexPlayers().filter { it.address in here && it.port != null }.map { "http://${it.address}:${it.port}" } +
+            runCatching { devices() }.getOrDefault(emptyList())
+                .filter { "player" in it.provides }
+                .flatMap { device -> device.connections.filter { it.address in here && it.port > 0 } }
+                .map { "http://${it.address}:${it.port}" }
+        candidates.distinct().firstNotNullOfOrNull { base -> probePlayer(base)?.also { knownBase = base } }
+    }
+
+    private fun probePlayer(base: String): Player? {
+        val body = runCatching {
+            quick.newCall(companionRequest("$base/resources").build()).execute().use { if (it.isSuccessful) it.body?.string() else null }
+        }.getOrNull() ?: return null
+        // Réponse XML (<Player machineIdentifier="…" title="…">) ou JSON selon les versions.
+        val id = Regex("""machineIdentifier"?\s*[=:]\s*"([^"]+)"""").find(body)?.groupValues?.get(1) ?: return null
+        val name = Regex("""title"?\s*[=:]\s*"([^"]+)"""").find(body)?.groupValues?.get(1) ?: "Plex"
+        return Player(id, name, base)
+    }
+
+    /** Appareils du compte plex.tv (serveurs et lecteurs). */
+    private suspend fun devices(): List<PlexDevice> {
+        val token = accountToken.ifBlank { return emptyList() }
+        return Http.json.decodeFromString(
+            Http.client.fetch(plexTv("https://plex.tv/api/v2/resources?includeHttps=1&includeRelay=1").header("X-Plex-Token", token).build())
+        )
+    }
+
+    /**
+     * Diagnostic du contrôle à distance (envoyé sur GitHub, dépôt public) : aucun jeton, aucun identifiant,
+     * adresses masquées.
+     */
+    suspend fun diagnostic(context: Context): List<String> = withContext(Dispatchers.IO) {
+        val lan = LocalNetwork.ipv4()
+        fun where(address: String): String = when {
+            address == "127.0.0.1" || address == lan -> "cet appareil"
+            address.startsWith("10.") || address.startsWith("192.168.") || Regex("""^172\.(1[6-9]|2\d|3[01])\.""").containsMatchIn(address) ->
+                "réseau local (" + address.substringBeforeLast('.') + ".x)"
+            address.isBlank() -> "?"
+            else -> "adresse publique"
         }
-        null
+        fun probe(base: String): String = runCatching {
+            quick.newCall(companionRequest("$base/resources").build()).execute().use { response ->
+                val body = response.body?.string().orEmpty()
+                val fields = listOf("product", "platform", "platformVersion", "version", "protocolCapabilities").mapNotNull { key ->
+                    Regex("""\b$key"?\s*[=:]\s*"([^"]*)"""").find(body)?.groupValues?.get(1)?.let { "$key=$it" }
+                }
+                "HTTP ${response.code}" + if (fields.isNotEmpty()) " · " + fields.joinToString(", ")
+                else " · " + body.replace(Regex("""(machineIdentifier|clientIdentifier|token|title|name)"?\s*[=:]\s*"[^"]*""""), "$1=…").take(160).replace('\n', ' ')
+            }
+        }.getOrElse { e ->
+            when (e) {
+                is java.net.ConnectException -> "connexion refusée (rien n'écoute)"
+                is java.net.SocketTimeoutException -> "pas de réponse (délai dépassé)"
+                else -> "${e.javaClass.simpleName} : ${e.message.orEmpty().take(120)}"
+            }
+        }
+
+        val lines = mutableListOf("Diagnostic Plex (sans jetons, noms d'appareils, identifiants ni adresses publiques)")
+        val pm = context.packageManager
+        listOf("com.plexapp.android" to "App Plex", "com.plexapp.mediaserver.smb" to "Plex Media Server").forEach { (pkg, label) ->
+            val info = runCatching { pm.getPackageInfo(pkg, 0) }.getOrNull()
+            lines += "$label ($pkg) : " + (info?.let { "version ${it.versionName}" } ?: "non installé / non visible")
+        }
+        lines += "Adresse de la Shield : " + (lan?.let { "réseau local (" + it.substringBeforeLast('.') + ".x)" } ?: "inconnue")
+        lines += "Compte Plex : jeton du compte " + (if (accountToken.isNotBlank()) "présent" else "absent (reconnecte Plex)")
+        lines += ""
+        lines += "Contrôle à distance sur le port habituel (32500) :"
+        listOfNotNull("127.0.0.1", lan).distinct().forEach { host -> lines += "- ${where(host)} : ${probe("http://$host:32500")}" }
+
+        lines += ""
+        val gdm = discoverPlexPlayers()
+        lines += "Découverte réseau GDM (UDP 32412) : ${gdm.size} réponse(s)"
+        gdm.forEach { p ->
+            lines += "- ${p.product ?: "?"} ${p.version.orEmpty()} · ${p.contentType ?: "?"} · port ${p.port ?: "?"} · ${where(p.address)}"
+            if (p.port != null && where(p.address) == "cet appareil") lines += "  → ${probe("http://${p.address}:${p.port}")}"
+        }
+
+        lines += ""
+        val accountDevices = runCatching { devices() }
+        accountDevices.exceptionOrNull()?.let { lines += "plex.tv : erreur ${it.message?.take(120)}" }
+        val list = accountDevices.getOrDefault(emptyList())
+        lines += "Appareils du compte plex.tv : ${list.size}"
+        list.forEach { d ->
+            // Noms des appareils omis (dépôt public) : produit, plateforme et modèle suffisent.
+            lines += "- ${d.product} ${d.productVersion} · ${d.platform} ${d.platformVersion} · ${d.device} · " +
+                "provides=${d.provides} · ${if (d.presence) "en ligne" else "hors ligne"}${if (d.owned) "" else " · partagé"}"
+            d.connections.forEach { c ->
+                val kind = if (c.relay) "relais" else if (c.local) "local" else "distant"
+                lines += "  · $kind ${c.protocol} ${where(c.address)} port ${c.port}"
+                if ("player" in d.provides && where(c.address) == "cet appareil") lines += "    → ${probe("http://${c.address}:${c.port}")}"
+            }
+        }
+        lines
     }
 
     /** File de lecture sur le serveur (les épisodes suivants s'enchaînent), ou null si refusée. */
