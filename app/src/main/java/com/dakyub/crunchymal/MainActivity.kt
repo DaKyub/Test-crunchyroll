@@ -138,6 +138,9 @@ private fun MainTabs(onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (Int) -> Unit
     val graph = LocalGraph.current
     val providers by graph.providers.selected.collectAsState()
     LaunchedEffect(Unit) { graph.updates.check() }
+    // Liste MAL lue au démarrage : statuts et marques « vu avec » affichés sur toutes les affiches.
+    val malLoggedIn by graph.malAuth.loggedIn.collectAsState()
+    LaunchedEffect(malLoggedIn) { if (malLoggedIn) graph.mal.refreshMyListSeenIds() }
     Column(Modifier.fillMaxSize()) {
         Row(
             verticalAlignment = Alignment.CenterVertically,

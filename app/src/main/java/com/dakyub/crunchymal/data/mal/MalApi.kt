@@ -102,6 +102,8 @@ data class MalListStatus(
     val score: Int = 0,
     @SerialName("num_episodes_watched") val episodesWatched: Int = 0,
     @SerialName("updated_at") val updatedAt: String? = null,
+    /** Tags de l'entrée (dont « vu-seul », « vu-avec-Prénom »). */
+    val tags: List<String> = emptyList(),
 )
 
 @Serializable
@@ -114,15 +116,7 @@ private data class MyStatusNode(
 data class MalListEntry(val anime: MalAnime, val status: MalListStatus)
 
 @Serializable
-private data class ListStatusFull(
-    val status: String? = null,
-    val score: Int = 0,
-    @SerialName("num_episodes_watched") val episodesWatched: Int = 0,
-    @SerialName("updated_at") val updatedAt: String? = null,
-)
-
-@Serializable
-private data class UserListItem(val node: Node = Node(), @SerialName("list_status") val listStatus: ListStatusFull? = null)
+private data class UserListItem(val node: Node = Node(), @SerialName("list_status") val listStatus: MalListStatus? = null)
 
 @Serializable
 private data class Paging(val next: String? = null)
@@ -219,30 +213,48 @@ class MalApi(private val clientId: () -> String) {
 
     /** Statut actuel dans la liste de l'utilisateur, et nombre d'épisodes de l'anime. */
     suspend fun myStatus(malId: Int, accessToken: String): Pair<MalListStatus?, Int> {
-        val url = "$BASE/anime/$malId".toHttpUrl().newBuilder()
-            .addQueryParameter("fields", "my_list_status,num_episodes")
-            .build()
-        val request = Request.Builder().url(url).header("Authorization", "Bearer $accessToken").build()
-        val node = Http.json.decodeFromString<MyStatusNode>(Http.client.fetch(request))
+        val body = withTagsFallback { statusFields ->
+            val url = "$BASE/anime/$malId".toHttpUrl().newBuilder()
+                .addQueryParameter("fields", "my_$statusFields,num_episodes")
+                .build()
+            Http.client.fetch(Request.Builder().url(url).header("Authorization", "Bearer $accessToken").build())
+        }
+        val node = Http.json.decodeFromString<MyStatusNode>(body)
         return node.myListStatus to node.numEpisodes
     }
+
+    /**
+     * Les tags ne sont renvoyés que s'ils sont demandés explicitement (« list_status{…,tags} ») ; si l'API
+     * refuse cette syntaxe, on se rabat sur le statut sans les tags.
+     */
+    private suspend fun withTagsFallback(call: suspend (statusFields: String) -> String): String =
+        try {
+            call(LIST_STATUS_WITH_TAGS)
+        } catch (e: HttpException) {
+            if (e.code != 400) throw e
+            call("list_status")
+        }
 
     /** Liste MAL complète de l'utilisateur connecté (toutes pages). */
     suspend fun userList(accessToken: String): List<MalListEntry> {
         val out = mutableListOf<MalListEntry>()
-        var url: String? = "$BASE/users/@me/animelist".toHttpUrl().newBuilder()
-            .addQueryParameter("limit", "1000")
-            .addQueryParameter("nsfw", "true")
-            .addQueryParameter("fields", "list_status,$FIELDS,main_picture")
-            .build().toString()
-        while (url != null) {
-            val request = Request.Builder().url(url).header("Authorization", "Bearer $accessToken").build()
-            val page = Http.json.decodeFromString<UserListResponse>(Http.client.fetch(request))
+        var page = Http.json.decodeFromString<UserListResponse>(withTagsFallback { statusFields ->
+            val first = "$BASE/users/@me/animelist".toHttpUrl().newBuilder()
+                .addQueryParameter("limit", "1000")
+                .addQueryParameter("nsfw", "true")
+                .addQueryParameter("fields", "$statusFields,$FIELDS,main_picture")
+                .build().toString()
+            Http.client.fetch(Request.Builder().url(first).header("Authorization", "Bearer $accessToken").build())
+        })
+        while (true) {
             page.data.forEach { item ->
                 val st = item.listStatus ?: return@forEach
-                out += MalListEntry(item.node.toAnime(), MalListStatus(st.status, st.score, st.episodesWatched, st.updatedAt))
+                out += MalListEntry(item.node.toAnime(), st)
             }
-            url = page.paging?.next
+            // Les pages suivantes reprennent les paramètres de la première (dont les champs demandés).
+            val next = page.paging?.next ?: break
+            val request = Request.Builder().url(next).header("Authorization", "Bearer $accessToken").build()
+            page = Http.json.decodeFromString<UserListResponse>(Http.client.fetch(request))
         }
         return out
     }
@@ -261,7 +273,30 @@ class MalApi(private val clientId: () -> String) {
         Http.client.fetch(request)
     }
 
+    /**
+     * Remplace les tags d'une entrée (séparés par des virgules). [status] non nul : l'anime est ajouté à la
+     * liste avec ce statut s'il n'y est pas encore ; sinon le statut et la note ne sont pas touchés.
+     */
+    suspend fun updateTags(malId: Int, accessToken: String, tags: List<String>, status: String?) {
+        val form = okhttp3.FormBody.Builder()
+            .add("tags", tags.joinToString(","))
+            .apply { status?.let { add("status", it) } }
+            .build()
+        var attempt = 0
+        while (true) {
+            val request = Request.Builder().url("$BASE/anime/$malId/my_list_status")
+                .header("Authorization", "Bearer $accessToken")
+                .patch(form)
+                .build()
+            val error = runCatching { Http.client.fetch(request) }.exceptionOrNull() ?: return
+            val retryable = error !is HttpException || error.code == 429 || error.code >= 500
+            if (!retryable || ++attempt >= 4) throw error
+            delay(2000L * attempt)
+        }
+    }
+
     private companion object {
+        const val LIST_STATUS_WITH_TAGS = "list_status{status,score,num_episodes_watched,updated_at,tags}"
         const val BASE = "https://api.myanimelist.net/v2"
         const val FIELDS = "id,title,alternative_titles,mean,num_scoring_users,media_type,num_episodes,start_date,genres,status"
         const val MIN_INTERVAL_MS = 400L

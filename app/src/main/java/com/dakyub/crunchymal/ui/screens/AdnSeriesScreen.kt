@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal.ui.screens
 
+import com.dakyub.crunchymal.ui.components.CompanionsButton
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
@@ -303,6 +304,7 @@ fun AdnSeriesScreen(showId: String, onOpenSeries: (SeriesRef) -> Unit = {}, onOp
                                     ) { Text(if (inList) "✓ Watchlist ADN" else "+ Watchlist ADN") }
                                 }
                                 OutlinedButton(onClick = { malListOpen = true }) { Text("Ma liste MAL") }
+                                CompanionsButton(listOf(MalEntryChoice("Série", ref.malKey)))
                                 OutlinedButton(onClick = { correcting = true }) { Text("Corriger MAL") }
                                 if (adnLoggedIn) {
                                     OutlinedButton(onClick = { vm.refreshProgress() }) { Text("↻") }

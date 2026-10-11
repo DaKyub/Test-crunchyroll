@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal.ui.screens
 
+import com.dakyub.crunchymal.ui.components.CompanionsButton
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -310,6 +311,14 @@ fun SeriesScreen(seriesId: String, onOpenSeries: (SeriesRef) -> Unit = {}, onOpe
                                 }
                             }
                             OutlinedButton(onClick = { malListOpen = true }) { Text("Ma liste MAL") }
+                            CompanionsButton(
+                                listOfNotNull(
+                                    MalEntryChoice("Série", "series:${series.id}"),
+                                    state.tree?.seasons?.getOrNull(state.selectedSeason)?.season?.let {
+                                        MalEntryChoice("Saison ${it.seasonNumber}", seasonMalKey("series:${series.id}", state.selectedSeason, it, malRecords))
+                                    },
+                                )
+                            )
                             OutlinedButton(onClick = { correcting = ref.malKey to (ref.malTitles.firstOrNull() ?: series.title) }) {
                                 Text("Corriger MAL")
                             }

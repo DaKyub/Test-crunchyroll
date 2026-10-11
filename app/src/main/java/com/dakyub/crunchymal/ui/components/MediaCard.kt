@@ -93,6 +93,21 @@ fun MediaCard(
                             .padding(horizontal = 5.dp, vertical = 1.dp),
                     )
                 }
+                // Avec qui la série a été vue (tags de la liste MAL).
+                if (showMal) {
+                    val graph = LocalGraph.current
+                    val marks by graph.companions.byMalId.collectAsState()
+                    val records by graph.mal.records.collectAsState()
+                    val seenWith = records[item.series.malKey]?.malId?.let { marks[it] }
+                    if (!seenWith.isNullOrEmpty()) {
+                        CompanionsBadge(
+                            seenWith,
+                            Modifier
+                                .align(Alignment.BottomStart)
+                                .padding(start = 6.dp, end = 6.dp, bottom = if (item.progress != null) 10.dp else 6.dp),
+                        )
+                    }
+                }
                 item.progress?.let { p ->
                     Box(
                         Modifier

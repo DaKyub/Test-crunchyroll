@@ -88,6 +88,11 @@ class Settings(context: Context) {
         get() = prefs.getBoolean("new_episode_notifications", true)
         set(value) = prefs.edit().putBoolean("new_episode_notifications", value).apply()
 
+    /** Prénoms des personnes avec qui les séries sont regardées (marques « vu avec »). */
+    var companions: List<String>
+        get() = prefs.getString("companions", "")!!.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
+        set(value) = prefs.edit().putString("companions", value.joinToString("\n")).apply()
+
     val malClientId: String
         get() = malClientIdOverride.ifBlank { BuildConfig.MAL_CLIENT_ID }
 

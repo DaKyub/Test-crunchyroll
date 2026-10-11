@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal.ui.screens
 
+import com.dakyub.crunchymal.ui.components.CompanionsButton
 import android.widget.Toast
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -364,6 +365,7 @@ fun PlexShowScreen(ratingKey: String, onOpenSeries: (SeriesRef) -> Unit, onOpenM
                                     )
                                 }
                                 OutlinedButton(onClick = { malListOpen = true }) { Text("Ma liste MAL") }
+                                CompanionsButton(listOf(MalEntryChoice("Série", malKey)))
                                 OutlinedButton(onClick = { correcting = true }) { Text("Corriger MAL") }
                                 OutlinedButton(onClick = { vm.load() }) { Text("↻") }
                             }

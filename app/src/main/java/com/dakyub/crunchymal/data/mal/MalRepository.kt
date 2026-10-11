@@ -125,6 +125,37 @@ class MalRepository(context: Context, clientId: () -> String, val auth: MalAuth)
             .map { it.anime.malId }.toSet()
         _myListStatuses.value = list.mapNotNull { e -> e.status.status?.let { e.anime.malId to it } }.toMap()
         myListFetchedAt = System.currentTimeMillis()
+        lastList = list
+        _myListTags.value = list.filter { it.status.tags.isNotEmpty() }.associate { it.anime.malId to it.status.tags }
+        writeLock.withLock { runCatching { tagsFile.writeText(Http.json.encodeToString(_myListTags.value)) } }
+    }
+
+    private var lastList: List<MalListEntry>? = null
+
+    /** Liste MAL récupérée il y a moins de [maxAgeMs], sinon relue. */
+    suspend fun myListCached(maxAgeMs: Long): List<MalListEntry> =
+        lastList?.takeIf { System.currentTimeMillis() - myListFetchedAt < maxAgeMs } ?: myList()
+
+    /** Tags de chaque fiche de la liste MAL (gardés sur disque pour un affichage immédiat au démarrage). */
+    private val tagsFile = File(context.filesDir, "mal_tags.json")
+    private val _myListTags = MutableStateFlow(
+        runCatching { Http.json.decodeFromString<Map<Int, List<String>>>(tagsFile.readText()) }.getOrElse { emptyMap() }
+    )
+    val myListTags: StateFlow<Map<Int, List<String>>> = _myListTags
+
+    /**
+     * Remplace les tags d'une fiche. [statusIfNew] : statut donné si l'anime n'est pas encore dans la liste
+     * (il y est alors ajouté) ; null = l'anime y est déjà, statut et note inchangés.
+     */
+    suspend fun setTags(malId: Int, tags: List<String>, statusIfNew: String?) {
+        api.updateTags(malId, auth.accessToken(), tags, statusIfNew)
+        _myListTags.update { if (tags.isEmpty()) it - malId else it + (malId to tags) }
+        statusIfNew?.let { status ->
+            _myListStatuses.update { it + (malId to status) }
+            if (status != "plan_to_watch") _myListSeenIds.update { it + malId }
+        }
+        lastList = lastList?.map { e -> if (e.anime.malId == malId) e.copy(status = e.status.copy(tags = tags)) else e }
+        writeLock.withLock { runCatching { tagsFile.writeText(Http.json.encodeToString(_myListTags.value)) } }
     }
 
     /** Fiches MAL déjà vues ou commencées par l'utilisateur (tout statut sauf « À voir »). */

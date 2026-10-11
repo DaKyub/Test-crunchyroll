@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vu avec…</title>
+<style>
+:root { --bg:#f6f6f7; --card:#fff; --text:#16161a; --muted:#6b6b76; --line:#e2e2e6; --accent:#f47521; --changed:#fff4e8; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#121214; --card:#1c1c20; --text:#ececf0; --muted:#9a9aa6; --line:#2c2c33; --changed:#2e2116; }
+}
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--text); font:15px/1.35 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; padding-bottom:84px; }
+header { padding:14px 12px 8px; }
+h1 { margin:0 0 4px; font-size:20px; }
+.hint { color:var(--muted); font-size:13px; margin:0 0 10px; }
+input[type=search] { width:100%; font-size:16px; padding:10px 12px; border:1px solid var(--line); border-radius:10px; background:var(--card); color:var(--text); }
+.chips { display:flex; gap:6px; overflow-x:auto; padding:8px 0 2px; scrollbar-width:none; }
+.chip { flex:none; border:1px solid var(--line); background:var(--card); color:var(--text); border-radius:16px; padding:6px 12px; font-size:14px; }
+.chip.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+.tools { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding-top:6px; }
+.tools select, .tools button { font-size:14px; padding:7px 10px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--text); }
+#msg { padding:0 12px 6px; color:var(--muted); font-size:13px; }
+#msg.err { color:#d33; }
+table { width:100%; border-collapse:collapse; background:var(--card); }
+thead th { position:sticky; top:0; z-index:1; background:var(--card); border-bottom:1px solid var(--line); padding:6px 2px; font-size:13px; font-weight:600; }
+td { border-bottom:1px solid var(--line); padding:4px 2px; vertical-align:middle; }
+td.poster { width:46px; padding-left:8px; }
+td.poster img { width:38px; height:54px; object-fit:cover; border-radius:4px; display:block; background:var(--line); }
+td.title { padding-left:8px; word-break:break-word; }
+td.title small { color:var(--muted); display:block; font-size:12px; }
+th.c, td.c { width:58px; text-align:center; }
+td.c { cursor:pointer; }
+td.c input { width:26px; height:26px; accent-color:var(--accent); pointer-events:none; }
+th .pname { max-width:58px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin:0 auto; }
+th button.all { margin-top:3px; font-size:11px; padding:2px 6px; border-radius:6px; border:1px solid var(--line); background:var(--bg); color:var(--text); }
+tr.changed td { background:var(--changed); }
+tr.failed td.title { color:#d33; }
+footer { position:fixed; left:0; right:0; bottom:0; display:flex; align-items:center; gap:10px; padding:12px; background:var(--card); border-top:1px solid var(--line); }
+footer span { flex:1; font-size:14px; color:var(--muted); }
+footer button { font-size:16px; font-weight:600; padding:11px 18px; border-radius:10px; border:0; background:var(--accent); color:#fff; }
+footer button:disabled { opacity:.45; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Vu avec…</h1>
+  <p class="hint">Coche avec qui tu as vu chaque série, puis « Enregistrer » : les marques sont rangées comme tags dans ta liste MyAnimeList (« vu-seul », « vu-avec-Prénom »).</p>
+  <input id="q" type="search" placeholder="Rechercher un titre" autocomplete="off">
+  <div class="chips" id="statuses"></div>
+  <div class="tools">
+    <select id="sort">
+      <option value="title">Titre A→Z</option>
+      <option value="updated">Modifiées récemment</option>
+      <option value="score">Note MAL</option>
+      <option value="year">Année</option>
+    </select>
+    <button id="unmarked">Non marquées</button>
+    <button id="addPerson">+ Personne</button>
+  </div>
+</header>
+<div id="msg">Chargement…</div>
+<table>
+  <thead id="head"></thead>
+  <tbody id="body"></tbody>
+</table>
+<footer>
+  <span id="count">Aucune modification</span>
+  <button id="save" disabled>Enregistrer</button>
+</footer>
+<script>
+(function () {
+  var K = new URLSearchParams(location.search).get('k') || '';
+  var LABELS = { watching: 'En cours', completed: 'Terminé', on_hold: 'En pause', dropped: 'Abandonné', plan_to_watch: 'À voir' };
+  var ORDER = ['completed', 'watching', 'on_hold', 'dropped', 'plan_to_watch'];
+  var data = null, people = [], savedPeople = [], orig = {}, cur = {}, rows = {}, boxes = {};
+  var shown = { completed: true, watching: true, on_hold: true, dropped: true, plan_to_watch: false };
+  var unmarkedOnly = false, saving = false, pendingIds = [];
+
+  function el(id) { return document.getElementById(id); }
+  function make(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+  function msg(text, err) { var m = el('msg'); m.textContent = text; m.className = err ? 'err' : ''; }
+  function norm(s) { return (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase(); }
+  function api(path, opts) {
+    var url = path + (path.indexOf('?') < 0 ? '?' : '&') + 'k=' + encodeURIComponent(K);
+    return fetch(url, opts).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) {
+        if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+        return j;
+      });
+    });
+  }
+  function same(a, b) {
+    if (a.size !== b.size) return false;
+    var ok = true;
+    a.forEach(function (x) { if (!b.has(x)) ok = false; });
+    return ok;
+  }
+  function changedIds() {
+    return Object.keys(cur).filter(function (id) { return !same(cur[id], orig[id]); });
+  }
+
+  function load() {
+    msg('Chargement de ta liste MAL…');
+    api('/api/data').then(function (d) {
+      data = d;
+      savedPeople = d.people.slice();
+      people = [d.alone].concat(d.people);
+      orig = {}; cur = {};
+      d.items.forEach(function (it) { orig[it.id] = new Set(it.w); cur[it.id] = new Set(it.w); });
+      buildChips();
+      build();
+      if (d.job && d.job.running) { saving = true; updateBar(); poll(); }
+    }).catch(function (e) { msg('Erreur : ' + e.message, true); });
+  }
+
+  function buildChips() {
+    var box = el('statuses');
+    box.innerHTML = '';
+    ORDER.forEach(function (s) {
+      var n = data.items.filter(function (it) { return it.s === s; }).length;
+      if (!n) return;
+      var c = make('button', 'chip' + (shown[s] ? ' on' : ''), LABELS[s] + ' · ' + n);
+      c.onclick = function () { shown[s] = !shown[s]; c.classList.toggle('on', shown[s]); filter(); };
+      box.appendChild(c);
+    });
+  }
+
+  function sortedItems() {
+    var mode = el('sort').value;
+    var items = data.items.slice();
+    if (mode === 'updated') items.sort(function (a, b) { return (b.u || '').localeCompare(a.u || ''); });
+    else if (mode === 'score') items.sort(function (a, b) { return (b.m || 0) - (a.m || 0); });
+    else if (mode === 'year') items.sort(function (a, b) { return (b.y || 0) - (a.y || 0); });
+    else items.sort(function (a, b) { return a.t.localeCompare(b.t, 'fr', { sensitivity: 'base' }); });
+    return items;
+  }
+
+  function build() {
+    var head = el('head');
+    head.innerHTML = '';
+    var tr = make('tr');
+    tr.appendChild(make('th'));
+    tr.appendChild(make('th', null, 'Série'));
+    people.forEach(function (p) {
+      var th = make('th', 'c');
+      var name = make('div', 'pname', p);
+      name.title = p;
+      th.appendChild(name);
+      var all = make('button', 'all', 'tout');
+      all.onclick = function () { toggleColumn(p); };
+      th.appendChild(all);
+      tr.appendChild(th);
+    });
+    head.appendChild(tr);
+
+    var body = el('body');
+    body.innerHTML = '';
+    rows = {}; boxes = {};
+    sortedItems().forEach(function (it) {
+      var row = make('tr');
+      var poster = make('td', 'poster');
+      if (it.p) {
+        var img = make('img');
+        img.loading = 'lazy';
+        img.alt = '';
+        img.src = it.p;
+        poster.appendChild(img);
+      }
+      row.appendChild(poster);
+      var title = make('td', 'title', it.t);
+      var details = [LABELS[it.s] || it.s];
+      if (it.y) details.push(it.y);
+      if (it.m) details.push('MAL ' + it.m.toFixed(2));
+      if (it.o) details.push(it.o);
+      title.appendChild(make('small', null, details.join(' · ')));
+      row.appendChild(title);
+      boxes[it.id] = {};
+      people.forEach(function (p) {
+        var td = make('td', 'c');
+        var box = make('input');
+        box.type = 'checkbox';
+        box.checked = cur[it.id].has(p);
+        td.appendChild(box);
+        td.onclick = function () {
+          if (saving) return;
+          box.checked = !box.checked;
+          if (box.checked) cur[it.id].add(p); else cur[it.id].delete(p);
+          mark(it.id);
+          updateBar();
+        };
+        boxes[it.id][p] = box;
+        row.appendChild(td);
+      });
+      rows[it.id] = row;
+      body.appendChild(row);
+      mark(it.id);
+    });
+    filter();
+    updateBar();
+  }
+
+  function visibleItems() {
+    var q = norm(el('q').value.trim());
+    return data.items.filter(function (it) {
+      if (!shown[it.s]) return false;
+      if (unmarkedOnly && orig[it.id].size > 0) return false;
+      return !q || norm(it.t).indexOf(q) >= 0 || norm(it.o).indexOf(q) >= 0;
+    });
+  }
+
+  function filter() {
+    if (!data) return;
+    var visible = {};
+    var list = visibleItems();
+    list.forEach(function (it) { visible[it.id] = true; });
+    data.items.forEach(function (it) { rows[it.id].style.display = visible[it.id] ? '' : 'none'; });
+    msg(list.length + ' séries affichées sur ' + data.items.length + ' dans ta liste MAL.');
+  }
+
+  function mark(id) {
+    rows[id].classList.toggle('changed', !same(cur[id], orig[id]));
+  }
+
+  function toggleColumn(p) {
+    if (saving) return;
+    var list = visibleItems();
+    if (!list.length) return;
+    var all = list.every(function (it) { return cur[it.id].has(p); });
+    var question = (all ? 'Décocher « ' : 'Cocher « ') + p + ' » pour les ' + list.length + ' séries affichées ?';
+    if (list.length > 1 && !confirm(question)) return;
+    list.forEach(function (it) {
+      if (all) cur[it.id].delete(p); else cur[it.id].add(p);
+      boxes[it.id][p].checked = !all;
+      mark(it.id);
+    });
+    updateBar();
+  }
+
+  function newPeople() {
+    return people.slice(1).filter(function (p) {
+      return !savedPeople.some(function (s) { return s.toLowerCase() === p.toLowerCase(); });
+    });
+  }
+
+  function updateBar() {
+    var n = changedIds().length;
+    var added = newPeople().length;
+    if (!saving) {
+      var parts = [];
+      if (n) parts.push(n + (n > 1 ? ' séries modifiées' : ' série modifiée'));
+      if (added) parts.push(added + (added > 1 ? ' nouvelles personnes' : ' nouvelle personne'));
+      el('count').textContent = parts.length ? parts.join(' · ') : 'Aucune modification';
+    }
+    el('save').disabled = saving || (n === 0 && added === 0);
+  }
+
+  function save() {
+    var ids = changedIds();
+    var changes = ids.map(function (id) { return { id: +id, w: Array.from(cur[id]) }; });
+    saving = true;
+    pendingIds = ids;
+    updateBar();
+    el('count').textContent = 'Envoi…';
+    api('/api/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ people: people.slice(1), changes: changes })
+    }).then(function () {
+      savedPeople = people.slice(1);
+      poll();
+    }).catch(function (e) {
+      saving = false;
+      updateBar();
+      el('count').textContent = 'Erreur : ' + e.message;
+    });
+  }
+
+  function poll() {
+    api('/api/job').then(function (job) {
+      if (job.running) {
+        el('count').textContent = 'Enregistrement sur MAL : ' + job.done + '/' + job.total + '…';
+        setTimeout(poll, 1000);
+        return;
+      }
+      var failed = {};
+      (job.failedIds || []).forEach(function (id) { failed[id] = true; });
+      pendingIds.forEach(function (id) {
+        if (!failed[id]) orig[id] = new Set(cur[id]);
+        if (rows[id]) { rows[id].classList.toggle('failed', !!failed[id]); mark(id); }
+      });
+      pendingIds = [];
+      saving = false;
+      updateBar();
+      el('count').textContent = job.failed && job.failed.length
+        ? job.failed.length + ' échec(s) : ' + job.failed.slice(0, 3).join(' ; ')
+        : 'Enregistré sur MAL ✓ (' + job.total + ')';
+    }).catch(function () { setTimeout(poll, 2000); });
+  }
+
+  el('q').addEventListener('input', filter);
+  el('sort').addEventListener('change', function () { if (data) build(); });
+  el('unmarked').onclick = function () {
+    unmarkedOnly = !unmarkedOnly;
+    el('unmarked').textContent = unmarkedOnly ? '✓ Non marquées' : 'Non marquées';
+    filter();
+  };
+  el('addPerson').onclick = function () {
+    if (!data) return;
+    var name = (prompt('Prénom de la personne') || '').replace(/,/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 30);
+    if (!name) return;
+    if (people.some(function (p) { return p.toLowerCase() === name.toLowerCase(); })) return;
+    people.push(name);
+    build();
+  };
+  el('save').onclick = save;
+  window.addEventListener('beforeunload', function (e) {
+    if (changedIds().length || saving) { e.preventDefault(); e.returnValue = ''; }
+  });
+  load();
+})();
+</script>
+</body>
+</html>

@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal.ui.screens
 
+import com.dakyub.crunchymal.ui.components.CompanionsButton
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -162,6 +163,7 @@ fun MalSeriesScreen(malId: Int, onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (I
                                     OutlinedButton(onClick = { PlatformApps.open(context, platform) }) { Text("▶ $platform") }
                                 }
                                 item { OutlinedButton(onClick = { malListOpen = true }) { Text("Ma liste MAL") } }
+                                item { CompanionsButton(listOf(MalEntryChoice("Série", "mal:$malId"))) }
                             }
                         }
                     }

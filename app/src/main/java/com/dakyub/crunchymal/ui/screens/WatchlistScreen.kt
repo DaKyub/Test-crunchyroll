@@ -1,5 +1,9 @@
 package com.dakyub.crunchymal.ui.screens
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
+import com.dakyub.crunchymal.ui.components.nextCompanionFilter
+import com.dakyub.crunchymal.ui.components.CompanionFilter
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -66,6 +70,7 @@ data class WatchlistFilters(
     val statuses: Set<WatchStatus> = emptySet(),
     val sort: SortMode = SortMode.RECENT,
     val minScore: Double? = null,
+    val companion: CompanionFilter? = null,
 )
 
 data class WatchlistUi(
@@ -91,7 +96,7 @@ class WatchlistViewModel(private val graph: Graph, private val source: SeriesLis
     )
     private var loadedFor: Pair<Set<Provider>, Boolean>? = null
 
-    val ui = combine(loaded, filters, graph.progress.summaries, graph.mal.records) { l, f, summaries, mal ->
+    val ui = combine(loaded, filters, graph.progress.summaries, graph.mal.records, graph.companions.byMalId) { l, f, summaries, mal, marks ->
         val rows = l.entries.map { e ->
             val summary = summaries[e.series.progressKey]
             val status = summary?.status ?: if (e.neverWatched) WatchStatus.NOT_STARTED else null
@@ -100,6 +105,7 @@ class WatchlistViewModel(private val graph: Graph, private val source: SeriesLis
         val filtered = rows
             .filter { (_, status, _) -> f.statuses.accepts(status) }
             .filter { (_, _, score) -> f.minScore == null || (score != null && score >= f.minScore) }
+            .filter { (e, _, _) -> f.companion?.accepts(mal[e.series.malKey]?.malId?.let { marks[it] }.orEmpty()) ?: true }
         val sorted = when (f.sort) {
             // « Les deux » : les deux watchlists sont entrelacées, chacune dans son ordre.
             SortMode.RECENT -> filtered.sortedWith(compareBy({ it.first.order }, { it.first.series.provider.ordinal }))
@@ -177,6 +183,9 @@ class WatchlistViewModel(private val graph: Graph, private val source: SeriesLis
     fun toggleStatus(s: WatchStatus) { filters.value = filters.value.copy(statuses = filters.value.statuses.toggle(s)) }
     fun setSort(s: SortMode) { filters.value = filters.value.copy(sort = s) }
     fun setMinScore(m: Double?) { filters.value = filters.value.copy(minScore = m) }
+    fun nextCompanion() {
+        filters.value = filters.value.copy(companion = nextCompanionFilter(filters.value.companion, graph.companions.people.value))
+    }
 }
 
 @Composable
@@ -196,6 +205,7 @@ fun WatchlistScreen(onOpenSeries: (SeriesRef) -> Unit, source: SeriesListSource 
     LaunchedEffect(providers, adnLoggedIn) { vm.ensure(providers, adnLoggedIn) }
     val ui by vm.ui.collectAsState()
     val malError by graph.mal.lastError.collectAsState()
+    val malLoggedIn by graph.malAuth.loggedIn.collectAsState()
     val context = LocalContext.current
 
     val message = when {
@@ -215,12 +225,13 @@ fun WatchlistScreen(onOpenSeries: (SeriesRef) -> Unit, source: SeriesListSource 
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.padding(vertical = 4.dp),
+                modifier = Modifier.padding(vertical = 4.dp).horizontalScroll(rememberScrollState()),
             ) {
                 CycleButton("Tri", ui.filters.sort.label) { vm.setSort(ui.filters.sort.next()) }
                 CycleButton("MAL ≥", ui.filters.minScore?.toString() ?: "toutes") {
                     vm.setMinScore(MinScores[(MinScores.indexOf(ui.filters.minScore) + 1) % MinScores.size])
                 }
+                if (malLoggedIn) CycleButton("Vu avec", ui.filters.companion?.label ?: "toutes", vm::nextCompanion)
                 OutlinedButton(onClick = { vm.load(force = true) }, scale = OutlinedButtonDefaults.scale(focusedScale = 1.05f)) {
                     Text("Actualiser", style = MaterialTheme.typography.labelLarge)
                 }

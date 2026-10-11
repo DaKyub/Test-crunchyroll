@@ -1,5 +1,9 @@
 package com.dakyub.crunchymal.ui.screens
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
+import com.dakyub.crunchymal.ui.components.nextCompanionFilter
+import com.dakyub.crunchymal.ui.components.CompanionFilter
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -52,6 +56,7 @@ data class MalListUi(
     val statuses: Set<String> = setOf("watching", "plan_to_watch"),
     val availableOnly: Boolean = false,
     val sort: MalListSort = MalListSort.MAL,
+    val companion: CompanionFilter? = null,
 )
 
 /** Carte de la liste MAL + série correspondante sur Crunchyroll / ADN (si trouvée). */
@@ -62,8 +67,12 @@ data class MalListVisible(val rows: List<MalListRow> = emptyList(), val checked:
 class MalListViewModel(private val graph: Graph) : ViewModel() {
     val ui = MutableStateFlow(MalListUi())
 
-    val visible = combine(ui, graph.availability.found, graph.providers.selected, graph.watchPlatforms.found) { u, found, providers, platforms ->
-        val entries = u.entries.filter { entry -> entry.status.status?.let { it in u.statuses } == true }
+    val visible = combine(
+        ui, graph.availability.found, graph.providers.selected, graph.watchPlatforms.found, graph.companions.byMalId,
+    ) { u, found, providers, platforms, marks ->
+        val entries = u.entries
+            .filter { entry -> entry.status.status?.let { it in u.statuses } == true }
+            .filter { entry -> u.companion?.accepts(marks[entry.anime.malId].orEmpty()) ?: true }
         val rows = entries.map { entry ->
             val availability: Availability? = found[entry.anime.malId]
             val elsewhere = platforms[entry.anime.malId]
@@ -137,6 +146,10 @@ class MalListViewModel(private val graph: Graph) : ViewModel() {
         ui.value = ui.value.copy(availableOnly = !ui.value.availableOnly)
     }
 
+    fun nextCompanion() {
+        ui.value = ui.value.copy(companion = nextCompanionFilter(ui.value.companion, graph.companions.people.value))
+    }
+
     fun nextSort() {
         ui.value = ui.value.copy(sort = MalListSort.entries[(ui.value.sort.ordinal + 1) % MalListSort.entries.size])
     }
@@ -184,9 +197,10 @@ fun MalListScreen(onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (Int) -> Unit) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.padding(vertical = 2.dp),
+                modifier = Modifier.padding(vertical = 2.dp).horizontalScroll(rememberScrollState()),
             ) {
                 CycleButton("Tri", ui.sort.label, vm::nextSort)
+                CycleButton("Vu avec", ui.companion?.label ?: "toutes", vm::nextCompanion)
                 FilterChip(selected = ui.availableOnly, onClick = vm::toggleAvailableOnly) {
                     Text(if (ui.availableOnly) "✓ Disponibles seulement" else "Disponibles seulement", style = MaterialTheme.typography.labelMedium)
                 }

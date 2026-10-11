@@ -164,6 +164,64 @@ fun SettingsScreen() {
             )
         }
 
+        item { Section("Vu seul / vu avec…") }
+        item {
+            val people by graph.companions.people.collectAsState()
+            var names by remember { mutableStateOf(graph.companions.people.value.joinToString(", ")) }
+            val server by graph.tagServer.state.collectAsState()
+            val job by graph.tagServer.job.collectAsState()
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "Avec qui tu as vu chaque série, rangé comme tags de ta liste MAL (« vu-seul », « vu-avec-Prénom ») : " +
+                        "pastille sur les affiches, filtre « Vu avec » dans Liste MAL, En cours et Watchlist, bouton « Vu avec… » sur les fiches. " +
+                        "Pour tout marquer d'un coup, ouvre la page web sur ton téléphone (même Wi-Fi que la Shield).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                TvTextField(names, { names = it }, "Prénoms séparés par des virgules (ex. Julie, Max)")
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
+                    OutlinedButton(onClick = {
+                        graph.companions.setPeople(names.split(","))
+                        names = graph.companions.people.value.joinToString(", ")
+                        toast("Personnes enregistrées")
+                    }) { Text("Enregistrer les prénoms") }
+                    if (server.url == null) {
+                        Button(onClick = { graph.tagServer.start() }, enabled = malLoggedIn) { Text("Marquer depuis le téléphone") }
+                    } else {
+                        OutlinedButton(onClick = { graph.tagServer.stop() }) { Text("Arrêter la page web") }
+                    }
+                }
+                if (!malLoggedIn) {
+                    Text("Connecte d'abord ton compte MAL (section « Compte MyAnimeList »).", style = MaterialTheme.typography.bodySmall)
+                }
+                server.url?.let { url ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(24.dp), verticalAlignment = Alignment.CenterVertically) {
+                        QrCode(url, size = 180.dp)
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("Scanne ce QR code avec ton téléphone, ou ouvre :", style = MaterialTheme.typography.bodyMedium)
+                            Text(url, style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                "Personnes : " + (listOf("Seul") + people).joinToString(", ") +
+                                    ". La page s'arrête seule après 1 h sans utilisation.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+                server.error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+                if (job.total > 0) {
+                    Text(
+                        if (job.running) "Enregistrement sur MAL : ${job.done}/${job.total}…"
+                        else "Dernier enregistrement : ${job.total - job.failed.size}/${job.total} ✓" +
+                            if (job.failed.isNotEmpty()) " · échecs : " + job.failed.take(3).joinToString(" ; ") else "",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (job.failed.isEmpty()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        }
+
         item { Section("Plex") }
         item {
             val plexConnected by graph.plex.connected.collectAsState()

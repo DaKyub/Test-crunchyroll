@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.compose.runtime.staticCompositionLocalOf
 import com.dakyub.crunchymal.data.ArrivalWatcher
 import com.dakyub.crunchymal.data.AvailabilityRepository
+import com.dakyub.crunchymal.data.CompanionsRepository
 import com.dakyub.crunchymal.data.DiagnosticsUploader
 import com.dakyub.crunchymal.data.HistoryRepository
 import com.dakyub.crunchymal.data.Provider
@@ -22,6 +23,7 @@ import com.dakyub.crunchymal.data.mal.MalAuth
 import com.dakyub.crunchymal.data.mal.MalRepository
 import com.dakyub.crunchymal.data.mal.MalSync
 import com.dakyub.crunchymal.data.plex.PlexApi
+import com.dakyub.crunchymal.server.TagServer
 import com.dakyub.crunchymal.tv.HomeChannel
 import com.dakyub.crunchymal.data.progress.AdnProgressRepository
 import com.dakyub.crunchymal.data.progress.ProgressRepository
@@ -51,6 +53,8 @@ class Graph(context: Context) {
     val homeChannel = HomeChannel(context, settings)
     val arrivals = ArrivalWatcher(context, api, adn, mal)
     val plex = PlexApi(context)
+    val companions = CompanionsRepository(settings, mal)
+    val tagServer = TagServer(context, mal, companions)
 
     /** Calcule (si besoin) la progression d'une série, quel que soit son service. */
     suspend fun ensureProgress(ref: SeriesRef, force: Boolean = false) = when (ref.provider) {
