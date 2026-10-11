@@ -264,7 +264,11 @@ fun AdnSeriesScreen(showId: String, onOpenSeries: (SeriesRef) -> Unit = {}, onOp
                             GenresLine(record?.genres, show.genres)
                             show.summary?.takeIf { it.isNotBlank() }?.let {
                                 // Focus sur le résumé : la fiche remonte tout en haut (titre, note MAL).
-                                ExpandableSynopsis(it, onFocused = { scope.launch { delay(150); listState.animateScrollToItem(0) } })
+                                ExpandableSynopsis(
+                                    it,
+                                    onFocused = { scope.launch { delay(150); listState.animateScrollToItem(0) } },
+                                    loadFull = { record?.malId?.let { id -> graph.mal.synopsis(id) } },
+                                )
                             }
                             // Rangée défilante : les boutons hors écran restent accessibles à la télécommande.
                             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {

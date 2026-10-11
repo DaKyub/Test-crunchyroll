@@ -25,6 +25,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
@@ -107,9 +108,20 @@ fun <T> PosterGrid(
  * remonter la fiche tout en haut (titre, note MAL) ; plus bas, la fiche défile pour montrer les épisodes.
  */
 @Composable
-fun ExpandableSynopsis(text: String, onFocused: () -> Unit, modifier: Modifier = Modifier, collapsedLines: Int = 3) {
+fun ExpandableSynopsis(
+    text: String,
+    onFocused: () -> Unit,
+    modifier: Modifier = Modifier,
+    collapsedLines: Int = 3,
+    /** Résumé complet de secours (MAL, en anglais), chargé au dépliage quand [text] n'est qu'une accroche « … ». */
+    loadFull: (suspend () -> String?)? = null,
+) {
     var expanded by remember(text) { mutableStateOf(false) }
     var focused by remember { mutableStateOf(false) }
+    val teaser = loadFull != null && text.trimEnd().let { it.endsWith("...") || it.endsWith("…") }
+    val full by produceState<String?>(null, expanded, text) {
+        if (expanded && teaser) value = runCatching { loadFull?.invoke() }.getOrNull() ?: ""
+    }
     Surface(
         onClick = { expanded = !expanded },
         modifier = modifier.onFocusChanged {
@@ -132,6 +144,22 @@ fun ExpandableSynopsis(text: String, onFocused: () -> Unit, modifier: Modifier =
                 maxLines = if (expanded) Int.MAX_VALUE else collapsedLines,
                 overflow = TextOverflow.Ellipsis,
             )
+            if (expanded && teaser) {
+                Text(
+                    "Résumé complet (MyAnimeList, en anglais) :",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+                Text(
+                    when (val f = full) {
+                        null -> "Chargement…"
+                        "" -> "Pas de résumé sur MAL."
+                        else -> f
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
             if (focused) {
                 Text(
                     if (expanded) "OK : réduire le résumé" else "OK : lire tout le résumé",

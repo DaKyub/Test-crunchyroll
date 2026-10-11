@@ -146,7 +146,14 @@ class MalRepository(context: Context, clientId: () -> String, val auth: MalAuth)
 
     suspend fun candidates(query: String): List<MalAnime> = api.search(query, limit = 15)
 
-    suspend fun details(malId: Int): MalAnime = api.details(malId)
+    private val detailsCache = java.util.concurrent.ConcurrentHashMap<Int, MalAnime>()
+
+    /** Fiche complète (affiche, résumé), gardée le temps de la session. */
+    suspend fun details(malId: Int): MalAnime = detailsCache[malId] ?: api.details(malId).also { detailsCache[malId] = it }
+
+    /** Résumé MAL (anglais) sans la mention finale « [Written by MAL Rewrite] ». */
+    suspend fun synopsis(malId: Int): String? =
+        details(malId).synopsis?.replace(Regex("""\s*\[Written by [^\]]*\]\s*$"""), "")?.trim()?.ifBlank { null }
 
     suspend fun seasonal(year: Int, season: String): List<MalAnime> = api.seasonal(year, season)
 

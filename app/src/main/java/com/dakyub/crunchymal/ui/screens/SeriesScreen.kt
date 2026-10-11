@@ -272,6 +272,7 @@ fun SeriesScreen(seriesId: String, onOpenSeries: (SeriesRef) -> Unit = {}, onOpe
                                 synopsis,
                                 onFocused = { scope.launch { delay(150); listState.animateScrollToItem(0) } },
                                 modifier = Modifier.fillMaxWidth(0.6f),
+                                loadFull = { malRecords[ref.malKey]?.malId?.let { graph.mal.synopsis(it) } },
                             )
                         }
                     }
