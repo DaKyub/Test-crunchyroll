@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal
 
+import com.dakyub.crunchymal.data.plex.PlexLibrary
 import android.content.Context
 import androidx.compose.runtime.staticCompositionLocalOf
 import com.dakyub.crunchymal.data.ArrivalWatcher
@@ -53,6 +54,7 @@ class Graph(context: Context) {
     val homeChannel = HomeChannel(context, settings)
     val arrivals = ArrivalWatcher(context, api, adn, mal)
     val plex = PlexApi(context)
+    val plexLibrary = PlexLibrary(context, plex, mal, watchPlatforms)
     val companions = CompanionsRepository(settings, mal)
     val tagServer = TagServer(context, mal, companions)
 

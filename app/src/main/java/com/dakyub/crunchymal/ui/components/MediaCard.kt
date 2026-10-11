@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal.ui.components
 
+import androidx.compose.runtime.remember
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -74,31 +75,32 @@ fun MediaCard(
                             .padding(6.dp),
                     )
                 }
-                // Badges de plateformes (liste MAL), sinon badge du service quand plusieurs sont affichés.
-                val providers by LocalGraph.current.providers.selected.collectAsState()
-                if (item.badges.isNotEmpty()) {
-                    PlatformBadges(item.badges, Modifier.align(Alignment.TopStart).padding(6.dp))
-                } else if (showMal && showProviderBadge && providers.size > 1 && item.series.id.isNotBlank()) {
-                    Text(
-                        (listOf(item.series.provider) + item.series.alsoOn).distinct().joinToString("+") { it.badge },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.White,
-                        modifier = Modifier
-                            .align(Alignment.TopStart)
-                            .padding(6.dp)
-                            .background(
-                                if (item.series.provider == Provider.ADN) AdnBlue else CrunchyOrange,
-                                RoundedCornerShape(4.dp),
-                            )
-                            .padding(horizontal = 5.dp, vertical = 1.dp),
-                    )
+                val graph = LocalGraph.current
+                val records by graph.mal.records.collectAsState()
+                val malId = records[item.series.malKey]?.malId
+                // Série présente sur le serveur Plex (sauf cartes déjà issues de Plex).
+                val plexIndex by graph.plexLibrary.index.collectAsState()
+                val plex = remember(plexIndex, malId, item.series.title) {
+                    if (!showMal || "Plex" in item.badges) null
+                    else plexIndex.find(malId, listOf(item.series.title) + item.series.malTitles)
+                }
+                // Badges de plateformes (liste MAL), sinon badge du service quand plusieurs sont affichés ; puis Plex.
+                val providers by graph.providers.selected.collectAsState()
+                Column(Modifier.align(Alignment.TopStart).padding(6.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    if (item.badges.isNotEmpty()) {
+                        PlatformBadges(item.badges)
+                    } else if (showMal && showProviderBadge && providers.size > 1 && item.series.id.isNotBlank()) {
+                        BadgeText(
+                            (listOf(item.series.provider) + item.series.alsoOn).distinct().joinToString("+") { it.badge },
+                            if (item.series.provider == Provider.ADN) AdnBlue else CrunchyOrange,
+                        )
+                    }
+                    plex?.let { BadgeText(it.label, PlexColor) }
                 }
                 // Avec qui la série a été vue (tags de la liste MAL).
                 if (showMal) {
-                    val graph = LocalGraph.current
                     val marks by graph.companions.byMalId.collectAsState()
-                    val records by graph.mal.records.collectAsState()
-                    val seenWith = records[item.series.malKey]?.malId?.let { marks[it] }
+                    val seenWith = malId?.let { marks[it] }
                     if (!seenWith.isNullOrEmpty()) {
                         CompanionsBadge(
                             seenWith,
@@ -145,6 +147,8 @@ fun MediaCard(
     }
 }
 
+val PlexColor = Color(0xFFE5A00D)
+
 /** Libellé court et couleur du badge d'une plateforme. */
 fun platformBadge(name: String): Pair<String, Color> = when (name) {
     "Crunchyroll" -> "CR" to CrunchyOrange
@@ -156,7 +160,7 @@ fun platformBadge(name: String): Pair<String, Color> = when (name) {
     "Canal+" -> "Canal+" to Color(0xFF1B1B1B)
     "Max" -> "Max" to Color(0xFF002BE7)
     "HIDIVE" -> "HIDIVE" to Color(0xFF00A3E0)
-    "Plex" -> "Plex" to Color(0xFFE5A00D)
+    "Plex" -> "Plex" to PlexColor
     else -> name.take(10) to Color(0xFF5A5A5A)
 }
 

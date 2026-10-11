@@ -116,6 +116,8 @@ fun CompanionsDialog(choices: List<MalEntryChoice>, onDismiss: () -> Unit) {
     var message by remember(malId) { mutableStateOf<String?>(null) }
     var addStatus by remember { mutableStateOf("completed") }
     var newName by remember { mutableStateOf("") }
+    // Champ de saisie affiché à la demande : sinon il prend le focus et ouvre le clavier à chaque fois.
+    var adding by remember { mutableStateOf(false) }
 
     LaunchedEffect(malId, loggedIn) {
         if (malId == null || !loggedIn) return@LaunchedEffect
@@ -173,22 +175,25 @@ fun CompanionsDialog(choices: List<MalEntryChoice>, onDismiss: () -> Unit) {
                                 selected = if (checked) selected.filterNot { it.equals(person, true) }.toSet() else selected + person
                             }) { Text(if (checked) "✓ $person" else person, maxLines = 1) }
                         }
+                        if (!adding) {
+                            item { OutlinedButton(onClick = { adding = true }) { Text("+ Autre personne", maxLines = 1) } }
+                        }
                     }
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        TvTextField(
-                            newName,
-                            { newName = it },
-                            "Autre personne (prénom)",
-                            modifier = Modifier.width(320.dp),
-                            onSubmit = {
-                                val name = CompanionTags.clean(newName)
-                                if (name.isNotEmpty()) { graph.companions.addPerson(name); selected = selected + name; newName = "" }
-                            },
-                        )
-                        OutlinedButton(onClick = {
+                    if (adding) {
+                        val add = {
                             val name = CompanionTags.clean(newName)
-                            if (name.isNotEmpty()) { graph.companions.addPerson(name); selected = selected + name; newName = "" }
-                        }) { Text("Ajouter") }
+                            if (name.isNotEmpty()) {
+                                graph.companions.addPerson(name)
+                                selected = selected + name
+                                newName = ""
+                                adding = false
+                            }
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            TvTextField(newName, { newName = it }, "Prénom", modifier = Modifier.width(320.dp), onSubmit = add)
+                            OutlinedButton(onClick = add) { Text("Ajouter") }
+                            OutlinedButton(onClick = { adding = false; newName = "" }) { Text("Annuler") }
+                        }
                     }
                     if (inList == false) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {

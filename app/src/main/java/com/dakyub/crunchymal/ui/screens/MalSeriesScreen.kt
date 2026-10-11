@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal.ui.screens
 
+import com.dakyub.crunchymal.ui.components.PlexButton
 import com.dakyub.crunchymal.ui.components.CompanionsButton
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -80,7 +81,7 @@ class MalSeriesViewModel(private val graph: Graph, private val malId: Int) : Vie
 
 /** Fiche d'une série de la liste MAL absente de Crunchyroll / ADN : infos MAL et plateformes où la regarder. */
 @Composable
-fun MalSeriesScreen(malId: Int, onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (Int) -> Unit = {}) {
+fun MalSeriesScreen(malId: Int, onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (Int) -> Unit = {}, onOpenPlex: (String) -> Unit = {}) {
     val graph = LocalGraph.current
     val vm = viewModel(key = "mal-$malId") { MalSeriesViewModel(graph, malId) }
     val state by vm.state.collectAsState()
@@ -162,6 +163,7 @@ fun MalSeriesScreen(malId: Int, onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (I
                                 items(others) { platform ->
                                     OutlinedButton(onClick = { PlatformApps.open(context, platform) }) { Text("▶ $platform") }
                                 }
+                                item { PlexButton("mal:$malId", anime.allTitles, onOpenPlex) }
                                 item { OutlinedButton(onClick = { malListOpen = true }) { Text("Ma liste MAL") } }
                                 item { CompanionsButton(listOf(MalEntryChoice("Série", "mal:$malId"))) }
                             }

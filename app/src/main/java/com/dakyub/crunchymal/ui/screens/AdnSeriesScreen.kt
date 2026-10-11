@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal.ui.screens
 
+import com.dakyub.crunchymal.ui.components.PlexButton
 import com.dakyub.crunchymal.ui.components.CompanionsButton
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -179,7 +180,12 @@ class AdnSeriesViewModel(private val graph: Graph, private val showId: String) :
 }
 
 @Composable
-fun AdnSeriesScreen(showId: String, onOpenSeries: (SeriesRef) -> Unit = {}, onOpenMal: (Int) -> Unit = {}) {
+fun AdnSeriesScreen(
+    showId: String,
+    onOpenSeries: (SeriesRef) -> Unit = {},
+    onOpenMal: (Int) -> Unit = {},
+    onOpenPlex: (String) -> Unit = {},
+) {
     val graph = LocalGraph.current
     val vm = viewModel(key = "adn-$showId") { AdnSeriesViewModel(graph, showId) }
     val state by vm.state.collectAsState()
@@ -303,6 +309,7 @@ fun AdnSeriesScreen(showId: String, onOpenSeries: (SeriesRef) -> Unit = {}, onOp
                                         enabled = !state.watchlistBusy,
                                     ) { Text(if (inList) "✓ Watchlist ADN" else "+ Watchlist ADN") }
                                 }
+                                PlexButton(ref.malKey, ref.malTitles, onOpenPlex)
                                 OutlinedButton(onClick = { malListOpen = true }) { Text("Ma liste MAL") }
                                 CompanionsButton(listOf(MalEntryChoice("Série", ref.malKey)))
                                 OutlinedButton(onClick = { correcting = true }) { Text("Corriger MAL") }

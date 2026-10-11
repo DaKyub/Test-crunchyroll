@@ -39,6 +39,10 @@ private data class PlexResource(
     val connections: List<PlexConnection> = emptyList(),
 )
 
+/** Identifiant externe d'un élément Plex (« tmdb://1234 », « tvdb://… », « imdb://… »). */
+@Serializable
+data class PlexGuid(val id: String = "")
+
 @Serializable
 data class PlexDirectory(val key: String = "", val title: String = "", val type: String = "")
 
@@ -55,6 +59,11 @@ data class PlexItem(
     /** Série : épisodes au total / vus. */
     val leafCount: Int = 0,
     val viewedLeafCount: Int = 0,
+    /** Série : nombre de saisons sur le serveur. */
+    val childCount: Int = 0,
+    @SerialName("Guid") val guids: List<PlexGuid> = emptyList(),
+    /** Saison : série parente. */
+    val parentRatingKey: String? = null,
     // Épisode
     val grandparentTitle: String? = null,
     val grandparentRatingKey: String? = null,
@@ -200,6 +209,13 @@ class PlexApi(context: Context) {
     suspend fun libraries(): List<PlexDirectory> = get("/library/sections").directories.filter { it.type == "show" }
 
     suspend fun shows(sectionKey: String): List<PlexItem> = get("/library/sections/$sectionKey/all?type=2").items
+
+    /** Séries d'une bibliothèque avec leurs identifiants externes (TMDB…). */
+    suspend fun showsWithGuids(sectionKey: String): List<PlexItem> =
+        get("/library/sections/$sectionKey/all?type=2&includeGuids=1").items
+
+    /** Toutes les saisons d'une bibliothèque de séries. */
+    suspend fun seasons(sectionKey: String): List<PlexItem> = get("/library/sections/$sectionKey/all?type=3").items
 
     /** « Reprendre » : épisodes en cours ou suivants (On Deck). */
     suspend fun onDeck(): List<PlexItem> = get("/library/onDeck").items.filter { it.type == "episode" }

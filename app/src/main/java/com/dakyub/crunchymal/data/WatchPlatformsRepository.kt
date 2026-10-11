@@ -90,7 +90,10 @@ private data class TmdbSeasonInfo(
 )
 
 @Serializable
-private data class TmdbTvDetails(val seasons: List<TmdbSeasonInfo> = emptyList())
+private data class TmdbTvDetails(
+    val seasons: List<TmdbSeasonInfo> = emptyList(),
+    @SerialName("number_of_seasons") val numberOfSeasons: Int = 0,
+)
 
 /**
  * Recherche TMDB : [titles] à essayer, [allTitles] (noms de saison), film ou série, année de diffusion.
@@ -341,6 +344,13 @@ class WatchPlatformsRepository(context: Context, private val settings: Settings)
             if (page >= result.totalPages) break
         }
         return out.distinctBy { it.id }
+    }
+
+    /** Nombre de saisons d'une série TMDB (hors spéciaux), ou null sans clé TMDB / en cas d'échec. */
+    suspend fun tvSeasonCount(tvId: Int): Int? {
+        if (settings.tmdbKey.isBlank()) return null
+        return runCatching { Http.json.decodeFromString<TmdbTvDetails>(tmdb("tv/$tvId") {}).numberOfSeasons }
+            .getOrNull()?.takeIf { it > 0 }
     }
 
     suspend fun clear() {

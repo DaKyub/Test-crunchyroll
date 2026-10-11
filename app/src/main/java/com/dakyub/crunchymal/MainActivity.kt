@@ -103,7 +103,7 @@ private fun AppRoot() {
             PlexShowScreen(ratingKey = entry.arguments?.getString("key").orEmpty(), onOpenSeries = openSeries, onOpenMal = openMal)
         }
         composable("mal/{id}", arguments = listOf(navArgument("id") { type = NavType.IntType })) { entry ->
-            MalSeriesScreen(malId = entry.arguments?.getInt("id") ?: 0, onOpenSeries = openSeries, onOpenMal = openMal)
+            MalSeriesScreen(malId = entry.arguments?.getInt("id") ?: 0, onOpenSeries = openSeries, onOpenMal = openMal, onOpenPlex = openPlexShow)
         }
         composable(
             "series/{provider}/{id}",
@@ -114,8 +114,8 @@ private fun AppRoot() {
         ) { entry ->
             val id = entry.arguments?.getString("id").orEmpty()
             when (entry.arguments?.getString("provider")) {
-                Provider.ADN.name -> AdnSeriesScreen(showId = id, onOpenSeries = openSeries, onOpenMal = openMal)
-                else -> SeriesScreen(seriesId = id, onOpenSeries = openSeries, onOpenMal = openMal)
+                Provider.ADN.name -> AdnSeriesScreen(showId = id, onOpenSeries = openSeries, onOpenMal = openMal, onOpenPlex = openPlexShow)
+                else -> SeriesScreen(seriesId = id, onOpenSeries = openSeries, onOpenMal = openMal, onOpenPlex = openPlexShow)
             }
         }
     }
@@ -141,6 +141,9 @@ private fun MainTabs(onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (Int) -> Unit
     // Liste MAL lue au démarrage : statuts et marques « vu avec » affichés sur toutes les affiches.
     val malLoggedIn by graph.malAuth.loggedIn.collectAsState()
     LaunchedEffect(malLoggedIn) { if (malLoggedIn) graph.mal.refreshMyListSeenIds() }
+    // Séries du serveur Plex : badge « Plex » sur toutes les affiches.
+    val plexConnected by graph.plex.connected.collectAsState()
+    LaunchedEffect(plexConnected) { if (plexConnected) graph.plexLibrary.refresh() }
     Column(Modifier.fillMaxSize()) {
         Row(
             verticalAlignment = Alignment.CenterVertically,

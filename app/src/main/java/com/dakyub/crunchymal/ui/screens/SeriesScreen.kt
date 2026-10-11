@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal.ui.screens
 
+import com.dakyub.crunchymal.ui.components.PlexButton
 import com.dakyub.crunchymal.ui.components.CompanionsButton
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -201,7 +202,12 @@ private fun seasonMalKey(seriesKey: String, index: Int, season: CrSeason, record
 }
 
 @Composable
-fun SeriesScreen(seriesId: String, onOpenSeries: (SeriesRef) -> Unit = {}, onOpenMal: (Int) -> Unit = {}) {
+fun SeriesScreen(
+    seriesId: String,
+    onOpenSeries: (SeriesRef) -> Unit = {},
+    onOpenMal: (Int) -> Unit = {},
+    onOpenPlex: (String) -> Unit = {},
+) {
     val graph = LocalGraph.current
     val vm = viewModel(key = seriesId) { SeriesViewModel(graph, seriesId) }
     val state by vm.state.collectAsState()
@@ -305,6 +311,7 @@ fun SeriesScreen(seriesId: String, onOpenSeries: (SeriesRef) -> Unit = {}, onOpe
                                 )
                             }
                             OutlinedButton(onClick = { OfficialApp.openSeries(context, series.id) }) { Text("Fiche Crunchyroll") }
+                            PlexButton(ref.malKey, ref.malTitles, onOpenPlex)
                             state.inWatchlist?.let { inList ->
                                 OutlinedButton(onClick = { vm.toggleWatchlist() }) {
                                     Text(if (inList) "✓ Dans la watchlist" else "+ Watchlist")
