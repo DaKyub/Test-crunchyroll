@@ -332,7 +332,17 @@ fun PlexShowScreen(ratingKey: String, onOpenSeries: (SeriesRef) -> Unit, onOpenM
     var correctingSeason by remember { mutableStateOf<Pair<String, String>?>(null) }
     val malRecords by graph.mal.records.collectAsState()
     val show = state.show
-    if (malListOpen) MalListDialog(choices = listOf(MalEntryChoice("Série", malKey)), onDismiss = { malListOpen = false })
+    if (malListOpen) {
+        // Série puis chaque saison (même clé MAL que sa puce), la saison affichée présélectionnée.
+        val seasonChoices = state.seasons.mapIndexed { index, (number, _) ->
+            MalEntryChoice("Saison $number", if (index == 0 && number <= 1) malKey else "plexseason:$ratingKey:$number")
+        }
+        MalListDialog(
+            choices = listOf(MalEntryChoice("Série", malKey)) + seasonChoices,
+            onDismiss = { malListOpen = false },
+            initialKey = seasonChoices.getOrNull(state.selectedSeason)?.malKey,
+        )
+    }
     if (correcting && show != null) MalCorrectionDialog(malKey = malKey, initialQuery = show.title, onDismiss = { correcting = false })
     correctingSeason?.let { (key, query) -> MalCorrectionDialog(malKey = key, initialQuery = query, onDismiss = { correctingSeason = null }) }
 

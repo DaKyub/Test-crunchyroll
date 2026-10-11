@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal.ui.screens
 
+import com.dakyub.crunchymal.data.progress.SeasonNode
 import com.dakyub.crunchymal.ui.components.TrailerButton
 import com.dakyub.crunchymal.ui.components.PlanToWatchButton
 import com.dakyub.crunchymal.ui.components.PlexButton
@@ -203,6 +204,12 @@ private fun seasonMalKey(seriesKey: String, index: Int, season: CrSeason, record
     else -> "seasonmal:${season.id}"
 }
 
+/** Fiches MAL de chaque saison, pour « Ma liste MAL » et « Vu avec… ». */
+private fun seasonChoices(seriesId: String, seasons: List<SeasonNode>, records: Map<String, MalRecord>): List<MalEntryChoice> =
+    seasons.mapIndexed { index, node ->
+        MalEntryChoice("Saison ${node.season.seasonNumber}", seasonMalKey("series:$seriesId", index, node.season, records))
+    }
+
 @Composable
 fun SeriesScreen(
     seriesId: String,
@@ -323,12 +330,8 @@ fun SeriesScreen(
                             PlanToWatchButton(ref.malKey, series.title)
                             OutlinedButton(onClick = { malListOpen = true }) { Text("Ma liste MAL") }
                             CompanionsButton(
-                                listOfNotNull(
-                                    MalEntryChoice("Série", "series:${series.id}"),
-                                    state.tree?.seasons?.getOrNull(state.selectedSeason)?.season?.let {
-                                        MalEntryChoice("Saison ${it.seasonNumber}", seasonMalKey("series:${series.id}", state.selectedSeason, it, malRecords))
-                                    },
-                                )
+                                listOf(MalEntryChoice("Série", "series:${series.id}")) +
+                                    seasonChoices(series.id, state.tree?.seasons.orEmpty(), malRecords)
                             )
                             OutlinedButton(onClick = { correcting = ref.malKey to (ref.malTitles.firstOrNull() ?: series.title) }) {
                                 Text("Corriger MAL")
@@ -425,15 +428,12 @@ fun SeriesScreen(
     }
 
     if (malListOpen && series != null) {
-        val selectedSeason = state.tree?.seasons?.getOrNull(state.selectedSeason)?.season
+        // Toutes les saisons au choix (la saison affichée est présélectionnée).
+        val seasonChoices = seasonChoices(series.id, state.tree?.seasons.orEmpty(), malRecords)
         MalListDialog(
-            choices = listOfNotNull(
-                MalEntryChoice("Série", "series:${series.id}"),
-                selectedSeason?.let {
-                    MalEntryChoice("Saison ${it.seasonNumber}", seasonMalKey("series:${series.id}", state.selectedSeason, it, malRecords))
-                },
-            ),
+            choices = listOf(MalEntryChoice("Série", "series:${series.id}")) + seasonChoices,
             onDismiss = { malListOpen = false },
+            initialKey = seasonChoices.getOrNull(state.selectedSeason)?.malKey,
         )
     }
 

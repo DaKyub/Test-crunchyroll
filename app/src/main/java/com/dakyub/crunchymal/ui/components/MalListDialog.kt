@@ -40,14 +40,15 @@ data class MalEntryChoice(val label: String, val malKey: String)
  * automatiquement pour "Terminé").
  */
 @Composable
-fun MalListDialog(choices: List<MalEntryChoice>, onDismiss: () -> Unit) {
+fun MalListDialog(choices: List<MalEntryChoice>, onDismiss: () -> Unit, initialKey: String? = null) {
     val graph = LocalGraph.current
     val records by graph.mal.records.collectAsState()
     val loggedIn by graph.malAuth.loggedIn.collectAsState()
     val scope = rememberCoroutineScope()
     val available = choices.filter { records[it.malKey]?.malId != null }.distinctBy { records[it.malKey]?.malId }
 
-    var choiceIndex by remember { mutableIntStateOf(0) }
+    // Fiche choisie à l'ouverture : la saison affichée sur la fiche, sinon la série.
+    var choiceIndex by remember { mutableIntStateOf(available.indexOfFirst { it.malKey == initialKey }.coerceAtLeast(0)) }
     val choice = available.getOrNull(choiceIndex)
     val malId = choice?.let { records[it.malKey]?.malId }
     var status by remember(malId) { mutableStateOf<String?>(null) }
