@@ -193,6 +193,30 @@ class MalRepository(context: Context, clientId: () -> String, val auth: MalAuth)
 
     suspend fun seasonal(year: Int, season: String): List<MalAnime> = api.seasonal(year, season)
 
+    private val rankingCache = ConcurrentHashMap<String, List<MalAnime>>()
+
+    /** Les 1 000 premiers animes d'un classement MAL, gardés le temps de la session. */
+    suspend fun ranking(type: String): List<MalAnime> = rankingCache[type] ?: run {
+        val first = api.ranking(type, limit = 500, offset = 0)
+        val second = if (first.size >= 500) runCatching { api.ranking(type, limit = 500, offset = 500) }.getOrDefault(emptyList()) else emptyList()
+        (first + second).distinctBy { it.malId }.also { rankingCache[type] = it }
+    }
+
+    /**
+     * Ajoute l'anime à « À voir » sur la liste MAL s'il n'y est pas encore. Renvoie null s'il a été ajouté,
+     * sinon son statut actuel (rien n'est modifié).
+     */
+    suspend fun addToPlanToWatch(malId: Int): String? {
+        val current = myStatus(malId).first?.status
+        if (current != null) {
+            _myListStatuses.update { it + (malId to current) }
+            return current
+        }
+        api.updateStatus(malId, auth.accessToken(), "plan_to_watch", 0, null)
+        _myListStatuses.update { it + (malId to "plan_to_watch") }
+        return null
+    }
+
     private val recommendationCache = java.util.concurrent.ConcurrentHashMap<Int, List<MalAnime>>()
 
     /** Recommandations MAL d'un anime (fiches complètes, 12 au plus), gardées le temps de la session. */

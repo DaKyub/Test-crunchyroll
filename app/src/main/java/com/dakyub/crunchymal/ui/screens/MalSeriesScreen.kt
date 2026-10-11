@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal.ui.screens
 
+import com.dakyub.crunchymal.ui.components.PlanToWatchButton
 import com.dakyub.crunchymal.ui.components.PlexButton
 import com.dakyub.crunchymal.ui.components.CompanionsButton
 import androidx.compose.foundation.layout.Arrangement
@@ -164,6 +165,7 @@ fun MalSeriesScreen(malId: Int, onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (I
                                     OutlinedButton(onClick = { PlatformApps.open(context, platform) }) { Text("▶ $platform") }
                                 }
                                 item { PlexButton("mal:$malId", anime.allTitles, onOpenPlex) }
+                                item { PlanToWatchButton("mal:$malId", anime.titleEnglish ?: anime.title) }
                                 item { OutlinedButton(onClick = { malListOpen = true }) { Text("Ma liste MAL") } }
                                 item { CompanionsButton(listOf(MalEntryChoice("Série", "mal:$malId"))) }
                             }

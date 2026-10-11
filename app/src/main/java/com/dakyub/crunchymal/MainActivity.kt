@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal
 
+import com.dakyub.crunchymal.ui.screens.DiscoverScreen
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -121,7 +122,7 @@ private fun AppRoot() {
     }
 }
 
-private val Tabs = listOf("Accueil", "En cours", "Parcourir", "Calendrier", "Saison", "Watchlist", "Liste MAL", "Plex", "Recherche", "Réglages")
+private val Tabs = listOf("Accueil", "En cours", "Parcourir", "Calendrier", "Saison", "Découvrir", "Watchlist", "Liste MAL", "Plex", "Recherche", "Réglages")
 
 @Composable
 private fun MainTabs(onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (Int) -> Unit, onOpenPlexShow: (String) -> Unit) {
@@ -180,10 +181,11 @@ private fun MainTabs(onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (Int) -> Unit
             2 -> BrowseScreen(onOpenSeries, onOpenMal)
             3 -> CalendarScreen(onOpenSeries)
             4 -> SeasonScreen(onOpenSeries, onOpenMal)
-            5 -> WatchlistScreen(onOpenSeries)
-            6 -> MalListScreen(onOpenSeries, onOpenMal)
-            7 -> PlexScreen(onOpenPlexShow)
-            8 -> SearchScreen(onOpenSeries)
+            5 -> DiscoverScreen(onOpenSeries, onOpenMal)
+            6 -> WatchlistScreen(onOpenSeries)
+            7 -> MalListScreen(onOpenSeries, onOpenMal)
+            8 -> PlexScreen(onOpenPlexShow)
+            9 -> SearchScreen(onOpenSeries)
             else -> SettingsScreen()
         }
     }

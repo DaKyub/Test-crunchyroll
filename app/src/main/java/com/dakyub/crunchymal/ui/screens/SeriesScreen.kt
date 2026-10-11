@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal.ui.screens
 
+import com.dakyub.crunchymal.ui.components.PlanToWatchButton
 import com.dakyub.crunchymal.ui.components.PlexButton
 import com.dakyub.crunchymal.ui.components.CompanionsButton
 import androidx.compose.foundation.background
@@ -317,6 +318,7 @@ fun SeriesScreen(
                                     Text(if (inList) "✓ Dans la watchlist" else "+ Watchlist")
                                 }
                             }
+                            PlanToWatchButton(ref.malKey, series.title)
                             OutlinedButton(onClick = { malListOpen = true }) { Text("Ma liste MAL") }
                             CompanionsButton(
                                 listOfNotNull(

@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal.ui.screens
 
+import com.dakyub.crunchymal.ui.components.PlanToWatchButton
 import com.dakyub.crunchymal.ui.components.PlexButton
 import com.dakyub.crunchymal.ui.components.CompanionsButton
 import androidx.compose.foundation.horizontalScroll
@@ -310,6 +311,7 @@ fun AdnSeriesScreen(
                                     ) { Text(if (inList) "✓ Watchlist ADN" else "+ Watchlist ADN") }
                                 }
                                 PlexButton(ref.malKey, ref.malTitles, onOpenPlex)
+                                PlanToWatchButton(ref.malKey, show.title)
                                 OutlinedButton(onClick = { malListOpen = true }) { Text("Ma liste MAL") }
                                 CompanionsButton(listOf(MalEntryChoice("Série", ref.malKey)))
                                 OutlinedButton(onClick = { correcting = true }) { Text("Corriger MAL") }

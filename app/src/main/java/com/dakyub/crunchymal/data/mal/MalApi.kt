@@ -193,6 +193,20 @@ class MalApi(private val clientId: () -> String) {
         return Http.json.decodeFromString<SearchResponse>(get(url)).data.map { it.node.toAnime() }
     }
 
+    /**
+     * Classement MAL ([type] : all, bypopularity, airing, upcoming, tv, movie…), dans l'ordre du classement.
+     * 500 animes au plus par page.
+     */
+    suspend fun ranking(type: String, limit: Int = 500, offset: Int = 0): List<MalAnime> {
+        val url = "$BASE/anime/ranking".toHttpUrl().newBuilder()
+            .addQueryParameter("ranking_type", type)
+            .addQueryParameter("limit", limit.toString())
+            .addQueryParameter("offset", offset.toString())
+            .addQueryParameter("fields", "$FIELDS,main_picture")
+            .build().toString()
+        return Http.json.decodeFromString<SearchResponse>(get(url)).data.map { it.node.toAnime() }
+    }
+
     /** Animes recommandés par les membres MAL pour [malId], les plus recommandés d'abord. */
     suspend fun recommendationIds(malId: Int): List<Int> {
         val url = "$BASE/anime/$malId".toHttpUrl().newBuilder()
