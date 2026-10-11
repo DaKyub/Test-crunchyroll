@@ -48,6 +48,8 @@ import com.dakyub.crunchymal.ui.screens.MalListScreen
 import com.dakyub.crunchymal.ui.screens.MalSeriesScreen
 import com.dakyub.crunchymal.ui.screens.HomeScreen
 import com.dakyub.crunchymal.ui.screens.LoginScreen
+import com.dakyub.crunchymal.ui.screens.PlexScreen
+import com.dakyub.crunchymal.ui.screens.PlexShowScreen
 import com.dakyub.crunchymal.ui.screens.SearchScreen
 import com.dakyub.crunchymal.ui.screens.SeasonScreen
 import com.dakyub.crunchymal.ui.screens.SeriesScreen
@@ -92,9 +94,13 @@ private fun AppRoot() {
     val nav = rememberNavController()
     val openSeries: (SeriesRef) -> Unit = { ref -> if (ref.id.isNotBlank()) nav.navigate(ref.route) }
     val openMal: (Int) -> Unit = { malId -> nav.navigate("mal/$malId") }
+    val openPlexShow: (String) -> Unit = { ratingKey -> nav.navigate("plex/$ratingKey") }
     NavHost(navController = nav, startDestination = "main") {
         composable("main") {
-            MainTabs(onOpenSeries = openSeries, onOpenMal = openMal)
+            MainTabs(onOpenSeries = openSeries, onOpenMal = openMal, onOpenPlexShow = openPlexShow)
+        }
+        composable("plex/{key}", arguments = listOf(navArgument("key") { type = NavType.StringType })) { entry ->
+            PlexShowScreen(ratingKey = entry.arguments?.getString("key").orEmpty(), onOpenSeries = openSeries, onOpenMal = openMal)
         }
         composable("mal/{id}", arguments = listOf(navArgument("id") { type = NavType.IntType })) { entry ->
             MalSeriesScreen(malId = entry.arguments?.getInt("id") ?: 0, onOpenSeries = openSeries, onOpenMal = openMal)
@@ -115,10 +121,10 @@ private fun AppRoot() {
     }
 }
 
-private val Tabs = listOf("Accueil", "En cours", "Parcourir", "Calendrier", "Saison", "Watchlist", "Liste MAL", "Recherche", "Réglages")
+private val Tabs = listOf("Accueil", "En cours", "Parcourir", "Calendrier", "Saison", "Watchlist", "Liste MAL", "Plex", "Recherche", "Réglages")
 
 @Composable
-private fun MainTabs(onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (Int) -> Unit) {
+private fun MainTabs(onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (Int) -> Unit, onOpenPlexShow: (String) -> Unit) {
     var selected by rememberSaveable { mutableIntStateOf(0) }
     // Au retour d'une fiche, Android redonne le focus au premier onglet (Accueil), qui serait alors
     // sélectionné : pendant ce retour, le focus est redirigé vers l'onglet où l'on était.
@@ -165,12 +171,13 @@ private fun MainTabs(onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (Int) -> Unit
         when (selected) {
             0 -> HomeScreen(onOpenSeries)
             1 -> WatchlistScreen(onOpenSeries, SeriesListSource.STARTED)
-            2 -> BrowseScreen(onOpenSeries)
+            2 -> BrowseScreen(onOpenSeries, onOpenMal)
             3 -> CalendarScreen(onOpenSeries)
             4 -> SeasonScreen(onOpenSeries, onOpenMal)
             5 -> WatchlistScreen(onOpenSeries)
             6 -> MalListScreen(onOpenSeries, onOpenMal)
-            7 -> SearchScreen(onOpenSeries)
+            7 -> PlexScreen(onOpenPlexShow)
+            8 -> SearchScreen(onOpenSeries)
             else -> SettingsScreen()
         }
     }

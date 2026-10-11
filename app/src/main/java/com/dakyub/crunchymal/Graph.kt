@@ -21,6 +21,7 @@ import com.dakyub.crunchymal.data.crunchyroll.CrAuth
 import com.dakyub.crunchymal.data.mal.MalAuth
 import com.dakyub.crunchymal.data.mal.MalRepository
 import com.dakyub.crunchymal.data.mal.MalSync
+import com.dakyub.crunchymal.data.plex.PlexApi
 import com.dakyub.crunchymal.tv.HomeChannel
 import com.dakyub.crunchymal.data.progress.AdnProgressRepository
 import com.dakyub.crunchymal.data.progress.ProgressRepository
@@ -49,6 +50,7 @@ class Graph(context: Context) {
     val malSync = MalSync(mal, settings)
     val homeChannel = HomeChannel(context, settings)
     val arrivals = ArrivalWatcher(context, api, adn, mal)
+    val plex = PlexApi(context)
 
     /** Calcule (si besoin) la progression d'une série, quel que soit son service. */
     suspend fun ensureProgress(ref: SeriesRef, force: Boolean = false) = when (ref.provider) {

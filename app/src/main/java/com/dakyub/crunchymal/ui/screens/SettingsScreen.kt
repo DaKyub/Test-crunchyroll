@@ -44,6 +44,7 @@ import com.dakyub.crunchymal.ui.components.QrCode
 import com.dakyub.crunchymal.ui.components.UpdateButton
 import com.dakyub.crunchymal.ui.components.label
 import com.dakyub.crunchymal.update.UpdateState
+import com.dakyub.crunchymal.PlexApp
 import kotlinx.coroutines.launch
 
 private val Locales = listOf("fr-FR" to "Français", "en-US" to "English")
@@ -161,6 +162,41 @@ fun SettingsScreen() {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+
+        item { Section("Plex") }
+        item {
+            val plexConnected by graph.plex.connected.collectAsState()
+            val plexLogin by graph.plex.login.collectAsState()
+            var linkFormat by remember { mutableStateOf(settings.plexLinkFormat) }
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (plexConnected) {
+                    Text("Serveur : ${graph.plex.serverName}", style = MaterialTheme.typography.bodyMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        OutlinedButton(onClick = { graph.plex.logout() }) { Text("Se déconnecter de Plex") }
+                        CycleButton("Lien vers l'app Plex", "format ${linkFormat + 1}/${PlexApp.formats.size}") {
+                            linkFormat = (linkFormat + 1) % PlexApp.formats.size
+                            settings.plexLinkFormat = linkFormat
+                        }
+                    }
+                    Text(
+                        "Si un épisode n'ouvre que l'accueil de l'app Plex, passe au format suivant et réessaie.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    Button(onClick = { graph.plex.startLogin() }) { Text("Se connecter à Plex") }
+                }
+                plexLogin?.let { login ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(24.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(login.message, style = MaterialTheme.typography.bodyMedium)
+                            login.code?.let { Text(it, style = MaterialTheme.typography.displaySmall) }
+                        }
+                        login.qrUrl?.let { QrCode(it, size = 160.dp) }
+                    }
+                }
+            }
         }
 
         item { Section("Services") }

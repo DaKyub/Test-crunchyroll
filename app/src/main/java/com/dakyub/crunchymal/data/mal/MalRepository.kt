@@ -123,12 +123,17 @@ class MalRepository(context: Context, clientId: () -> String, val auth: MalAuth)
     suspend fun myList(): List<MalListEntry> = api.userList(auth.accessToken()).also { list ->
         _myListSeenIds.value = list.filter { it.status.status != null && it.status.status != "plan_to_watch" }
             .map { it.anime.malId }.toSet()
+        _myListStatuses.value = list.mapNotNull { e -> e.status.status?.let { e.anime.malId to it } }.toMap()
         myListFetchedAt = System.currentTimeMillis()
     }
 
     /** Fiches MAL déjà vues ou commencées par l'utilisateur (tout statut sauf « À voir »). */
     private val _myListSeenIds = MutableStateFlow<Set<Int>>(emptySet())
     val myListSeenIds: StateFlow<Set<Int>> = _myListSeenIds
+
+    /** Statut MAL (watching, completed…) de chaque fiche de la liste de l'utilisateur. */
+    private val _myListStatuses = MutableStateFlow<Map<Int, String>>(emptyMap())
+    val myListStatuses: StateFlow<Map<Int, String>> = _myListStatuses
     private var myListFetchedAt = 0L
 
     /** Rafraîchit [myListSeenIds] (au plus toutes les 30 min) si le compte MAL est connecté. */

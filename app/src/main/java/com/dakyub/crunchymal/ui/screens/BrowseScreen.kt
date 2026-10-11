@@ -44,6 +44,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import android.widget.Toast
+import androidx.compose.ui.platform.LocalContext
+import com.dakyub.crunchymal.data.TmdbPlatforms
 import kotlinx.coroutines.launch
 import com.dakyub.crunchymal.data.mergeProviders
 import kotlinx.coroutines.Dispatchers
@@ -76,7 +79,12 @@ data class BrowseUi(
     val loading: Boolean = false,
     val results: List<CardItem> = emptyList(),
     val error: String? = null,
+    /** Plateforme TMDB affichée (Netflix, Prime Video, Disney+) à la place de Crunchyroll / ADN. */
+    val platform: Pair<Int, String>? = null,
 )
+
+/** Carte d'un catalogue de plateforme (TMDB) : pas de fiche Crunchyroll / ADN, seulement MAL. */
+private val CardItem.isPlatformItem: Boolean get() = series.id.startsWith("tmdb-")
 
 /** Liste affichée après filtres (statut, note MAL) et tri. */
 data class BrowseVisible(
@@ -94,14 +102,25 @@ class BrowseViewModel(private val graph: Graph) : ViewModel() {
     private val crWatched = MutableStateFlow<Set<String>?>(null)
 
     val visible = combine(ui, graph.progress.summaries, graph.mal.records, graph.adn.loggedIn, crWatched) { u, summaries, mal, _, watched ->
-        fun statusOf(item: CardItem): WatchStatus? = summaries[item.series.progressKey]?.status
-            ?: if (item.series.provider == Provider.CRUNCHYROLL && watched != null && item.series.id !in watched) WatchStatus.NOT_STARTED else null
+        val malStatuses = graph.mal.myListStatuses.value
+        fun statusOf(item: CardItem): WatchStatus? {
+            // Plateformes : statut d'après la liste MAL (pas de progression disponible chez elles).
+            if (item.isPlatformItem) {
+                return when (mal[item.series.malKey]?.malId?.let { malStatuses[it] }) {
+                    "completed" -> WatchStatus.COMPLETED
+                    "watching", "on_hold", "dropped" -> WatchStatus.IN_PROGRESS
+                    else -> WatchStatus.NOT_STARTED
+                }
+            }
+            return summaries[item.series.progressKey]?.status
+                ?: if (item.series.provider == Provider.CRUNCHYROLL && watched != null && item.series.id !in watched) WatchStatus.NOT_STARTED else null
+        }
         val rows = u.results.map { item -> Triple(item, statusOf(item), mal[item.series.malKey]?.score) }
         val filtered = rows
             .filter { (_, status, _) -> u.statuses.accepts(status) }
             .filter { (_, _, score) -> u.minScore == null || (score != null && score >= u.minScore) }
         val sorted = if (u.sort == BrowseSort.MAL) filtered.sortedByDescending { it.third ?: -1.0 } else filtered
-        val trackable = u.results.filter { graph.progressAvailable(it.series) }
+        val trackable = u.results.filter { !it.isPlatformItem && graph.progressAvailable(it.series) }
         BrowseVisible(
             items = sorted.map { (item, _, _) ->
                 val summary = summaries[item.series.progressKey]
@@ -137,7 +156,13 @@ class BrowseViewModel(private val graph: Graph) : ViewModel() {
     }
 
     fun select(selection: BrowseSelection) {
-        ui.value = ui.value.copy(selections = ui.value.selections + (selection.provider to selection))
+        ui.value = ui.value.copy(selections = ui.value.selections + (selection.provider to selection), platform = null)
+        reload()
+    }
+
+    /** Catalogue anime d'une plateforme (TMDB), à la place des catégories Crunchyroll / ADN. */
+    fun selectPlatform(platform: Pair<Int, String>) {
+        ui.value = ui.value.copy(platform = platform)
         reload()
     }
 
@@ -161,7 +186,7 @@ class BrowseViewModel(private val graph: Graph) : ViewModel() {
     private fun computeProgressIfNeeded() {
         progressJob?.cancel()
         if (ui.value.statuses.isEmpty()) return
-        val refs = ui.value.results.map { it.series }.filter { graph.progressAvailable(it) }
+        val refs = ui.value.results.filter { !it.isPlatformItem }.map { it.series }.filter { graph.progressAvailable(it) }
         progressJob = viewModelScope.launch {
             // Crunchyroll : seules les séries de l'historique ont une progression à calculer.
             val watched = if (refs.any { it.provider == Provider.CRUNCHYROLL }) {
@@ -173,6 +198,7 @@ class BrowseViewModel(private val graph: Graph) : ViewModel() {
     }
 
     private fun reload() {
+        ui.value.platform?.let { loadPlatform(it); return }
         val selections = ui.value.selections
         if (selections.isEmpty()) return
         val alpha = ui.value.sort == BrowseSort.ALPHA
@@ -189,6 +215,34 @@ class BrowseViewModel(private val graph: Graph) : ViewModel() {
             ui.value = ui.value.copy(loading = false, results = merged, error = error.takeIf { merged.isEmpty() })
             merged.forEach { graph.mal.request(it.series.malKey, it.series.malTitles) }
             computeProgressIfNeeded()
+        }
+    }
+
+    private fun loadPlatform(platform: Pair<Int, String>) {
+        val alpha = ui.value.sort == BrowseSort.ALPHA
+        job?.cancel()
+        job = viewModelScope.launch {
+            ui.value = ui.value.copy(loading = true, error = null, results = emptyList())
+            runCatching { graph.watchPlatforms.animeOn(platform.first) }
+                .onSuccess { shows ->
+                    val cards = shows.map { show ->
+                        CardItem(
+                            series = SeriesRef(
+                                id = "tmdb-${show.id}",
+                                title = show.name,
+                                posterUrl = show.posterUrl,
+                                altTitles = listOf(show.originalName).filter { it.isNotBlank() },
+                                malKeyOverride = "tmdb:${show.id}",
+                            ),
+                            subtitle = show.firstAirDate?.take(4),
+                            badges = listOf(platform.second),
+                        )
+                    }.let { list -> if (alpha) list.sortedBy { it.series.title.lowercase() } else list }
+                    ui.value = ui.value.copy(loading = false, results = cards)
+                    cards.forEach { graph.mal.request(it.series.malKey, it.series.malTitles) }
+                    graph.mal.refreshMyListSeenIds()
+                }
+                .onFailure { ui.value = ui.value.copy(loading = false, error = it.message ?: "Erreur TMDB") }
         }
     }
 
@@ -227,13 +281,15 @@ class BrowseViewModel(private val graph: Graph) : ViewModel() {
 }
 
 @Composable
-fun BrowseScreen(onOpenSeries: (SeriesRef) -> Unit) {
+fun BrowseScreen(onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (Int) -> Unit = {}) {
     val graph = LocalGraph.current
     val vm = viewModel { BrowseViewModel(graph) }
     val ui by vm.ui.collectAsState()
     val visible by vm.visible.collectAsState()
     val providers by graph.providers.selected.collectAsState()
     val adnLoggedIn by graph.adn.loggedIn.collectAsState()
+    val malRecords by graph.mal.records.collectAsState()
+    val context = LocalContext.current
     LaunchedEffect(providers) { vm.ensure(providers) }
 
     val message = when {
@@ -254,7 +310,7 @@ fun BrowseScreen(onOpenSeries: (SeriesRef) -> Unit) {
                     "Crunchyroll",
                     listOf(BrowseSelection.all(Provider.CRUNCHYROLL)) +
                         ui.crCategories.map { BrowseSelection(Provider.CRUNCHYROLL, it.slug.ifBlank { it.id }, it.title) },
-                    ui.selections[Provider.CRUNCHYROLL],
+                    ui.selections[Provider.CRUNCHYROLL].takeIf { ui.platform == null },
                     vm::select,
                 )
             }
@@ -262,9 +318,20 @@ fun BrowseScreen(onOpenSeries: (SeriesRef) -> Unit) {
                 CategoryRow(
                     "ADN",
                     listOf(BrowseSelection.all(Provider.ADN)) + ui.adnGenres.map { BrowseSelection(Provider.ADN, it, adnGenreLabel(it)) },
-                    ui.selections[Provider.ADN],
+                    ui.selections[Provider.ADN].takeIf { ui.platform == null },
                     vm::select,
                 )
+            }
+            // Catalogues anime des autres plateformes (TMDB, France) : il faut la clé TMDB.
+            if (graph.settings.tmdbKey.isNotBlank()) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
+                    Text("Autres", style = MaterialTheme.typography.labelLarge, modifier = Modifier.width(96.dp))
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(TmdbPlatforms) { platform ->
+                            FilterChip(selected = ui.platform == platform, onClick = { vm.selectPlatform(platform) }) { Text(platform.second) }
+                        }
+                    }
+                }
             }
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -272,7 +339,8 @@ fun BrowseScreen(onOpenSeries: (SeriesRef) -> Unit) {
                 modifier = Modifier.padding(vertical = 4.dp),
             ) {
                 Text(
-                    ui.selections.values.joinToString(" + ") { "${it.title} · ${it.provider.label}" },
+                    ui.platform?.let { "Animes sur ${it.second} (France, d'après TMDB)" }
+                        ?: ui.selections.values.joinToString(" + ") { "${it.title} · ${it.provider.label}" },
                     style = MaterialTheme.typography.titleMedium,
                 )
                 CycleButton("Tri", ui.sort.label, vm::nextSort)
@@ -290,7 +358,15 @@ fun BrowseScreen(onOpenSeries: (SeriesRef) -> Unit) {
             )
         },
     ) { item ->
-        MediaCard(item = item, width = GridPosterWidth, onClick = { onOpenSeries(item.series) })
+        MediaCard(
+            item = item,
+            width = GridPosterWidth,
+            onClick = {
+                if (!item.isPlatformItem) onOpenSeries(item.series)
+                else malRecords[item.series.malKey]?.malId?.let(onOpenMal)
+                    ?: Toast.makeText(context, "Fiche MAL pas encore trouvée pour ${item.series.title}", Toast.LENGTH_SHORT).show()
+            },
+        )
     }
 }
 

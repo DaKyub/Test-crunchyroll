@@ -141,6 +141,7 @@ fun platformBadge(name: String): Pair<String, Color> = when (name) {
     "Canal+" -> "Canal+" to Color(0xFF1B1B1B)
     "Max" -> "Max" to Color(0xFF002BE7)
     "HIDIVE" -> "HIDIVE" to Color(0xFF00A3E0)
+    "Plex" -> "Plex" to Color(0xFFE5A00D)
     else -> name.take(10) to Color(0xFF5A5A5A)
 }
 

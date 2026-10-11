@@ -62,6 +62,24 @@ private data class TmdbCountry(
 @Serializable
 private data class TmdbProviders(val results: Map<String, TmdbCountry> = emptyMap())
 
+/** Série d'un catalogue de plateforme (découverte TMDB). */
+@Serializable
+data class TmdbShowLite(
+    val id: Int = 0,
+    val name: String = "",
+    @SerialName("original_name") val originalName: String = "",
+    @SerialName("poster_path") val posterPath: String? = null,
+    @SerialName("first_air_date") val firstAirDate: String? = null,
+) {
+    val posterUrl: String? get() = posterPath?.let { "https://image.tmdb.org/t/p/w342$it" }
+}
+
+@Serializable
+private data class TmdbDiscover(val results: List<TmdbShowLite> = emptyList(), @SerialName("total_pages") val totalPages: Int = 1)
+
+/** Plateformes proposées dans Parcourir (identifiant TMDB → nom). */
+val TmdbPlatforms = listOf(8 to "Netflix", 119 to "Prime Video", 337 to "Disney+")
+
 @Serializable
 private data class TmdbSeasonInfo(
     @SerialName("season_number") val number: Int = 0,
@@ -233,6 +251,25 @@ class WatchPlatformsRepository(context: Context, private val settings: Settings)
             .apply { if (bearer) header("Authorization", "Bearer $key") }
             .build()
         return Http.client.fetch(request)
+    }
+
+    /** Animes (séries d'animation japonaises) inclus dans l'abonnement de la plateforme TMDB [providerId], en France. */
+    suspend fun animeOn(providerId: Int, pages: Int = 5): List<TmdbShowLite> {
+        val out = mutableListOf<TmdbShowLite>()
+        for (page in 1..pages) {
+            val result = Http.json.decodeFromString<TmdbDiscover>(tmdb("discover/tv") {
+                addQueryParameter("with_watch_providers", providerId.toString())
+                addQueryParameter("watch_region", "FR")
+                addQueryParameter("with_watch_monetization_types", "flatrate")
+                addQueryParameter("with_genres", "16")
+                addQueryParameter("with_original_language", "ja")
+                addQueryParameter("sort_by", "popularity.desc")
+                addQueryParameter("page", page.toString())
+            })
+            out += result.results
+            if (page >= result.totalPages) break
+        }
+        return out.distinctBy { it.id }
     }
 
     suspend fun clear() {

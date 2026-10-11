@@ -78,6 +78,11 @@ class Settings(context: Context) {
         get() = prefs.getBoolean("arrival_alerts", true)
         set(value) = prefs.edit().putBoolean("arrival_alerts", value).apply()
 
+    /** Format de lien utilisé pour ouvrir un épisode dans l'app Plex (voir PlexApp.formats). */
+    var plexLinkFormat: Int
+        get() = prefs.getInt("plex_link_format", 0)
+        set(value) = prefs.edit().putInt("plex_link_format", value).apply()
+
     /** Notification quand une série suivie sort un nouvel épisode. */
     var newEpisodeNotifications: Boolean
         get() = prefs.getBoolean("new_episode_notifications", true)
