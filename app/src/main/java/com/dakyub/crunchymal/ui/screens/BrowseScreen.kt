@@ -1,5 +1,9 @@
 package com.dakyub.crunchymal.ui.screens
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
+import com.dakyub.crunchymal.ui.components.nextCompanionFilter
+import com.dakyub.crunchymal.ui.components.CompanionFilter
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -83,6 +87,7 @@ data class BrowseUi(
     val platform: Pair<Int, String>? = null,
     /** Seulement les séries disponibles sur une seule plateforme en France. */
     val exclusiveOnly: Boolean = false,
+    val companion: CompanionFilter? = null,
 )
 
 /** Carte d'un catalogue de plateforme (TMDB) : pas de fiche Crunchyroll / ADN, seulement MAL. */
@@ -110,9 +115,11 @@ class BrowseViewModel(private val graph: Graph) : ViewModel() {
     private val crWatched = MutableStateFlow<Set<String>?>(null)
 
     // La connexion ADN change ce qui est calculable : elle relance le calcul avec l'historique Crunchyroll.
-    private val watchedFlow = combine(graph.adn.loggedIn, crWatched) { _, watched -> watched }
+    // Avec les marques « vu avec » (tags MAL) pour le filtre du même nom.
+    private val watchedFlow = combine(graph.adn.loggedIn, crWatched, graph.companions.byMalId) { _, watched, marks -> watched to marks }
 
-    val visible = combine(ui, graph.progress.summaries, graph.mal.records, watchedFlow, graph.watchPlatforms.catalog) { u, summaries, mal, watched, catalog ->
+    val visible = combine(ui, graph.progress.summaries, graph.mal.records, watchedFlow, graph.watchPlatforms.catalog) { u, summaries, mal, watchedAndMarks, catalog ->
+        val (watched, marks) = watchedAndMarks
         val malStatuses = graph.mal.myListStatuses.value
         /** Plateformes en France (TMDB + ce que l'app sait déjà), ou null tant que ce n'est pas vérifié. */
         fun platformsOf(item: CardItem): Set<String>? {
@@ -137,6 +144,7 @@ class BrowseViewModel(private val graph: Graph) : ViewModel() {
             .filter { (_, status, _) -> u.statuses.accepts(status) }
             .filter { (_, _, score) -> u.minScore == null || (score != null && score >= u.minScore) }
             .filter { (item, _, _) -> !u.exclusiveOnly || platformsOf(item)?.size == 1 }
+            .filter { (item, _, _) -> u.companion?.accepts(mal[item.series.malKey]?.malId?.let { marks[it] }.orEmpty()) ?: true }
         val sorted = if (u.sort == BrowseSort.MAL) filtered.sortedByDescending { it.third ?: -1.0 } else filtered
         val trackable = u.results.filter { !it.isPlatformItem && graph.progressAvailable(it.series) }
         BrowseVisible(
@@ -183,6 +191,10 @@ class BrowseViewModel(private val graph: Graph) : ViewModel() {
     fun selectPlatform(platform: Pair<Int, String>) {
         ui.value = ui.value.copy(platform = platform)
         reload()
+    }
+
+    fun nextCompanion() {
+        ui.value = ui.value.copy(companion = nextCompanionFilter(ui.value.companion, graph.companions.people.value))
     }
 
     fun toggleExclusive() {
@@ -327,6 +339,7 @@ fun BrowseScreen(onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (Int) -> Unit = {
     val providers by graph.providers.selected.collectAsState()
     val adnLoggedIn by graph.adn.loggedIn.collectAsState()
     val malRecords by graph.mal.records.collectAsState()
+    val malLoggedIn by graph.malAuth.loggedIn.collectAsState()
     val context = LocalContext.current
     LaunchedEffect(providers) { vm.ensure(providers) }
 
@@ -377,7 +390,7 @@ fun BrowseScreen(onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (Int) -> Unit = {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
-                modifier = Modifier.padding(vertical = 4.dp),
+                modifier = Modifier.padding(vertical = 4.dp).horizontalScroll(rememberScrollState()),
             ) {
                 Text(
                     ui.platform?.let { "Animes sur ${it.second} (France, d'après TMDB)" }
@@ -386,6 +399,7 @@ fun BrowseScreen(onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (Int) -> Unit = {
                 )
                 CycleButton("Tri", ui.sort.label, vm::nextSort)
                 CycleButton("MAL ≥", ui.minScore?.toString() ?: "toutes", vm::nextMinScore)
+                if (malLoggedIn) CycleButton("Vu avec", ui.companion?.label ?: "toutes", vm::nextCompanion)
                 if (graph.settings.tmdbKey.isNotBlank()) {
                     FilterChip(selected = ui.exclusiveOnly, onClick = vm::toggleExclusive) {
                         Text(if (ui.exclusiveOnly) "✓ Exclusivités" else "Exclusivités")

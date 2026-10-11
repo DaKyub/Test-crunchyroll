@@ -1,5 +1,8 @@
 package com.dakyub.crunchymal.ui.screens
 
+import com.dakyub.crunchymal.data.plex.PlexMatch
+import com.dakyub.crunchymal.ui.components.nextCompanionFilter
+import com.dakyub.crunchymal.ui.components.CompanionFilter
 import com.dakyub.crunchymal.ui.components.CompanionsButton
 import android.widget.Toast
 import androidx.compose.foundation.horizontalScroll
@@ -106,14 +109,16 @@ data class PlexUi(
     val statuses: Set<WatchStatus> = emptySet(),
     val minScore: Double? = null,
     val sort: SortMode = SortMode.TITLE,
+    val companion: CompanionFilter? = null,
 )
 
 class PlexViewModel(private val graph: Graph) : ViewModel() {
     val ui = MutableStateFlow(PlexUi())
 
-    val visible = combine(ui, graph.mal.records) { u, mal ->
+    val visible = combine(ui, graph.mal.records, graph.companions.byMalId) { u, mal, marks ->
         u.shows
             .filter { u.statuses.accepts(it.status()) }
+            .filter { show -> u.companion?.accepts(mal["plex:${show.ratingKey}"]?.malId?.let { marks[it] }.orEmpty()) ?: true }
             .filter { show -> u.minScore == null || (mal["plex:${show.ratingKey}"]?.score ?: -1.0) >= u.minScore }
             .let { list ->
                 when (u.sort) {
@@ -150,6 +155,7 @@ class PlexViewModel(private val graph: Graph) : ViewModel() {
     fun toggleStatus(status: WatchStatus) { ui.value = ui.value.copy(statuses = ui.value.statuses.toggle(status)) }
     fun nextMinScore() { ui.value = ui.value.copy(minScore = MinScores[(MinScores.indexOf(ui.value.minScore) + 1) % MinScores.size]) }
     fun nextSort() { ui.value = ui.value.copy(sort = SortMode.entries[(ui.value.sort.ordinal + 1) % SortMode.entries.size]) }
+    fun nextCompanion() { ui.value = ui.value.copy(companion = nextCompanionFilter(ui.value.companion, graph.companions.people.value)) }
 }
 
 /** Onglet Plex : séries de la bibliothèque choisie (note MAL, progression Plex) et « Reprendre ». */
@@ -165,6 +171,12 @@ fun PlexScreen(onOpenPlexShow: (String) -> Unit) {
     val ui by vm.ui.collectAsState()
     val shows by vm.visible.collectAsState()
     val context = LocalContext.current
+    val malLoggedIn by graph.malAuth.loggedIn.collectAsState()
+    // Badge « Plex 1/3 » quand des saisons manquent sur le serveur (index Plex, saisons d'après TMDB).
+    val libraryShows by graph.plexLibrary.shows.collectAsState()
+    val plexLabels = remember(libraryShows) {
+        libraryShows.associate { it.ratingKey to PlexMatch(it.ratingKey, it.seasons, it.totalSeasons).label }
+    }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { if (!ui.loading) vm.load() }
 
     val message = when {
@@ -189,9 +201,14 @@ fun PlexScreen(onOpenPlexShow: (String) -> Unit) {
                     }
                 }
             }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(vertical = 2.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.padding(vertical = 2.dp).horizontalScroll(rememberScrollState()),
+            ) {
                 CycleButton("Tri", ui.sort.label, vm::nextSort)
                 CycleButton("MAL ≥", ui.minScore?.toString() ?: "toutes", vm::nextMinScore)
+                if (malLoggedIn) CycleButton("Vu avec", ui.companion?.label ?: "toutes", vm::nextCompanion)
                 Text(
                     "${shows.size}/${ui.shows.size} séries",
                     style = MaterialTheme.typography.labelMedium,
@@ -230,7 +247,7 @@ fun PlexScreen(onOpenPlexShow: (String) -> Unit) {
                 series = show.showRef(graph),
                 subtitle = if (show.leafCount > 0) "${show.viewedLeafCount}/${show.leafCount} ép." else show.year?.toString(),
                 progress = show.leafCount.takeIf { it > 0 }?.let { show.viewedLeafCount.toFloat() / it }?.takeIf { it > 0f },
-                badges = listOf("Plex"),
+                badges = listOf(plexLabels[show.ratingKey] ?: "Plex"),
             ),
             width = GridPosterWidth,
             onClick = { onOpenPlexShow(show.ratingKey) },

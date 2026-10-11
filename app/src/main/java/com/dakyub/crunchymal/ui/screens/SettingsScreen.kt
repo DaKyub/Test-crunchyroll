@@ -239,7 +239,7 @@ fun SettingsScreen() {
                         }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
-                        OutlinedButton(onClick = { sendDiagnostic("Diagnostic Plex") { graph.plex.diagnostic(context) } }) {
+                        OutlinedButton(onClick = { sendDiagnostic("Diagnostic Plex") { graph.plex.diagnostic(context) + graph.plexLibrary.summary() } }) {
                             Text("Envoyer un diagnostic Plex")
                         }
                         OutlinedButton(onClick = {

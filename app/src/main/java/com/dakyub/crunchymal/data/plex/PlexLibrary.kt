@@ -121,6 +121,20 @@ class PlexLibrary(
         return PlexIndex(byMalId, byTitle)
     }
 
+    /** Résumé de l'index pour le diagnostic Plex : saisons présentes sur le serveur et saisons d'après TMDB. */
+    fun summary(): List<String> {
+        val shows = _shows.value
+        val partial = shows.filter { PlexMatch(it.ratingKey, it.seasons, it.totalSeasons).partial }
+        fun line(it: PlexShowEntry) = "- ${it.englishTitle ?: it.title} : ${it.seasons} saison(s) sur le serveur / " +
+            "${it.totalSeasons ?: "?"} d'après TMDB" + if (it.tmdbId == null) " (pas d'identifiant TMDB)" else ""
+        return listOf(
+            "",
+            "Index Plex (badges) : ${shows.size} séries · id TMDB ${shows.count { it.tmdbId != null }} · " +
+                "titre anglais ${shows.count { it.englishTitle != null }} · saisons TMDB connues ${shows.count { it.totalSeasons != null }} · " +
+                "saisons serveur > 0 ${shows.count { it.seasons > 0 }} · incomplètes ${partial.size}",
+        ) + partial.take(10).map(::line) + (shows - partial.toSet()).take(10).map(::line)
+    }
+
     /** Titres TMDB (anglais, original) d'une série Plex, à essayer avant ses titres Plex. */
     fun extraTitles(ratingKey: String): List<String> =
         _shows.value.firstOrNull { it.ratingKey == ratingKey }?.let { listOfNotNull(it.englishTitle, it.tmdbOriginalTitle) }.orEmpty()

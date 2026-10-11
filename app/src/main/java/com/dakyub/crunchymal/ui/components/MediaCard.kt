@@ -81,7 +81,7 @@ fun MediaCard(
                 // Série présente sur le serveur Plex (sauf cartes déjà issues de Plex).
                 val plexIndex by graph.plexLibrary.index.collectAsState()
                 val plex = remember(plexIndex, malId, item.series.title) {
-                    if (!showMal || "Plex" in item.badges) null
+                    if (!showMal || item.badges.any { it.startsWith("Plex") }) null
                     else plexIndex.find(malId, listOf(item.series.title) + item.series.malTitles)
                 }
                 // Badges de plateformes (liste MAL), sinon badge du service quand plusieurs sont affichés ; puis Plex.
@@ -150,7 +150,8 @@ fun MediaCard(
 val PlexColor = Color(0xFFE5A00D)
 
 /** Libellé court et couleur du badge d'une plateforme. */
-fun platformBadge(name: String): Pair<String, Color> = when (name) {
+// « Plex 1/3 » : saisons présentes sur le serveur / saisons de la série.
+fun platformBadge(name: String): Pair<String, Color> = if (name.startsWith("Plex ")) name to PlexColor else when (name) {
     "Crunchyroll" -> "CR" to CrunchyOrange
     "ADN" -> "ADN" to AdnBlue
     "Netflix" -> "Netflix" to Color(0xFFE50914)
