@@ -164,7 +164,7 @@ class MalListViewModel(private val graph: Graph) : ViewModel() {
 }
 
 @Composable
-fun MalListScreen(onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (Int) -> Unit) {
+fun MalListScreen(onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (Int) -> Unit, onOpenStats: () -> Unit = {}) {
     val graph = LocalGraph.current
     val loggedIn by graph.malAuth.loggedIn.collectAsState()
     if (!loggedIn) {
@@ -214,6 +214,7 @@ fun MalListScreen(onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (Int) -> Unit) {
                     Text(if (ui.availableOnly) "✓ Disponibles seulement" else "Disponibles seulement", style = MaterialTheme.typography.labelMedium)
                 }
                 OutlinedButton(onClick = vm::load) { Text("Actualiser", style = MaterialTheme.typography.labelLarge) }
+                OutlinedButton(onClick = onOpenStats) { Text("📊 Statistiques", style = MaterialTheme.typography.labelLarge) }
                 Text(
                     "${visible.rows.size} séries · disponibilité vérifiée ${visible.checked}/${visible.total}",
                     style = MaterialTheme.typography.labelMedium,

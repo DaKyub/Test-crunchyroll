@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal.ui.screens
 
+import com.dakyub.crunchymal.ui.components.TrailerButton
 import com.dakyub.crunchymal.ui.components.PlanToWatchButton
 import com.dakyub.crunchymal.ui.components.PlexButton
 import com.dakyub.crunchymal.ui.components.CompanionsButton
@@ -313,6 +314,7 @@ fun SeriesScreen(
                             }
                             OutlinedButton(onClick = { OfficialApp.openSeries(context, series.id) }) { Text("Fiche Crunchyroll") }
                             PlexButton(ref.malKey, ref.malTitles, onOpenPlex)
+                            TrailerButton(listOfNotNull(malRecords[ref.malKey]?.englishTitle) + ref.malTitles)
                             state.inWatchlist?.let { inList ->
                                 OutlinedButton(onClick = { vm.toggleWatchlist() }) {
                                     Text(if (inList) "✓ Dans la watchlist" else "+ Watchlist")

@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal.ui.screens
 
+import com.dakyub.crunchymal.ui.components.TrailerButton
 import com.dakyub.crunchymal.ui.components.PlanToWatchButton
 import com.dakyub.crunchymal.ui.components.PlexButton
 import com.dakyub.crunchymal.ui.components.CompanionsButton
@@ -311,6 +312,7 @@ fun AdnSeriesScreen(
                                     ) { Text(if (inList) "✓ Watchlist ADN" else "+ Watchlist ADN") }
                                 }
                                 PlexButton(ref.malKey, ref.malTitles, onOpenPlex)
+                                TrailerButton(listOfNotNull(record?.englishTitle) + ref.malTitles)
                                 PlanToWatchButton(ref.malKey, show.title)
                                 OutlinedButton(onClick = { malListOpen = true }) { Text("Ma liste MAL") }
                                 CompanionsButton(listOf(MalEntryChoice("Série", ref.malKey)))

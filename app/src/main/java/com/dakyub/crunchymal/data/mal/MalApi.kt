@@ -29,6 +29,8 @@ data class MalAnime(
     val synopsis: String? = null,
     /** Diffusion d'après MAL : finished_airing, currently_airing ou not_yet_aired. */
     val airing: String? = null,
+    /** Durée moyenne d'un épisode en minutes (liste MAL seulement). */
+    val episodeMinutes: Int? = null,
 ) {
     val url: String get() = "https://myanimelist.net/anime/$malId"
 
@@ -64,6 +66,7 @@ private data class Node(
     @SerialName("main_picture") val mainPicture: Picture? = null,
     val synopsis: String? = null,
     val status: String? = null,
+    @SerialName("average_episode_duration") val averageEpisodeDuration: Int? = null,
 ) {
     fun toAnime() = MalAnime(
         malId = id,
@@ -80,6 +83,7 @@ private data class Node(
         pictureUrl = mainPicture?.large ?: mainPicture?.medium,
         synopsis = synopsis?.takeIf { it.isNotBlank() },
         airing = status?.takeIf { it.isNotBlank() },
+        episodeMinutes = averageEpisodeDuration?.takeIf { it > 0 }?.let { (it + 30) / 60 },
     )
 }
 
@@ -104,6 +108,8 @@ data class MalListStatus(
     @SerialName("updated_at") val updatedAt: String? = null,
     /** Tags de l'entrée (dont « vu-seul », « vu-avec-Prénom »). */
     val tags: List<String> = emptyList(),
+    /** Date de fin indiquée sur MAL (AAAA-MM-JJ, parfois seulement l'année). */
+    @SerialName("finish_date") val finishDate: String? = null,
 )
 
 @Serializable
@@ -256,7 +262,7 @@ class MalApi(private val clientId: () -> String) {
             val first = "$BASE/users/@me/animelist".toHttpUrl().newBuilder()
                 .addQueryParameter("limit", "1000")
                 .addQueryParameter("nsfw", "true")
-                .addQueryParameter("fields", "$statusFields,$FIELDS,main_picture")
+                .addQueryParameter("fields", "$statusFields,$FIELDS,main_picture,average_episode_duration")
                 .build().toString()
             Http.client.fetch(Request.Builder().url(first).header("Authorization", "Bearer $accessToken").build())
         })
@@ -310,7 +316,7 @@ class MalApi(private val clientId: () -> String) {
     }
 
     private companion object {
-        const val LIST_STATUS_WITH_TAGS = "list_status{status,score,num_episodes_watched,updated_at,tags}"
+        const val LIST_STATUS_WITH_TAGS = "list_status{status,score,num_episodes_watched,updated_at,tags,finish_date}"
         const val BASE = "https://api.myanimelist.net/v2"
         const val FIELDS = "id,title,alternative_titles,mean,num_scoring_users,media_type,num_episodes,start_date,genres,status"
         const val MIN_INTERVAL_MS = 400L

@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal.ui.screens
 
+import com.dakyub.crunchymal.ui.components.malGenreLabel
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
@@ -195,24 +196,6 @@ class DiscoverViewModel(private val graph: Graph) : ViewModel() {
     fun nextSort() { ui.value = ui.value.copy(sort = DiscoverSort.entries[(ui.value.sort.ordinal + 1) % DiscoverSort.entries.size]) }
 }
 
-/** Genres MAL en français (les autres restent en anglais). */
-private val MalGenreLabels = mapOf(
-    "Adventure" to "Aventure", "Comedy" to "Comédie", "Drama" to "Drame", "Sci-Fi" to "Science-fiction",
-    "Slice of Life" to "Tranche de vie", "Sports" to "Sport", "Supernatural" to "Surnaturel", "Mystery" to "Mystère",
-    "Horror" to "Horreur", "Award Winning" to "Primé", "Gourmet" to "Gastronomie", "Avant Garde" to "Avant-garde",
-    "Music" to "Musique", "School" to "École", "Military" to "Militaire", "Historical" to "Historique",
-    "Psychological" to "Psychologique", "Martial Arts" to "Arts martiaux", "Super Power" to "Super-pouvoirs",
-    "Space" to "Espace", "Detective" to "Détective", "Time Travel" to "Voyage dans le temps", "Mythology" to "Mythologie",
-    "Parody" to "Parodie", "Workplace" to "Travail", "Adult Cast" to "Personnages adultes", "Video Game" to "Jeu vidéo",
-    "Strategy Game" to "Jeu de stratégie", "Team Sports" to "Sport d'équipe", "Combat Sports" to "Sport de combat",
-    "Racing" to "Course", "Reincarnation" to "Réincarnation", "Love Polygon" to "Triangle amoureux", "Survival" to "Survie",
-    "Organized Crime" to "Crime organisé", "Delinquents" to "Délinquants", "Childcare" to "Garde d'enfants",
-    "Performing Arts" to "Arts du spectacle", "Visual Arts" to "Arts visuels", "Educational" to "Éducatif",
-    "Medical" to "Médical", "Pets" to "Animaux", "Gag Humor" to "Humour absurde", "High Stakes Game" to "Jeux à enjeux",
-    "Anthropomorphic" to "Anthropomorphe", "Kids" to "Enfants", "Romantic Subtext" to "Sous-texte romantique",
-)
-
-private fun malGenreLabel(genre: String) = MalGenreLabels[genre] ?: genre
 
 /** Onglet « Découvrir » : classements MAL sans les séries déjà dans ta liste, avec filtres et ajout à « À voir ». */
 @Composable

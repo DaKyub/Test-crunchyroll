@@ -1,5 +1,9 @@
 package com.dakyub.crunchymal.ui.screens
 
+import androidx.tv.material3.OutlinedButton
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
 import com.dakyub.crunchymal.PlexApp
 import com.dakyub.crunchymal.data.plexShowKey
 import androidx.compose.foundation.rememberScrollState
@@ -464,7 +468,7 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
 }
 
 @Composable
-fun HomeScreen(onOpenSeries: (SeriesRef) -> Unit, onOpenPlexShow: (String) -> Unit = {}) {
+fun HomeScreen(onOpenSeries: (SeriesRef) -> Unit, onOpenPlexShow: (String) -> Unit = {}, onOpenMal: (Int) -> Unit = {}) {
     val graph = LocalGraph.current
     val vm = viewModel { HomeViewModel(graph) }
     val state by vm.state.collectAsState()
@@ -473,6 +477,10 @@ fun HomeScreen(onOpenSeries: (SeriesRef) -> Unit, onOpenPlexShow: (String) -> Un
     val providers by graph.providers.selected.collectAsState()
     val adnLoggedIn by graph.adn.loggedIn.collectAsState()
     val malLoggedIn by graph.malAuth.loggedIn.collectAsState()
+    var tonightOpen by remember { mutableStateOf(false) }
+    if (tonightOpen) {
+        TonightDialog(onDismiss = { tonightOpen = false }, onOpenSeries = onOpenSeries, onOpenMal = onOpenMal, onOpenPlexShow = onOpenPlexShow)
+    }
     LaunchedEffect(providers, adnLoggedIn) { vm.ensure(providers, adnLoggedIn) }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.onResume() }
     val context = LocalContext.current
@@ -492,6 +500,7 @@ fun HomeScreen(onOpenSeries: (SeriesRef) -> Unit, onOpenPlexShow: (String) -> Un
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         modifier = Modifier.horizontalScroll(rememberScrollState()),
                     ) {
+                        OutlinedButton(onClick = { tonightOpen = true }) { Text("🎲 Que regarder ce soir ?") }
                         CycleButton("Tri", filters.sort.label, vm::nextSort)
                         CycleButton("MAL ≥", filters.minScore?.toString() ?: "toutes", vm::nextMinScore)
                         if (malLoggedIn) CycleButton("Vu avec", filters.companion?.label ?: "toutes", vm::nextCompanion)

@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal
 
+import com.dakyub.crunchymal.ui.screens.StatsScreen
 import com.dakyub.crunchymal.ui.screens.DiscoverScreen
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -98,7 +99,10 @@ private fun AppRoot() {
     val openPlexShow: (String) -> Unit = { ratingKey -> nav.navigate("plex/$ratingKey") }
     NavHost(navController = nav, startDestination = "main") {
         composable("main") {
-            MainTabs(onOpenSeries = openSeries, onOpenMal = openMal, onOpenPlexShow = openPlexShow)
+            MainTabs(onOpenSeries = openSeries, onOpenMal = openMal, onOpenPlexShow = openPlexShow, onOpenStats = { nav.navigate("stats") })
+        }
+        composable("stats") {
+            StatsScreen()
         }
         composable("plex/{key}", arguments = listOf(navArgument("key") { type = NavType.StringType })) { entry ->
             PlexShowScreen(ratingKey = entry.arguments?.getString("key").orEmpty(), onOpenSeries = openSeries, onOpenMal = openMal)
@@ -125,7 +129,12 @@ private fun AppRoot() {
 private val Tabs = listOf("Accueil", "En cours", "Parcourir", "Calendrier", "Saison", "Découvrir", "Watchlist", "Liste MAL", "Plex", "Recherche", "Réglages")
 
 @Composable
-private fun MainTabs(onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (Int) -> Unit, onOpenPlexShow: (String) -> Unit) {
+private fun MainTabs(
+    onOpenSeries: (SeriesRef) -> Unit,
+    onOpenMal: (Int) -> Unit,
+    onOpenPlexShow: (String) -> Unit,
+    onOpenStats: () -> Unit,
+) {
     var selected by rememberSaveable { mutableIntStateOf(0) }
     // Au retour d'une fiche, Android redonne le focus au premier onglet (Accueil), qui serait alors
     // sélectionné : pendant ce retour, le focus est redirigé vers l'onglet où l'on était.
@@ -176,14 +185,14 @@ private fun MainTabs(onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (Int) -> Unit
             UpdateBanner()
         }
         when (selected) {
-            0 -> HomeScreen(onOpenSeries, onOpenPlexShow)
+            0 -> HomeScreen(onOpenSeries, onOpenPlexShow, onOpenMal)
             1 -> WatchlistScreen(onOpenSeries, SeriesListSource.STARTED)
             2 -> BrowseScreen(onOpenSeries, onOpenMal)
             3 -> CalendarScreen(onOpenSeries)
             4 -> SeasonScreen(onOpenSeries, onOpenMal)
             5 -> DiscoverScreen(onOpenSeries, onOpenMal)
             6 -> WatchlistScreen(onOpenSeries)
-            7 -> MalListScreen(onOpenSeries, onOpenMal)
+            7 -> MalListScreen(onOpenSeries, onOpenMal, onOpenStats)
             8 -> PlexScreen(onOpenPlexShow)
             9 -> SearchScreen(onOpenSeries)
             else -> SettingsScreen()

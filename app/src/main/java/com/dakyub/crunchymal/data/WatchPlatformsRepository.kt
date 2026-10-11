@@ -98,6 +98,18 @@ private data class TmdbTvDetails(
 )
 
 @Serializable
+private data class TmdbVideo(
+    val key: String = "",
+    val site: String = "",
+    val type: String = "",
+    val official: Boolean = false,
+    @SerialName("iso_639_1") val language: String? = null,
+)
+
+@Serializable
+private data class TmdbVideos(val results: List<TmdbVideo> = emptyList())
+
+@Serializable
 private data class TmdbFind(@SerialName("tv_results") val tvResults: List<TmdbShowLite> = emptyList())
 
 /** Fiche TMDB d'une série : titre anglais, titre original et nombre de saisons (hors spéciaux). */
@@ -381,6 +393,51 @@ class WatchPlatformsRepository(context: Context, private val settings: Settings)
                 }.getOrNull()
                 MissingSeason(season.number, season.name, season.airDate?.take(4)?.toIntOrNull(), france?.platforms().orEmpty())
             }
+    }
+
+    /**
+     * Bande-annonce YouTube (identifiant de vidéo) d'une série ou d'un film : [tmdbId] s'il est connu, sinon
+     * recherche par [titles]. Français d'abord, puis anglais, japonais ; bande-annonce plutôt que teaser.
+     */
+    suspend fun trailer(titles: List<String>, movie: Boolean = false, tmdbId: Int? = null): String? {
+        if (settings.tmdbKey.isBlank()) return null
+        val kind = if (movie) "movie" else "tv"
+        val id = tmdbId ?: findTmdbId(titles, kind) ?: return null
+        val videos = runCatching {
+            Http.json.decodeFromString<TmdbVideos>(tmdb("$kind/$id/videos") {
+                setQueryParameter("language", "fr-FR")
+                addQueryParameter("include_video_language", "fr,en,ja,null")
+            }).results
+        }.getOrNull().orEmpty()
+        val languages = listOf("fr", "en", "ja")
+        return videos
+            .filter { it.site == "YouTube" && it.key.isNotBlank() }
+            .sortedWith(
+                compareBy(
+                    { languages.indexOf(it.language).let { i -> if (i < 0) languages.size else i } },
+                    { it.type != "Trailer" },
+                    { it.type != "Teaser" },
+                    { !it.official },
+                )
+            )
+            .firstOrNull()?.key
+    }
+
+    /** Série (ou film) TMDB la plus proche de [titles], de préférence une animation japonaise. */
+    private suspend fun findTmdbId(titles: List<String>, kind: String): Int? {
+        val clean = titles.map { it.trim() }.filter { it.length >= 2 }.distinct()
+        val queries = clean.flatMap { listOf(it, TitleMatcher.baseTitle(it)) }.filter { it.length >= 2 }.distinct().take(4)
+        for (query in queries) {
+            val hits = runCatching {
+                Http.json.decodeFromString<TmdbHits>(tmdb("search/$kind") { addQueryParameter("query", query) }).results
+            }.getOrNull() ?: continue
+            fun similarity(hit: TmdbHit) = hit.names.maxOfOrNull { n -> (clean + queries).maxOf { TitleMatcher.similarity(it, n) } } ?: 0.0
+            val best = hits.take(8).maxByOrNull { hit ->
+                similarity(hit) + (if (16 in hit.genreIds) 0.2 else 0.0) + (if ("JP" in hit.originCountry) 0.1 else 0.0)
+            } ?: continue
+            if (similarity(best) >= 0.5) return best.id
+        }
+        return null
     }
 
     /** Identifiant TMDB d'une série à partir d'un identifiant TVDB ([source] « tvdb_id ») ou IMDb (« imdb_id »). */

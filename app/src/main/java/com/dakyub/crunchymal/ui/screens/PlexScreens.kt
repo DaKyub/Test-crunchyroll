@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal.ui.screens
 
+import com.dakyub.crunchymal.ui.components.TrailerButton
 import androidx.compose.runtime.produceState
 import com.dakyub.crunchymal.PlatformApps
 import com.dakyub.crunchymal.data.Provider
@@ -322,6 +323,7 @@ fun PlexShowScreen(ratingKey: String, onOpenSeries: (SeriesRef) -> Unit, onOpenM
     val context = LocalContext.current
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.onResume() }
     val malKey = "plex:$ratingKey"
+    val libraryShows by graph.plexLibrary.shows.collectAsState()
     var malListOpen by remember { mutableStateOf(false) }
     var correcting by remember { mutableStateOf(false) }
     val show = state.show
@@ -397,6 +399,7 @@ fun PlexShowScreen(ratingKey: String, onOpenSeries: (SeriesRef) -> Unit, onOpenM
                                 }
                                 OutlinedButton(onClick = { malListOpen = true }) { Text("Ma liste MAL") }
                                 CompanionsButton(listOf(MalEntryChoice("Série", malKey)))
+                                TrailerButton(ref.malTitles, tmdbId = libraryShows.firstOrNull { it.ratingKey == ratingKey }?.tmdbId)
                                 OutlinedButton(onClick = { correcting = true }) { Text("Corriger MAL") }
                                 OutlinedButton(onClick = { vm.load() }) { Text("↻") }
                             }
