@@ -120,7 +120,9 @@ data class CrSeries(
     val id: String = "",
     val title: String = "",
     @SerialName("slug_title") val slugTitle: String = "",
+    /** Résumé court (souvent coupé par « … ») ; le complet est dans [extendedDescription]. */
     val description: String = "",
+    @SerialName("extended_description") val extendedDescription: String = "",
     val images: CrImages = CrImages(),
     @SerialName("episode_count") val episodeCount: Int = 0,
     @SerialName("season_count") val seasonCount: Int = 0,

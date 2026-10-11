@@ -264,11 +264,12 @@ fun SeriesScreen(seriesId: String, onOpenSeries: (SeriesRef) -> Unit = {}, onOpe
                         val record = rememberMalRecord(ref.malKey, ref.malTitles)
                         GenresLine(record?.genres, state.categories)
                     }
-                    if (series.description.isNotBlank()) {
+                    val synopsis = series.extendedDescription.ifBlank { series.description }
+                    if (synopsis.isNotBlank()) {
                         item {
                             // Focus sur le résumé : la fiche remonte tout en haut (titre, note MAL).
                             ExpandableSynopsis(
-                                series.description,
+                                synopsis,
                                 onFocused = { scope.launch { delay(150); listState.animateScrollToItem(0) } },
                                 modifier = Modifier.fillMaxWidth(0.6f),
                             )
