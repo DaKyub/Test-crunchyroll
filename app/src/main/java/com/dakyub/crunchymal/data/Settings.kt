@@ -101,6 +101,14 @@ class Settings(context: Context) {
             _hideMalCompleted.value = value
         }
 
+    /** « Qui regarde ? » : personnes devant l'écran et moment où elles ont été choisies. */
+    var viewers: List<String>
+        get() = prefs.getString("viewers", "")!!.split("\n").filter { it.isNotBlank() }
+        set(value) = prefs.edit().putString("viewers", value.joinToString("\n")).apply()
+    var viewersSetAt: Long
+        get() = prefs.getLong("viewers_set_at", 0)
+        set(value) = prefs.edit().putLong("viewers_set_at", value).apply()
+
     /** Prénoms des personnes avec qui les séries sont regardées (marques « vu avec »). */
     var companions: List<String>
         get() = prefs.getString("companions", "")!!.split("\n").map { it.trim() }.filter { it.isNotEmpty() }

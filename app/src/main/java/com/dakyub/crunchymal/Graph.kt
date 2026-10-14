@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal
 
+import com.dakyub.crunchymal.data.mal.SequelsRepository
 import com.dakyub.crunchymal.data.mal.MalCompletion
 import com.dakyub.crunchymal.data.plex.PlexLibrary
 import android.content.Context
@@ -51,13 +52,14 @@ class Graph(context: Context) {
     val diagnostics = DiagnosticsUploader(context, settings)
     val history = HistoryRepository(context, api)
     val started = StartedSeriesRepository(api, history, adn, adnWatchlist)
-    val malSync = MalSync(mal, settings)
+    val companions = CompanionsRepository(settings, mal)
+    val malSync = MalSync(mal, settings, companions)
     val malCompletion = MalCompletion(settings, mal)
     val homeChannel = HomeChannel(context, settings) { key -> PlexApp.intent(plex.machineId, key, settings.plexLinkFormat) }
     val arrivals = ArrivalWatcher(context, api, adn, mal)
+    val sequels = SequelsRepository(context, mal, availability)
     val plex = PlexApi(context)
     val plexLibrary = PlexLibrary(context, plex, mal, watchPlatforms, malSync)
-    val companions = CompanionsRepository(settings, mal)
     val tagServer = TagServer(context, mal, companions)
 
     /** Calcule (si besoin) la progression d'une série, quel que soit son service. */

@@ -1,5 +1,8 @@
 package com.dakyub.crunchymal.ui.screens
 
+import com.dakyub.crunchymal.ui.components.prepareMalAnime
+import com.dakyub.crunchymal.ui.components.malCardItem
+import com.dakyub.crunchymal.ui.components.ViewersButton
 import androidx.tv.material3.OutlinedButton
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
@@ -230,6 +233,7 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
     /** « Reprendre » unique : Crunchyroll, ADN et Plex mêlés par date de visionnage. */
     private val continueLoader = continueWatching()
     private val newEpisodesLoader = newEpisodesRow()
+    private val sequelsLoader = sequelsRow()
     private val gemsLoader = gemsRow()
     private val adnGemsLoader = adnGemsRow()
     /** Rangées filtrées sur la note MAL (8+) : la note est demandée pour toutes leurs séries. */
@@ -261,6 +265,10 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
             if (list.none { it.second === continueLoader }) {
                 val after = list.indexOfFirst { it.second === newEpisodesLoader }
                 list.add(after + 1, "Reprendre" to continueLoader)
+            }
+            // Suites des séries terminées sur MAL, juste après « Reprendre ».
+            if (graph.malAuth.loggedIn.value) {
+                list.add(list.indexOfFirst { it.second === continueLoader } + 1, "Suites de tes séries terminées" to sequelsLoader)
             }
 
             // Les rangées s'affichent au fur et à mesure, dans l'ordre du fil officiel.
@@ -336,6 +344,31 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
     private fun continueWatching(): suspend () -> List<CardItem> = { graph.resumeCards(viewModelScope, graph.providers.selected.value) }
 
     private fun newEpisodesRow(): suspend () -> List<CardItem> = { graph.newEpisodeCards(graph.providers.selected.value) }
+
+    /**
+     * Suites (en cours, à venir, sorties) des séries terminées sur MAL et absentes de la liste. Rangée tirée
+     * du cache ; la mise à jour (appels MAL) se fait en arrière-plan et sert au chargement suivant.
+     */
+    private fun sequelsRow(): suspend () -> List<CardItem> = {
+        val crUsable = graph.auth.loggedIn.value
+        val crEnabled = Provider.CRUNCHYROLL in graph.providers.selected.value && crUsable
+        viewModelScope.launch { runCatching { graph.sequels.refresh(crEnabled) } }
+        val sequels = graph.sequels.sequels.value
+        graph.prepareMalAnime(sequels.map { it.toAnime() })
+        val found = graph.availability.found.value
+        val platforms = graph.watchPlatforms.found.value
+        sequels.map { info ->
+            val status = when (info.airing) {
+                "currently_airing" -> "en cours"
+                "not_yet_aired" -> "à venir"
+                else -> info.startYear?.toString() ?: "sortie"
+            }
+            malCardItem(
+                info.toAnime(), found[info.malId], platforms[info.malId], graph.providers.selected.value, crUsable,
+                subtitle = "Suite de « ${info.prequelTitle} » · $status",
+            ).card
+        }
+    }
 
     /** Séries populaires jamais commencées ; la rangée ne garde que celles notées 8+ sur MAL. */
     private fun gemsRow(): suspend () -> List<CardItem> = {
@@ -507,6 +540,7 @@ fun HomeScreen(onOpenSeries: (SeriesRef) -> Unit, onOpenPlexShow: (String) -> Un
                         modifier = Modifier.horizontalScroll(rememberScrollState()),
                     ) {
                         OutlinedButton(onClick = { tonightOpen = true }) { Text("🎲 Que regarder ce soir ?") }
+                        if (malLoggedIn) ViewersButton()
                         CycleButton("Tri", filters.sort.label, vm::nextSort)
                         CycleButton("MAL ≥", filters.minScore?.toString() ?: "toutes", vm::nextMinScore)
                         if (malLoggedIn) CycleButton("Vu avec", filters.companion?.label ?: "toutes", vm::nextCompanion)
@@ -553,8 +587,13 @@ fun HomeScreen(onOpenSeries: (SeriesRef) -> Unit, onOpenPlexShow: (String) -> Un
                                 item = item,
                                 onClick = {
                                     val plexShow = item.series.plexShowKey
+                                    // Carte MAL (suites) : fiche Crunchyroll / ADN si l'app l'a trouvée, sinon fiche MAL.
+                                    val malOnly = item.series.id.takeIf { it.startsWith("mal-") }?.removePrefix("mal-")?.toIntOrNull()
                                     when {
                                         plexShow != null -> onOpenPlexShow(plexShow)
+                                        malOnly != null -> graph.availability.found.value[malOnly]
+                                            ?.refFor(graph.providers.selected.value, graph.auth.loggedIn.value)
+                                            ?.let(onOpenSeries) ?: onOpenMal(malOnly)
                                         item.series.id.isNotBlank() -> onOpenSeries(item.series)
                                         item.episodeId != null -> playEpisode(context, item.series, item.episodeId)
                                     }

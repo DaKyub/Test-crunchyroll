@@ -64,6 +64,21 @@ class CompanionsRepository(private val settings: Settings, private val mal: MalR
     private fun marks(names: List<String>, tags: Map<Int, List<String>>): Map<Int, Set<String>> =
         tags.mapValues { (_, list) -> CompanionTags.people(list).map { display(it, names) }.toSet() }.filterValues { it.isNotEmpty() }
 
+    private val _viewers = MutableStateFlow(settings.viewers.toSet())
+
+    /** « Qui regarde ? » choisi (vide = personne) ; voir [currentViewers] pour la durée de validité. */
+    val viewers: StateFlow<Set<String>> = _viewers
+
+    /** Personnes devant l'écran, si elles ont été choisies il y a moins de 6 h (une soirée). */
+    fun currentViewers(): Set<String> =
+        if (System.currentTimeMillis() - settings.viewersSetAt > VIEWERS_TTL) emptySet() else _viewers.value
+
+    fun setViewers(people: Set<String>) {
+        settings.viewers = people.toList()
+        settings.viewersSetAt = System.currentTimeMillis()
+        _viewers.value = people
+    }
+
     /** Personnes d'après les tags d'une entrée, prénoms écrits comme dans les réglages. */
     fun peopleIn(tags: List<String>): Set<String> = CompanionTags.people(tags).map { display(it, saved.value) }.toSet()
 
@@ -87,5 +102,9 @@ class CompanionsRepository(private val settings: Settings, private val mal: MalR
     suspend fun set(malId: Int, people: Collection<String>, currentTags: List<String>, statusIfNew: String? = null) {
         people.filter { !it.equals(CompanionTags.ALONE, true) }.forEach { addPerson(it) }
         mal.setTags(malId, CompanionTags.merge(currentTags, people), statusIfNew)
+    }
+
+    private companion object {
+        const val VIEWERS_TTL = 6L * 3600 * 1000
     }
 }

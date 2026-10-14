@@ -208,6 +208,8 @@ class MalRepository(context: Context, clientId: () -> String, val auth: MalAuth)
 
     suspend fun seasonal(year: Int, season: String): List<MalAnime> = api.seasonal(year, season)
 
+    suspend fun sequelIds(malId: Int): List<Int> = api.sequelIds(malId)
+
     private val rankingCache = ConcurrentHashMap<String, List<MalAnime>>()
 
     /** Les 1 000 premiers animes d'un classement MAL, gardés le temps de la session. */

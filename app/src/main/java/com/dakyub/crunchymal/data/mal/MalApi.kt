@@ -97,6 +97,12 @@ private data class SearchResponse(val data: List<Wrapper> = emptyList())
 private data class RecommendationItem(val node: Node = Node(), @SerialName("num_recommendations") val count: Int = 0)
 
 @Serializable
+private data class RelatedItem(val node: Node = Node(), @SerialName("relation_type") val relationType: String = "")
+
+@Serializable
+private data class RelatedNode(@SerialName("related_anime") val related: List<RelatedItem> = emptyList())
+
+@Serializable
 private data class RecommendationsNode(val recommendations: List<RecommendationItem> = emptyList())
 
 /** Statut de l'anime dans la liste MAL de l'utilisateur. */
@@ -211,6 +217,17 @@ class MalApi(private val clientId: () -> String) {
             .addQueryParameter("fields", "$FIELDS,main_picture")
             .build().toString()
         return Http.json.decodeFromString<SearchResponse>(get(url)).data.map { it.node.toAnime() }
+    }
+
+    /** Suites directes (relation « sequel ») de l'anime [malId]. */
+    suspend fun sequelIds(malId: Int): List<Int> {
+        val url = "$BASE/anime/$malId".toHttpUrl().newBuilder()
+            .addQueryParameter("fields", "related_anime")
+            .build().toString()
+        return Http.json.decodeFromString<RelatedNode>(get(url)).related
+            .filter { it.relationType == "sequel" }
+            .map { it.node.id }
+            .filter { it > 0 }
     }
 
     /** Animes recommandés par les membres MAL pour [malId], les plus recommandés d'abord. */

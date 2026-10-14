@@ -64,6 +64,22 @@ class NewEpisodesWorker(context: Context, params: WorkerParameters) : CoroutineW
                     )
                 }
             }
+            // Suites de séries terminées sur MAL arrivées sur Crunchyroll / ADN (trouvées au passage précédent).
+            val crEnabled = Provider.CRUNCHYROLL in providers
+            runCatching { graph.sequels.newlyAvailable() }.getOrDefault(emptyList()).forEach { sequel ->
+                val found = graph.availability.found.value[sequel.malId] ?: return@forEach
+                val (provider, id) = found.crunchyroll?.takeIf { crEnabled }?.let { Provider.CRUNCHYROLL to it.id }
+                    ?: found.adn?.let { Provider.ADN to it.id } ?: return@forEach
+                notify(
+                    applicationContext,
+                    channel = ARRIVALS,
+                    id = "sequel:${sequel.malId}".hashCode(),
+                    title = "Suite disponible sur ${provider.label} : ${sequel.titleEnglish ?: sequel.title}",
+                    text = "Suite de « ${sequel.prequelTitle} », que tu as terminée",
+                    intent = seriesIntent(applicationContext, provider, id),
+                )
+            }
+            runCatching { graph.sequels.refresh(crEnabled) }
         }
 
         if (!settings.newEpisodeNotifications && !settings.homeChannel) return Result.success()

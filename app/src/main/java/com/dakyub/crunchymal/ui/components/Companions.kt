@@ -239,3 +239,55 @@ fun CompanionsDialog(choices: List<MalEntryChoice>, onDismiss: () -> Unit) {
         }
     }
 }
+
+/**
+ * « Qui regarde ? » : personnes devant l'écran ce soir. Pendant 6 h, les séries synchronisées sur MAL
+ * reçoivent aussi leur marque « vu seul » / « vu avec ».
+ */
+@Composable
+fun ViewersButton() {
+    val graph = LocalGraph.current
+    val chosen by graph.companions.viewers.collectAsState()
+    val people by graph.companions.people.collectAsState()
+    var open by remember { mutableStateOf(false) }
+    // Relu à chaque affichage : le choix expire au bout de 6 h.
+    val current = remember(chosen, open) { graph.companions.currentViewers() }
+    OutlinedButton(onClick = { open = true }) {
+        Text(if (current.isEmpty()) "👥 Qui regarde ?" else "👥 " + companionsLabel(current))
+    }
+    if (!open) return
+    var selected by remember { mutableStateOf(current) }
+    Dialog(onDismissRequest = { open = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Column(
+            Modifier
+                .width(720.dp)
+                .background(MaterialTheme.colorScheme.surface, MaterialTheme.shapes.medium)
+                .padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Text("Qui regarde ?", style = MaterialTheme.typography.titleLarge)
+            Text(
+                "Pendant 6 h, les séries dont les épisodes sont reportés sur MAL (synchro auto) reçoivent aussi la marque choisie.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(listOf(CompanionTags.ALONE) + people) { person ->
+                    val checked = person in selected
+                    FilterChip(selected = checked, onClick = {
+                        selected = when {
+                            checked -> selected - person
+                            // « Seul » exclut les autres personnes, et inversement.
+                            person == CompanionTags.ALONE -> setOf(person)
+                            else -> selected - CompanionTags.ALONE + person
+                        }
+                    }) { Text(if (checked) "✓ $person" else person, maxLines = 1) }
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Button(onClick = { graph.companions.setViewers(selected); open = false }) { Text("Valider") }
+                OutlinedButton(onClick = { graph.companions.setViewers(emptySet()); open = false }) { Text("Personne (désactiver)") }
+            }
+        }
+    }
+}

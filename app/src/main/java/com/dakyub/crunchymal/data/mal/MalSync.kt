@@ -1,5 +1,7 @@
 package com.dakyub.crunchymal.data.mal
 
+import com.dakyub.crunchymal.data.CompanionTags
+import com.dakyub.crunchymal.data.CompanionsRepository
 import com.dakyub.crunchymal.data.Settings
 import java.util.concurrent.ConcurrentHashMap
 
@@ -8,7 +10,7 @@ import java.util.concurrent.ConcurrentHashMap
  * reporté sur la fiche MAL correspondante (« En cours », puis « Terminé » au dernier épisode).
  * Ne fait jamais reculer MAL, et respecte les séries « Terminé » (revisionnage) et « Abandonné ».
  */
-class MalSync(private val mal: MalRepository, private val settings: Settings) {
+class MalSync(private val mal: MalRepository, private val settings: Settings, private val companions: CompanionsRepository) {
     /** Synchro active : réglage activé et compte MAL connecté. */
     val enabled: Boolean get() = settings.malAutoSync && mal.auth.loggedIn.value
 
@@ -22,12 +24,30 @@ class MalSync(private val mal: MalRepository, private val settings: Settings) {
         val (status, total) = mal.myStatus(malId)
         handled[malId] = watched
         val current = status?.status
-        if (current == "completed" || current == "dropped") return null
-        val episodes = if (total > 0) minOf(watched, total) else watched
-        if (episodes <= (status?.episodesWatched ?: 0)) return null
-        val newStatus = if (total > 0 && episodes >= total) "completed" else "watching"
-        mal.updateMyStatus(malId, newStatus, status?.score ?: 0, episodes)
-        val title = mal.records.value.values.firstOrNull { it.malId == malId }?.title ?: "MAL"
-        return "$title : " + if (newStatus == "completed") "terminé sur MAL ✓" else "$episodes/${total.takeIf { it > 0 } ?: "?"} ép. sur MAL"
+        var message: String? = null
+        if (current != "completed" && current != "dropped") {
+            val episodes = if (total > 0) minOf(watched, total) else watched
+            if (episodes > (status?.episodesWatched ?: 0)) {
+                val newStatus = if (total > 0 && episodes >= total) "completed" else "watching"
+                mal.updateMyStatus(malId, newStatus, status?.score ?: 0, episodes)
+                val title = mal.records.value.values.firstOrNull { it.malId == malId }?.title ?: "MAL"
+                message = "$title : " + if (newStatus == "completed") "terminé sur MAL ✓" else "$episodes/${total.takeIf { it > 0 } ?: "?"} ép. sur MAL"
+            }
+        }
+        val tagged = tagViewers(malId, status?.tags.orEmpty(), inList = current != null || message != null)
+        return listOfNotNull(message, tagged).joinToString(" · ").ifBlank { null }
+    }
+
+    /**
+     * « Qui regarde ? » : ajoute aux marques de la fiche les personnes devant l'écran (sans retirer les
+     * autres). Renvoie un message si des marques ont été ajoutées.
+     */
+    private suspend fun tagViewers(malId: Int, tags: List<String>, inList: Boolean): String? {
+        if (!inList) return null
+        val viewers = companions.currentViewers().takeIf { it.isNotEmpty() } ?: return null
+        val marks = companions.peopleIn(tags)
+        if (viewers.all { viewer -> marks.any { it.equals(viewer, ignoreCase = true) } }) return null
+        if (runCatching { companions.set(malId, marks + viewers, tags) }.isFailure) return null
+        return if (viewers == setOf(CompanionTags.ALONE)) "marquée « vu seul »" else "marquée « vu avec ${viewers.filter { it != CompanionTags.ALONE }.joinToString(", ")} »"
     }
 }
