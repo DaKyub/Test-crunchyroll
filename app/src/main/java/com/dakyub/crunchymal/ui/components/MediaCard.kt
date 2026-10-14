@@ -106,7 +106,8 @@ fun MediaCard(
                 // Avec qui la série a été vue (tags de la liste MAL).
                 if (showMal) {
                     val marks = graph.companions.byMalId.collectAsState()
-                    val seenWith by remember(malKey) { derivedStateOf { malId?.let { marks.value[it] } } }
+                    val seenWithState = remember(malKey) { derivedStateOf { malId?.let { marks.value[it] } } }
+                    val seenWith = seenWithState.value
                     if (!seenWith.isNullOrEmpty()) {
                         CompanionsBadge(
                             seenWith,

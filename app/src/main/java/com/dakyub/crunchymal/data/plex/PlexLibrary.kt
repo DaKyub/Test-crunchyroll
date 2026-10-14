@@ -104,7 +104,7 @@ class PlexLibrary(
     val shows: StateFlow<List<PlexShowEntry>> = _shows
 
     // Index par titre : ne dépend que des séries (recalculé seulement quand la bibliothèque change).
-    private val titleIndex: StateFlow<Map<String, PlexMatch>> = _shows.map(::buildTitles)
+    private val titleIndex: StateFlow<Map<String, PlexMatch>> = _shows.map { buildTitles(it) }
         .stateIn(scope, SharingStarted.Eagerly, buildTitles(saved.shows))
 
     /** Par fiche MAL (suit les notes MAL qui arrivent) et par titre ; publié seulement s'il change. */
