@@ -15,6 +15,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -130,7 +131,8 @@ fun SettingsScreen() {
         item { Section("Sauvegarde des réglages") }
         item {
             val server by graph.tagServer.state.collectAsState()
-            var requested by remember { mutableStateOf(false) }
+            // Gardé même si la section sort de l'écran (la liste se recycle).
+            var requested by rememberSaveable { mutableStateOf(false) }
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     "Garde sur ton téléphone un fichier avec les clés API, les comptes, les prénoms et les options, " +
@@ -138,11 +140,17 @@ fun SettingsScreen() {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (server.url == null || !requested) {
-                    Button(onClick = { requested = true; graph.tagServer.start() }) { Text("Sauvegarder / restaurer depuis le téléphone") }
-                } else {
-                    OutlinedButton(onClick = { requested = false; graph.tagServer.stop() }) { Text("Arrêter la page web") }
-                }
+                // Un seul bouton dont seul le texte change : il garde le focus (sinon il part sur les onglets).
+                val running = requested && server.url != null
+                Button(onClick = {
+                    if (running) {
+                        requested = false
+                        graph.tagServer.stop()
+                    } else {
+                        requested = true
+                        graph.tagServer.start()
+                    }
+                }) { Text(if (running) "Arrêter la page web" else "Sauvegarder / restaurer depuis le téléphone") }
                 val url = server.url?.replace("/?k=", "/backup?k=")
                 if (requested && url != null) {
                     Row(horizontalArrangement = Arrangement.spacedBy(24.dp), verticalAlignment = Alignment.CenterVertically) {
