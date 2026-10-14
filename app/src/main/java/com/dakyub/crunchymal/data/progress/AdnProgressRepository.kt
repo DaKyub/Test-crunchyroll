@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal.data.progress
 
+import com.dakyub.crunchymal.data.CacheLoads
 import com.dakyub.crunchymal.data.DateUtils
 import com.dakyub.crunchymal.data.adn.AdnApi
 import com.dakyub.crunchymal.data.adn.AdnVideo
@@ -39,6 +40,7 @@ class AdnProgressRepository(private val adn: AdnApi, private val store: Progress
 
     suspend fun ensureSummary(showId: String, force: Boolean = false) {
         if (!adn.loggedIn.value) return
+        CacheLoads.awaitAll()
         val existing = store.summaries.value[key(showId)]
         if (!force && existing != null && store.isFresh(existing)) return
         tree(showId, force = true)

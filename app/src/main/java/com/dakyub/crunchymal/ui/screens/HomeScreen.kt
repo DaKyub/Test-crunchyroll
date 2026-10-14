@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal.ui.screens
 
+import com.dakyub.crunchymal.data.CacheLoads
 import com.dakyub.crunchymal.ui.components.prepareMalAnime
 import com.dakyub.crunchymal.ui.components.malCardItem
 import com.dakyub.crunchymal.ui.components.ViewersButton
@@ -353,6 +354,7 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
         val crUsable = graph.auth.loggedIn.value
         val crEnabled = Provider.CRUNCHYROLL in graph.providers.selected.value && crUsable
         viewModelScope.launch { runCatching { graph.sequels.refresh(crEnabled) } }
+        CacheLoads.awaitAll()
         val sequels = graph.sequels.sequels.value
         graph.prepareMalAnime(sequels.map { it.toAnime() })
         val found = graph.availability.found.value
@@ -443,6 +445,7 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
 
     /** Watchlist ADN, avec la progression déjà connue de chaque série. */
     private fun adnWatchlistRow(): suspend () -> List<CardItem> = {
+        CacheLoads.awaitAll()
         val summaries = graph.progress.summaries.value
         graph.adnWatchlist.get().take(30).map { e ->
             val s = summaries[e.series.progressKey]

@@ -194,7 +194,7 @@ private fun MainTabs(
             6 -> WatchlistScreen(onOpenSeries)
             7 -> MalListScreen(onOpenSeries, onOpenMal, onOpenStats)
             8 -> PlexScreen(onOpenPlexShow)
-            9 -> SearchScreen(onOpenSeries)
+            9 -> SearchScreen(onOpenSeries, onOpenMal, onOpenPlexShow)
             else -> SettingsScreen()
         }
     }

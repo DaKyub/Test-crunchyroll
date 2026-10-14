@@ -127,6 +127,41 @@ fun SettingsScreen() {
                 UpdateButton()
             }
         }
+        item { Section("Sauvegarde des réglages") }
+        item {
+            val server by graph.tagServer.state.collectAsState()
+            var requested by remember { mutableStateOf(false) }
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "Garde sur ton téléphone un fichier avec les clés API, les comptes, les prénoms et les options, " +
+                        "pour tout remettre d'un coup après une réinstallation ou sur une autre Shield (même Wi-Fi que la Shield).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (server.url == null || !requested) {
+                    Button(onClick = { requested = true; graph.tagServer.start() }) { Text("Sauvegarder / restaurer depuis le téléphone") }
+                } else {
+                    OutlinedButton(onClick = { requested = false; graph.tagServer.stop() }) { Text("Arrêter la page web") }
+                }
+                val url = server.url?.replace("/?k=", "/backup?k=")
+                if (requested && url != null) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(24.dp), verticalAlignment = Alignment.CenterVertically) {
+                        QrCode(url, size = 180.dp)
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("Scanne ce QR code avec ton téléphone, ou ouvre :", style = MaterialTheme.typography.bodyMedium)
+                            Text(url, style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                "Le fichier donne accès à tes comptes : garde-le pour toi. Après une restauration, l'app redémarre.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+                if (requested) server.error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+            }
+        }
+
         item { Section("Automatismes") }
         item {
             var malSync by remember { mutableStateOf(settings.malAutoSync) }

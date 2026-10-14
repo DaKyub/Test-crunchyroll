@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal.data.progress
 
+import com.dakyub.crunchymal.data.CacheLoads
 import com.dakyub.crunchymal.data.CacheWriter
 import android.content.Context
 import com.dakyub.crunchymal.data.Http
@@ -77,8 +78,9 @@ class ProgressRepository(context: Context, private val api: CrApi) {
     /** Appelé par [clear] pour vider aussi les caches liés (progression ADN). */
     var onClear: () -> Unit = {}
 
-    private val _summaries = MutableStateFlow(load())
+    private val _summaries = MutableStateFlow<Map<String, ProgressSummary>>(emptyMap())
     val summaries: StateFlow<Map<String, ProgressSummary>> = _summaries
+    private val loaded = CacheLoads.into(_summaries, ::load)
 
     private fun load(): Map<String, ProgressSummary> = runCatching {
         if (file.exists()) Http.json.decodeFromString<Map<String, ProgressSummary>>(file.readText()) else emptyMap()
@@ -95,6 +97,7 @@ class ProgressRepository(context: Context, private val api: CrApi) {
 
     /** S'assure qu'un résumé récent existe (utilisé par la watchlist pour les filtres). */
     suspend fun ensureSummary(seriesId: String, force: Boolean = false) {
+        loaded.join()
         val existing = _summaries.value[seriesId]
         if (!force && existing != null && isFresh(existing)) return
         tree(seriesId, force = true)
@@ -172,7 +175,7 @@ class ProgressRepository(context: Context, private val api: CrApi) {
     }
 
     // Écritures groupées : une watchlist calcule des dizaines de progressions d'affilée.
-    private val summariesWriter = CacheWriter(file) { Http.json.encodeToString(_summaries.value) }
+    private val summariesWriter = CacheWriter(file, ready = loaded) { Http.json.encodeToString(_summaries.value) }
 
     private fun persist() = summariesWriter.schedule()
 

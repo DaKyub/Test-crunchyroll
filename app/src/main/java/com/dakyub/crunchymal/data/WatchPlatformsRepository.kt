@@ -148,16 +148,18 @@ class WatchPlatformsRepository(context: Context, private val settings: Settings)
     private val semaphore = Semaphore(3)
     private val writeLock = Mutex()
 
-    private val _found = MutableStateFlow(load())
+    private val _found = MutableStateFlow<Map<Int, WatchPlatforms>>(emptyMap())
     val found: StateFlow<Map<Int, WatchPlatforms>> = _found
-    private val foundWriter = CacheWriter(file) { Http.json.encodeToString(_found.value) }
+    private val loaded = CacheLoads.into(_found, ::load)
+    private val foundWriter = CacheWriter(file, ready = loaded) { Http.json.encodeToString(_found.value) }
 
     private val catalogFile = File(context.filesDir, "catalog_platforms_cache.json")
     private val catalogPending = ConcurrentHashMap.newKeySet<String>()
     private var catalogSave: Job? = null
-    private val _catalog = MutableStateFlow(
+    private val _catalog = MutableStateFlow<Map<String, WatchPlatforms>>(emptyMap())
+    private val catalogLoaded = CacheLoads.into(_catalog) {
         runCatching { Http.json.decodeFromString<Map<String, WatchPlatforms>>(catalogFile.readText()) }.getOrElse { emptyMap() }
-    )
+    }
 
     /**
      * Plateformes en France des séries des catalogues de Parcourir (TMDB), par clé : « tmdb:<id> » pour les
@@ -181,6 +183,10 @@ class WatchPlatformsRepository(context: Context, private val settings: Settings)
 
     private fun requestCatalog(key: String, lookup: suspend () -> WatchPlatforms) {
         if (settings.tmdbKey.isBlank()) return
+        if (!catalogLoaded.isCompleted) {
+            scope.launch { catalogLoaded.join(); requestCatalog(key, lookup) }
+            return
+        }
         val existing = _catalog.value[key]
         if (existing != null && System.currentTimeMillis() - existing.checkedAt < TTL) return
         if (!catalogPending.add(key)) return
@@ -201,6 +207,7 @@ class WatchPlatformsRepository(context: Context, private val settings: Settings)
         if (catalogSave?.isActive == true) return
         catalogSave = scope.launch {
             delay(3_000)
+            catalogLoaded.join()
             writeLock.withLock { runCatching { catalogFile.writeText(Http.json.encodeToString(_catalog.value)) } }
         }
     }
@@ -211,6 +218,10 @@ class WatchPlatformsRepository(context: Context, private val settings: Settings)
     }.getOrElse { emptyMap() }.mapValues { (_, v) -> v.copy(names = v.names.map(::normalize).distinct()) }
 
     fun request(anime: MalAnime) {
+        if (!loaded.isCompleted) {
+            scope.launch { loaded.join(); request(anime) }
+            return
+        }
         val existing = _found.value[anime.malId]
         if (existing != null && System.currentTimeMillis() - existing.checkedAt < TTL) return
         if (!pending.add(anime.malId)) return

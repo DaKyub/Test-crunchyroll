@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal.data.mal
 
+import com.dakyub.crunchymal.data.CacheLoads
 import com.dakyub.crunchymal.data.CacheWriter
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
@@ -43,8 +44,9 @@ class MalRepository(context: Context, clientId: () -> String, val auth: MalAuth)
     private val pending = ConcurrentHashMap.newKeySet<String>()
     private val writeLock = Mutex()
 
-    private val _records = MutableStateFlow(load())
+    private val _records = MutableStateFlow<Map<String, MalRecord>>(emptyMap())
     val records: StateFlow<Map<String, MalRecord>> = _records
+    private val loaded = CacheLoads.into(_records, ::load)
 
     /** Dernière erreur rencontrée (affichée dans l'interface pour le diagnostic). */
     private val _lastError = MutableStateFlow<String?>(null)
@@ -64,11 +66,21 @@ class MalRepository(context: Context, clientId: () -> String, val auth: MalAuth)
     }.getOrElse { emptyMap() }
 
     // Écritures groupées : une liste ou un classement enregistre des centaines de fiches d'affilée.
-    private val recordsWriter = CacheWriter(file) { Http.json.encodeToString(_records.value) }
+    private val recordsWriter = CacheWriter(file, ready = loaded) { Http.json.encodeToString(_records.value) }
 
     private fun put(key: String, record: MalRecord) {
         _records.update { it + (key to record) }
         recordsWriter.schedule()
+    }
+
+    /** Fiches MAL choisies à la main (corrections), gardées dans la sauvegarde des réglages. */
+    fun manualRecords(): Map<String, MalRecord> = _records.value.filterValues { it.manual }
+
+    /** Remet les corrections d'une sauvegarde, enregistrées tout de suite (l'app redémarre ensuite). */
+    fun restoreManual(records: Map<String, MalRecord>) {
+        if (records.isEmpty()) return
+        _records.update { it + records }
+        recordsWriter.writeNow()
     }
 
     private fun isStale(r: MalRecord): Boolean {
@@ -86,6 +98,10 @@ class MalRepository(context: Context, clientId: () -> String, val auth: MalAuth)
      * [titles] : titres Crunchyroll servant à la recherche (titre anglais déduit du slug en premier).
      */
     fun request(key: String, titles: List<String>, retryMissing: Boolean = false) {
+        if (!loaded.isCompleted) {
+            scope.launch { loaded.join(); request(key, titles, retryMissing) }
+            return
+        }
         val existing = _records.value[key]
         // [retryMissing] : nouvelle recherche d'une fiche restée sans correspondance (titres plus fiables).
         val retry = retryMissing && existing != null && existing.malId == null && !existing.manual
@@ -152,11 +168,12 @@ class MalRepository(context: Context, clientId: () -> String, val auth: MalAuth)
 
     /** Tags de chaque fiche de la liste MAL (gardés sur disque pour un affichage immédiat au démarrage). */
     private val tagsFile = File(context.filesDir, "mal_tags.json")
-    private val _myListTags = MutableStateFlow(
-        runCatching { Http.json.decodeFromString<Map<Int, List<String>>>(tagsFile.readText()) }.getOrElse { emptyMap() }
-    )
+    private val _myListTags = MutableStateFlow<Map<Int, List<String>>>(emptyMap())
     val myListTags: StateFlow<Map<Int, List<String>>> = _myListTags
-    private val tagsWriter = CacheWriter(tagsFile) { Http.json.encodeToString(_myListTags.value) }
+    private val tagsLoaded = CacheLoads.into(_myListTags) {
+        runCatching { Http.json.decodeFromString<Map<Int, List<String>>>(tagsFile.readText()) }.getOrElse { emptyMap() }
+    }
+    private val tagsWriter = CacheWriter(tagsFile, ready = tagsLoaded) { Http.json.encodeToString(_myListTags.value) }
 
     /**
      * Remplace les tags d'une fiche. [statusIfNew] : statut donné si l'anime n'est pas encore dans la liste
@@ -190,6 +207,7 @@ class MalRepository(context: Context, clientId: () -> String, val auth: MalAuth)
 
     /** Enregistre une fiche déjà connue (ex. liste MAL) pour que les badges l'affichent sans recherche. */
     suspend fun seed(key: String, anime: MalAnime) {
+        loaded.join()
         val existing = _records.value[key]
         if (existing != null && !isStale(existing)) return
         put(key, anime.toRecord(System.currentTimeMillis(), manual = true))

@@ -8,6 +8,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import com.dakyub.crunchymal.data.ArrivalWatcher
 import com.dakyub.crunchymal.data.AvailabilityRepository
 import com.dakyub.crunchymal.data.CompanionsRepository
+import com.dakyub.crunchymal.data.SettingsBackup
 import com.dakyub.crunchymal.data.DiagnosticsUploader
 import com.dakyub.crunchymal.data.HistoryRepository
 import com.dakyub.crunchymal.data.Provider
@@ -60,7 +61,7 @@ class Graph(context: Context) {
     val sequels = SequelsRepository(context, mal, availability)
     val plex = PlexApi(context)
     val plexLibrary = PlexLibrary(context, plex, mal, watchPlatforms, malSync)
-    val tagServer = TagServer(context, mal, companions)
+    val tagServer = TagServer(context, mal, companions, SettingsBackup(context, mal))
 
     /** Calcule (si besoin) la progression d'une série, quel que soit son service. */
     suspend fun ensureProgress(ref: SeriesRef, force: Boolean = false) = when (ref.provider) {

@@ -63,15 +63,20 @@ class AvailabilityRepository(context: Context, private val cr: CrApi, private va
     private val semaphore = Semaphore(3)
     private val writeLock = Mutex()
 
-    private val _found = MutableStateFlow(load())
+    private val _found = MutableStateFlow<Map<Int, Availability>>(emptyMap())
     val found: StateFlow<Map<Int, Availability>> = _found
-    private val writer = CacheWriter(file) { Http.json.encodeToString(_found.value) }
+    private val loaded = CacheLoads.into(_found, ::load)
+    private val writer = CacheWriter(file, ready = loaded) { Http.json.encodeToString(_found.value) }
 
     private fun load(): Map<Int, Availability> = runCatching {
         if (file.exists()) Http.json.decodeFromString<Map<Int, Availability>>(file.readText()) else emptyMap()
     }.getOrElse { emptyMap() }
 
     fun request(anime: MalAnime, crunchyrollEnabled: Boolean) {
+        if (!loaded.isCompleted) {
+            scope.launch { loaded.join(); request(anime, crunchyrollEnabled) }
+            return
+        }
         val existing = _found.value[anime.malId]
         // Ancienne recherche incomplète : on la refait avec les titres de base (saisons 2, 3…).
         val outdated = existing != null && existing.version < VERSION && (existing.crunchyroll == null || existing.adn == null)

@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sauvegarde CrunchyMAL</title>
+<style>
+:root { --bg:#f6f6f7; --card:#fff; --text:#16161a; --muted:#6b6b76; --line:#e2e2e6; --accent:#f47521; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#121214; --card:#1c1c20; --text:#ececf0; --muted:#9a9aa6; --line:#2c2c33; }
+}
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--text); font:15px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; padding:16px; }
+h1 { margin:0 0 12px; font-size:20px; }
+section { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:14px; }
+h2 { margin:0 0 6px; font-size:16px; }
+p { margin:0 0 10px; color:var(--muted); font-size:14px; }
+a.btn, button { display:inline-block; font-size:15px; padding:10px 14px; border-radius:10px; border:0; background:var(--accent); color:#fff; text-decoration:none; }
+button:disabled { opacity:.5; }
+input[type=file] { display:block; margin:0 0 10px; font-size:14px; color:var(--text); max-width:100%; }
+#msg { font-size:14px; margin-top:10px; }
+#msg.err { color:#d33; }
+#msg.ok { color:#2a9d5c; }
+</style>
+</head>
+<body>
+<h1>Sauvegarde des réglages</h1>
+<section>
+  <h2>Sauvegarder</h2>
+  <p>Télécharge un fichier avec les clés API, les comptes connectés (Crunchyroll, ADN, MAL, Plex), les prénoms,
+    les options et les fiches MAL corrigées à la main. Il donne accès à tes comptes : garde-le pour toi.</p>
+  <a class="btn" id="download" href="#">Télécharger la sauvegarde</a>
+</section>
+<section>
+  <h2>Restaurer</h2>
+  <p>Remplace les réglages de la Shield par ceux d'un fichier de sauvegarde. L'app redémarre ensuite.</p>
+  <input type="file" id="file" accept=".json,application/json">
+  <button id="restore" disabled>Restaurer</button>
+  <div id="msg"></div>
+</section>
+<script>
+var key = new URLSearchParams(location.search).get('k') || '';
+var stamp = new Date().toISOString().slice(0, 10);
+document.getElementById('download').href = '/api/backup?k=' + encodeURIComponent(key) + '&d=' + stamp;
+var file = document.getElementById('file');
+var restore = document.getElementById('restore');
+var msg = document.getElementById('msg');
+function show(text, cls) { msg.textContent = text; msg.className = cls || ''; }
+file.addEventListener('change', function () { restore.disabled = !file.files.length; show(''); });
+restore.addEventListener('click', function () {
+  var f = file.files[0];
+  if (!f) return;
+  if (!confirm('Remplacer les réglages de la Shield par ceux de ce fichier ?')) return;
+  restore.disabled = true;
+  show('Restauration…');
+  f.text().then(function (text) {
+    return fetch('/api/restore?k=' + encodeURIComponent(key), { method: 'POST', body: text, headers: { 'Content-Type': 'application/json' } });
+  }).then(function (r) {
+    return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || ('Erreur ' + r.status)); return j; });
+  }).then(function (j) {
+    show('✓ ' + j.restored + ' éléments restaurés. CrunchyMAL redémarre sur la Shield : cette page ne répondra plus.', 'ok');
+  }).catch(function (e) {
+    restore.disabled = false;
+    show(e.message, 'err');
+  });
+});
+</script>
+</body>
+</html>

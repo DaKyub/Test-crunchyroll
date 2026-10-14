@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal.data.plex
 
+import com.dakyub.crunchymal.data.CacheLoads
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import com.dakyub.crunchymal.data.mal.MalSync
@@ -264,6 +265,7 @@ class PlexLibrary(
 
     private suspend fun syncLocked(watched: Map<String, Int>) {
         if (!malSync.enabled) return
+        CacheLoads.awaitAll()
         val records = mal.records.value
         var changed = false
         for ((ratingKey, count) in watched) {

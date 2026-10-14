@@ -1,10 +1,12 @@
 package com.dakyub.crunchymal.server
 
 import android.content.Context
+import android.content.Intent
 import android.util.Log
 import com.dakyub.crunchymal.data.CompanionTags
 import com.dakyub.crunchymal.data.CompanionsRepository
 import com.dakyub.crunchymal.data.Http
+import com.dakyub.crunchymal.data.SettingsBackup
 import com.dakyub.crunchymal.data.mal.MalRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -15,6 +17,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -63,15 +66,20 @@ private data class WebSave(val people: List<String> = emptyList(), val changes: 
 @Serializable
 private data class WebError(val error: String)
 
+@Serializable
+private data class WebRestored(val restored: Int)
+
 /**
  * Petit serveur HTTP sur le réseau local : le téléphone (même Wi-Fi) ouvre une page qui liste toute la
  * liste MAL avec une case par personne, pour marquer d'un coup « vu seul » / « vu avec Prénom ».
+ * La page /backup sauvegarde et restaure les réglages de l'app.
  * Un jeton aléatoire, renouvelé à chaque démarrage, est exigé dans l'adresse.
  */
 class TagServer(
     private val context: Context,
     private val mal: MalRepository,
     private val companions: CompanionsRepository,
+    private val backup: SettingsBackup,
 ) {
     data class State(val url: String? = null, val error: String? = null)
 
@@ -163,6 +171,24 @@ class TagServer(
             method == "GET" && path == "/api/data" -> json(s) { Http.json.encodeToString(data()) }
             method == "GET" && path == "/api/job" -> json(s) { Http.json.encodeToString(_job.value) }
             method == "POST" && path == "/api/save" -> json(s) { save(Http.json.decodeFromString<WebSave>(body)) }
+            method == "GET" && path == "/backup" ->
+                respond(s, 200, "text/html; charset=utf-8", context.assets.open("backup.html").use { it.readBytes() })
+            method == "GET" && path == "/api/backup" -> {
+                val name = "crunchymal-reglages-${query["d"].orEmpty().filter { it.isDigit() || it == '-' }.ifBlank { "sauvegarde" }}.json"
+                respond(
+                    s, 200, "application/json; charset=utf-8", backup.export().toByteArray(),
+                    extraHeaders = "Content-Disposition: attachment; filename=\"$name\"\r\n",
+                )
+            }
+            method == "POST" && path == "/api/restore" -> json(s) {
+                val restored = backup.restore(body)
+                // Redémarrage une fois la réponse partie : chaque module relit ses réglages.
+                scope.launch {
+                    delay(1_500)
+                    withContext(Dispatchers.Main) { restartApp() }
+                }
+                Http.json.encodeToString(WebRestored(restored))
+            }
             else -> respond(s, 404, "text/plain", "Introuvable".toByteArray())
         }
     }
@@ -232,11 +258,20 @@ class TagServer(
         _job.update { it.copy(running = false) }
     }
 
-    private fun respond(s: Socket, code: Int, type: String, bytes: ByteArray) {
+    /** Relance l'app (nouveau processus) pour que tous les modules relisent les réglages restaurés. */
+    private fun restartApp() {
+        val pm = context.packageManager
+        val component = (pm.getLeanbackLaunchIntentForPackage(context.packageName) ?: pm.getLaunchIntentForPackage(context.packageName))
+            ?.component ?: return
+        context.startActivity(Intent.makeRestartActivityTask(component))
+        Runtime.getRuntime().exit(0)
+    }
+
+    private fun respond(s: Socket, code: Int, type: String, bytes: ByteArray, extraHeaders: String = "") {
         val reason = when (code) { 200 -> "OK"; 403 -> "Forbidden"; 404 -> "Not Found"; 413 -> "Payload Too Large"; else -> "Error" }
         val out = s.getOutputStream()
         out.write(
-            ("HTTP/1.1 $code $reason\r\nContent-Type: $type\r\nContent-Length: ${bytes.size}\r\n" +
+            ("HTTP/1.1 $code $reason\r\nContent-Type: $type\r\nContent-Length: ${bytes.size}\r\n" + extraHeaders +
                 "Cache-Control: no-store\r\nConnection: close\r\n\r\n").toByteArray()
         )
         out.write(bytes)

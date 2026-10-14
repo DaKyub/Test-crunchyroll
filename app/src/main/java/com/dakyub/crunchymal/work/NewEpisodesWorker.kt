@@ -20,6 +20,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.dakyub.crunchymal.CrunchyMalApp
 import com.dakyub.crunchymal.R
+import com.dakyub.crunchymal.data.CacheLoads
 import com.dakyub.crunchymal.data.CardItem
 import com.dakyub.crunchymal.data.Provider
 import com.dakyub.crunchymal.episodeIntent
@@ -38,6 +39,8 @@ class NewEpisodesWorker(context: Context, params: WorkerParameters) : CoroutineW
     override suspend fun doWork(): Result {
         val graph = (applicationContext as CrunchyMalApp).graph
         val settings = graph.settings
+        // Lancement à froid : les caches disque sont lus en arrière-plan.
+        CacheLoads.awaitAll()
         if (!settings.newEpisodeNotifications && !settings.homeChannel && !settings.arrivalAlerts) return Result.success()
         val selected = graph.providers.selected.value
         val providers = selected.filter { provider ->
