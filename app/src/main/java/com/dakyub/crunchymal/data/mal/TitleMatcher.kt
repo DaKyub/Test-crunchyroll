@@ -9,15 +9,23 @@ object TitleMatcher {
     private val nonAlnum = Regex("""[^\p{L}\p{N}]+""")
     private val diacritics = Regex("""\p{Mn}+""")
 
+    // Compilées une fois : ces fonctions servent des milliers de fois pendant les correspondances.
+    private val baseSeason = Regex("""(?i)\s+(season|saison|part|cour)\s*\d+.*$""")
+    private val baseOrdinalSeason = Regex("""(?i)\s+\d+(st|nd|rd|th)\s+season.*$""")
+    private val baseTrailingNumber = Regex("""\s+(\d+|II|III|IV|V)$""")
+    private val seasonSuffix = Regex("""(?i)\s+(season|saison|cour)\s*\d+$""")
+    private val ordinalSeasonSuffix = Regex("""(?i)\s+\d+(st|nd|rd|th)\s+season$""")
+    private val trailingSeasonNumber = Regex("""\s+([2-9]|II|III|IV|V)$""")
+
     /**
      * Titre sans sous-titre ni numéro de saison ("Bleach: Thousand-Year…" → "Bleach",
      * "March Comes in Like a Lion 2nd Season" → "March Comes in Like a Lion").
      */
     fun baseTitle(title: String): String = title
         .substringBefore(':')
-        .replace(Regex("""(?i)\s+(season|saison|part|cour)\s*\d+.*$"""), "")
-        .replace(Regex("""(?i)\s+\d+(st|nd|rd|th)\s+season.*$"""), "")
-        .replace(Regex("""\s+(\d+|II|III|IV|V)$"""), "")
+        .replace(baseSeason, "")
+        .replace(baseOrdinalSeason, "")
+        .replace(baseTrailingNumber, "")
         .trim()
 
     /**
@@ -26,9 +34,9 @@ object TitleMatcher {
      * la même fiche Crunchyroll que JoJo.
      */
     fun withoutSeason(title: String): String = title
-        .replace(Regex("""(?i)\s+(season|saison|cour)\s*\d+$"""), "")
-        .replace(Regex("""(?i)\s+\d+(st|nd|rd|th)\s+season$"""), "")
-        .replace(Regex("""\s+([2-9]|II|III|IV|V)$"""), "")
+        .replace(seasonSuffix, "")
+        .replace(ordinalSeasonSuffix, "")
+        .replace(trailingSeasonNumber, "")
         .trim()
 
     fun normalize(s: String): String =

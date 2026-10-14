@@ -1,5 +1,7 @@
 package com.dakyub.crunchymal.data.plex
 
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import com.dakyub.crunchymal.data.mal.MalSync
 import android.content.Context
 import com.dakyub.crunchymal.data.Http
@@ -71,10 +73,12 @@ data class PlexIndex(val byMalId: Map<Int, PlexMatch> = emptyMap(), val byTitle:
     }
 }
 
+private val nonAlphanumeric = Regex("""[^\p{L}\p{N}]+""")
+
 /** Clés de comparaison d'un titre : en minuscules, sans ponctuation, avec et sans numéro de saison. */
 fun plexTitleKeys(title: String): List<String> =
     listOf(title, TitleMatcher.withoutSeason(title))
-        .map { it.lowercase().replace(Regex("""[^\p{L}\p{N}]+"""), " ").trim() }
+        .map { it.lowercase().replace(nonAlphanumeric, " ").trim() }
         .filter { it.length >= 3 }
         .distinct()
 
@@ -99,8 +103,16 @@ class PlexLibrary(
     private val _shows = MutableStateFlow(saved.shows)
     val shows: StateFlow<List<PlexShowEntry>> = _shows
 
-    val index: StateFlow<PlexIndex> = combine(_shows, mal.records) { shows, records -> build(shows, records) }
-        .stateIn(scope, SharingStarted.Eagerly, build(saved.shows, mal.records.value))
+    // Index par titre : ne dépend que des séries (recalculé seulement quand la bibliothèque change).
+    private val titleIndex: StateFlow<Map<String, PlexMatch>> = _shows.map(::buildTitles)
+        .stateIn(scope, SharingStarted.Eagerly, buildTitles(saved.shows))
+
+    /** Par fiche MAL (suit les notes MAL qui arrivent) et par titre ; publié seulement s'il change. */
+    val index: StateFlow<PlexIndex> = combine(_shows, mal.records, titleIndex) { shows, records, titles ->
+        PlexIndex(buildMalIds(shows, records), titles)
+    }
+        .distinctUntilChanged()
+        .stateIn(scope, SharingStarted.Eagerly, PlexIndex(buildMalIds(saved.shows, mal.records.value), buildTitles(saved.shows)))
 
     init {
         // Déconnexion de Plex : plus de badge.
@@ -115,15 +127,21 @@ class PlexLibrary(
         }
     }
 
-    private fun build(shows: List<PlexShowEntry>, records: Map<String, MalRecord>): PlexIndex {
+    private fun buildMalIds(shows: List<PlexShowEntry>, records: Map<String, MalRecord>): Map<Int, PlexMatch> {
         val byMalId = HashMap<Int, PlexMatch>()
+        shows.forEach { show ->
+            records["plex:${show.ratingKey}"]?.malId?.let { byMalId.putIfAbsent(it, PlexMatch(show.ratingKey, show.seasons, show.totalSeasons)) }
+        }
+        return byMalId
+    }
+
+    private fun buildTitles(shows: List<PlexShowEntry>): Map<String, PlexMatch> {
         val byTitle = HashMap<String, PlexMatch>()
         shows.forEach { show ->
             val match = PlexMatch(show.ratingKey, show.seasons, show.totalSeasons)
-            records["plex:${show.ratingKey}"]?.malId?.let { byMalId.putIfAbsent(it, match) }
             show.malTitles.flatMap(::plexTitleKeys).forEach { byTitle.putIfAbsent(it, match) }
         }
-        return PlexIndex(byMalId, byTitle)
+        return byTitle
     }
 
     /** Résumé de l'index pour le diagnostic Plex : saisons présentes sur le serveur et saisons d'après TMDB. */

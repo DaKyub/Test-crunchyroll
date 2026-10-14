@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal.ui.components
 
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -76,13 +77,18 @@ fun MediaCard(
                     )
                 }
                 val graph = LocalGraph.current
-                val records by graph.mal.records.collectAsState()
-                val malId = records[item.series.malKey]?.malId
+                // États dérivés : la carte ne se redessine que si sa fiche MAL, ses marques ou son badge Plex
+                // changent, pas à chaque note reçue pour une autre série.
+                val records = graph.mal.records.collectAsState()
+                val malKey = item.series.malKey
+                val malId by remember(malKey) { derivedStateOf { records.value[malKey]?.malId } }
                 // Série présente sur le serveur Plex (sauf cartes déjà issues de Plex).
-                val plexIndex by graph.plexLibrary.index.collectAsState()
-                val plex = remember(plexIndex, malId, item.series.title) {
-                    if (!showMal || item.badges.any { it.startsWith("Plex") }) null
-                    else plexIndex.find(malId, listOf(item.series.title) + item.series.malTitles)
+                val plexIndex = graph.plexLibrary.index.collectAsState()
+                val plex by remember(item, showMal) {
+                    derivedStateOf {
+                        if (!showMal || item.badges.any { it.startsWith("Plex") }) null
+                        else plexIndex.value.find(malId, listOf(item.series.title) + item.series.malTitles)
+                    }
                 }
                 // Badges de plateformes (liste MAL), sinon badge du service quand plusieurs sont affichés ; puis Plex.
                 val providers by graph.providers.selected.collectAsState()
@@ -99,8 +105,8 @@ fun MediaCard(
                 }
                 // Avec qui la série a été vue (tags de la liste MAL).
                 if (showMal) {
-                    val marks by graph.companions.byMalId.collectAsState()
-                    val seenWith = malId?.let { marks[it] }
+                    val marks = graph.companions.byMalId.collectAsState()
+                    val seenWith by remember(malKey) { derivedStateOf { malId?.let { marks.value[it] } } }
                     if (!seenWith.isNullOrEmpty()) {
                         CompanionsBadge(
                             seenWith,

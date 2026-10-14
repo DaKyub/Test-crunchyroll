@@ -65,6 +65,7 @@ class AvailabilityRepository(context: Context, private val cr: CrApi, private va
 
     private val _found = MutableStateFlow(load())
     val found: StateFlow<Map<Int, Availability>> = _found
+    private val writer = CacheWriter(file) { Http.json.encodeToString(_found.value) }
 
     private fun load(): Map<Int, Availability> = runCatching {
         if (file.exists()) Http.json.decodeFromString<Map<Int, Availability>>(file.readText()) else emptyMap()
@@ -84,7 +85,7 @@ class AvailabilityRepository(context: Context, private val cr: CrApi, private va
                     val adnFound = runCatching { searchAdn(titles) }.getOrNull()
                     val result = Availability(crFound, adnFound, System.currentTimeMillis(), VERSION)
                     _found.update { it + (anime.malId to result) }
-                    writeLock.withLock { runCatching { file.writeText(Http.json.encodeToString(_found.value)) } }
+                    writer.schedule()
                 }
             } finally {
                 pending.remove(anime.malId)

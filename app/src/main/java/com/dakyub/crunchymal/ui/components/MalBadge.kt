@@ -1,5 +1,7 @@
 package com.dakyub.crunchymal.ui.components
 
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
@@ -34,8 +36,10 @@ fun rememberMalRecord(key: String, titles: List<String>): MalRecord? {
     val mal = LocalGraph.current.mal
     val version by mal.version.collectAsState()
     LaunchedEffect(key, version) { mal.request(key, titles) }
-    val records by mal.records.collectAsState()
-    return records[key]
+    // Seule la fiche [key] compte : le badge ne se redessine pas à chaque note reçue pour une autre série.
+    val records = mal.records.collectAsState()
+    val record by remember(key) { derivedStateOf { records.value[key] } }
+    return record
 }
 
 @Composable

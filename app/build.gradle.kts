@@ -55,7 +55,11 @@ android {
             signingConfig = signingConfigs.getByName("sideload")
         }
         release {
-            isMinifyEnabled = false
+            // R8 : Compose est nettement plus fluide optimisé. Le code de l'app est gardé tel quel
+            // (proguard-rules.pro) : seules les bibliothèques sont réduites et optimisées.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.getByName("sideload")
         }
     }
@@ -100,4 +104,6 @@ dependencies {
     // Chaîne de l'écran d'accueil Android TV et tâche des nouveaux épisodes.
     implementation("androidx.tvprovider:tvprovider:1.0.0")
     implementation("androidx.work:work-runtime-ktx:2.9.1")
+    // Installe les profils de démarrage fournis par Compose (app installée hors Play Store).
+    implementation("androidx.profileinstaller:profileinstaller:1.3.1")
 }

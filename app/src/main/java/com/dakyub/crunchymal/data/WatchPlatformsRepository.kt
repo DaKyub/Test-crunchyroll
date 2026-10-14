@@ -150,6 +150,7 @@ class WatchPlatformsRepository(context: Context, private val settings: Settings)
 
     private val _found = MutableStateFlow(load())
     val found: StateFlow<Map<Int, WatchPlatforms>> = _found
+    private val foundWriter = CacheWriter(file) { Http.json.encodeToString(_found.value) }
 
     private val catalogFile = File(context.filesDir, "catalog_platforms_cache.json")
     private val catalogPending = ConcurrentHashMap.newKeySet<String>()
@@ -217,7 +218,7 @@ class WatchPlatformsRepository(context: Context, private val settings: Settings)
             try {
                 semaphore.withPermit { lookup(anime) }?.let { result ->
                     _found.update { it + (anime.malId to result) }
-                    writeLock.withLock { runCatching { file.writeText(Http.json.encodeToString(_found.value)) } }
+                    foundWriter.schedule()
                 }
             } finally {
                 pending.remove(anime.malId)

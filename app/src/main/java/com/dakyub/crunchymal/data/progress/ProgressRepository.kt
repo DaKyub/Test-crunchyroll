@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal.data.progress
 
+import com.dakyub.crunchymal.data.CacheWriter
 import android.content.Context
 import com.dakyub.crunchymal.data.Http
 import com.dakyub.crunchymal.data.crunchyroll.CrApi
@@ -170,9 +171,10 @@ class ProgressRepository(context: Context, private val api: CrApi) {
             .sortedWith(compareBy({ it.seasonSequenceNumber }, { it.seasonNumber }))
     }
 
-    private suspend fun persist() = writeLock.withLock {
-        runCatching { file.writeText(Http.json.encodeToString(_summaries.value)) }
-    }
+    // Écritures groupées : une watchlist calcule des dizaines de progressions d'affilée.
+    private val summariesWriter = CacheWriter(file) { Http.json.encodeToString(_summaries.value) }
+
+    private fun persist() = summariesWriter.schedule()
 
     /** Retire les résumés dont la clé correspond (ex. ceux d'ADN à la déconnexion). */
     suspend fun removeKeys(predicate: (String) -> Boolean) {

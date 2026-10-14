@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal.data.mal
 
+import com.dakyub.crunchymal.data.CacheWriter
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
 import android.content.Context
@@ -62,11 +63,12 @@ class MalRepository(context: Context, clientId: () -> String, val auth: MalAuth)
         if (file.exists()) Http.json.decodeFromString<Map<String, MalRecord>>(file.readText()) else emptyMap()
     }.getOrElse { emptyMap() }
 
-    private suspend fun put(key: String, record: MalRecord) {
+    // Écritures groupées : une liste ou un classement enregistre des centaines de fiches d'affilée.
+    private val recordsWriter = CacheWriter(file) { Http.json.encodeToString(_records.value) }
+
+    private fun put(key: String, record: MalRecord) {
         _records.update { it + (key to record) }
-        writeLock.withLock {
-            runCatching { file.writeText(Http.json.encodeToString(_records.value)) }
-        }
+        recordsWriter.schedule()
     }
 
     private fun isStale(r: MalRecord): Boolean {
@@ -139,7 +141,7 @@ class MalRepository(context: Context, clientId: () -> String, val auth: MalAuth)
         myListFetchedAt = System.currentTimeMillis()
         lastList = list
         _myListTags.value = list.filter { it.status.tags.isNotEmpty() }.associate { it.anime.malId to it.status.tags }
-        writeLock.withLock { runCatching { tagsFile.writeText(Http.json.encodeToString(_myListTags.value)) } }
+        tagsWriter.schedule()
     }
 
     private var lastList: List<MalListEntry>? = null
@@ -154,6 +156,7 @@ class MalRepository(context: Context, clientId: () -> String, val auth: MalAuth)
         runCatching { Http.json.decodeFromString<Map<Int, List<String>>>(tagsFile.readText()) }.getOrElse { emptyMap() }
     )
     val myListTags: StateFlow<Map<Int, List<String>>> = _myListTags
+    private val tagsWriter = CacheWriter(tagsFile) { Http.json.encodeToString(_myListTags.value) }
 
     /**
      * Remplace les tags d'une fiche. [statusIfNew] : statut donné si l'anime n'est pas encore dans la liste
@@ -167,7 +170,7 @@ class MalRepository(context: Context, clientId: () -> String, val auth: MalAuth)
             if (status != "plan_to_watch") _myListSeenIds.update { it + malId }
         }
         lastList = lastList?.map { e -> if (e.anime.malId == malId) e.copy(status = e.status.copy(tags = tags)) else e }
-        writeLock.withLock { runCatching { tagsFile.writeText(Http.json.encodeToString(_myListTags.value)) } }
+        tagsWriter.schedule()
     }
 
     /** Fiches MAL déjà vues ou commencées par l'utilisateur (tout statut sauf « À voir »). */
