@@ -34,7 +34,9 @@ class MalSync(private val mal: MalRepository, private val settings: Settings, pr
                 message = "$title : " + if (newStatus == "completed") "terminé sur MAL ✓" else "$episodes/${total.takeIf { it > 0 } ?: "?"} ép. sur MAL"
             }
         }
-        val tagged = tagViewers(malId, status?.tags.orEmpty(), inList = current != null || message != null)
+        // Marques « Qui regarde ? » seulement quand un nouvel épisode vu vient d'être reporté (pas à la simple
+        // ouverture de la fiche).
+        val tagged = if (message != null) tagViewers(malId, status?.tags.orEmpty()) else null
         return listOfNotNull(message, tagged).joinToString(" · ").ifBlank { null }
     }
 
@@ -42,8 +44,7 @@ class MalSync(private val mal: MalRepository, private val settings: Settings, pr
      * « Qui regarde ? » : ajoute aux marques de la fiche les personnes devant l'écran (sans retirer les
      * autres). Renvoie un message si des marques ont été ajoutées.
      */
-    private suspend fun tagViewers(malId: Int, tags: List<String>, inList: Boolean): String? {
-        if (!inList) return null
+    private suspend fun tagViewers(malId: Int, tags: List<String>): String? {
         val viewers = companions.currentViewers().takeIf { it.isNotEmpty() } ?: return null
         val marks = companions.peopleIn(tags)
         if (viewers.all { viewer -> marks.any { it.equals(viewer, ignoreCase = true) } }) return null
