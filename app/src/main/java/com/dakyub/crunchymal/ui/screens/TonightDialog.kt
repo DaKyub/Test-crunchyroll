@@ -28,6 +28,7 @@ import androidx.tv.material3.Text
 import com.dakyub.crunchymal.Graph
 import com.dakyub.crunchymal.LocalGraph
 import com.dakyub.crunchymal.data.CardItem
+import com.dakyub.crunchymal.data.CompanionTags
 import com.dakyub.crunchymal.data.SeriesRef
 import com.dakyub.crunchymal.data.mal.MalAnime
 import com.dakyub.crunchymal.data.mal.MalRecord
@@ -103,7 +104,10 @@ fun TonightDialog(
     var includeInProgress by remember { mutableStateOf(true) }
     var includeToWatch by remember { mutableStateOf(true) }
     var availableOnly by remember { mutableStateOf(true) }
-    var companion by remember { mutableStateOf<CompanionFilter?>(null) }
+    // « Qui regarde ? » choisi ce soir : filtre « Avec » réglé sur la première personne (sinon toutes).
+    var companion by remember {
+        mutableStateOf<CompanionFilter?>(graph.companions.currentViewers().minByOrNull { it == CompanionTags.ALONE }?.let { CompanionFilter(it, true) })
+    }
     var genre by remember { mutableStateOf<String?>(null) }
     var minScore by remember { mutableStateOf<Double?>(null) }
     var picks by remember { mutableStateOf<List<TonightCandidate>>(emptyList()) }
@@ -113,6 +117,7 @@ fun TonightDialog(
     fun eligible(): List<TonightCandidate> {
         val records = graph.mal.records.value
         val marks = graph.companions.byMalId.value
+        val plannedMarks = graph.companions.plannedByMalId.value
         val found = graph.availability.found.value
         val platforms = graph.watchPlatforms.found.value
         val providers = graph.providers.selected.value
@@ -130,7 +135,9 @@ fun TonightDialog(
             // En cours sur Crunchyroll / ADN mais terminée sur MAL (vue ailleurs) : rien à regarder.
             val total = summaries[resolved.card.series.progressKey]?.total
             if (candidate.inProgress && total != null && completion.isCompleted(info.malId, total)) return@mapNotNull null
-            val ok = (companion?.accepts(info.malId?.let { marks[it] }.orEmpty()) ?: true) &&
+            // « À voir » : séries prévues avec la personne (« À voir avec… ») ; en cours : vues avec elle.
+            val who = info.malId?.let { if (candidate.inProgress) marks[it] else plannedMarks[it].orEmpty() + marks[it].orEmpty() }.orEmpty()
+            val ok = (companion?.accepts(who) ?: true) &&
                 (genre == null || genre in info.genres) &&
                 (minScore == null || (info.score ?: 0.0) >= minScore!!)
             resolved.takeIf { ok }
@@ -202,7 +209,7 @@ fun TonightDialog(
                 modifier = Modifier.horizontalScroll(rememberScrollState()),
             ) {
                 if (malLoggedIn) {
-                    CycleButton("Vu avec", companion?.label ?: "toutes") {
+                    CycleButton("Avec", companion?.label ?: "toutes") {
                         companion = nextCompanionFilter(companion, graph.companions.people.value)
                         roll()
                     }

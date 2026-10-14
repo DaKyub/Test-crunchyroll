@@ -109,6 +109,14 @@ class Settings(context: Context) {
         get() = prefs.getLong("viewers_set_at", 0)
         set(value) = prefs.edit().putLong("viewers_set_at", value).apply()
 
+    /** Ménage de la liste MAL : séries « gardées » (fiche MAL → date), à ne plus proposer pendant un moment. */
+    var cleanupKept: Map<Int, Long>
+        get() = prefs.getString("cleanup_kept", "")!!.split("\n").mapNotNull { line ->
+            val (id, at) = line.split(":").takeIf { it.size == 2 } ?: return@mapNotNull null
+            id.toIntOrNull()?.let { key -> at.toLongOrNull()?.let { key to it } }
+        }.toMap()
+        set(value) = prefs.edit().putString("cleanup_kept", value.entries.joinToString("\n") { "${it.key}:${it.value}" }).apply()
+
     /** Prénoms des personnes avec qui les séries sont regardées (marques « vu avec »). */
     var companions: List<String>
         get() = prefs.getString("companions", "")!!.split("\n").map { it.trim() }.filter { it.isNotEmpty() }

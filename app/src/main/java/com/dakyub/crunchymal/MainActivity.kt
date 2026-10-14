@@ -59,6 +59,9 @@ import com.dakyub.crunchymal.ui.screens.SettingsScreen
 import com.dakyub.crunchymal.ui.screens.SeriesListSource
 import com.dakyub.crunchymal.ui.screens.WatchlistScreen
 import com.dakyub.crunchymal.ui.theme.CrunchyMalTheme
+import com.dakyub.crunchymal.ui.components.RatingPrompt
+import com.dakyub.crunchymal.ui.screens.CleanupScreen
+import com.dakyub.crunchymal.ui.screens.HistoryScreen
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -99,10 +102,16 @@ private fun AppRoot() {
     val openPlexShow: (String) -> Unit = { ratingKey -> nav.navigate("plex/$ratingKey") }
     NavHost(navController = nav, startDestination = "main") {
         composable("main") {
-            MainTabs(onOpenSeries = openSeries, onOpenMal = openMal, onOpenPlexShow = openPlexShow, onOpenStats = { nav.navigate("stats") })
+            MainTabs(onOpenSeries = openSeries, onOpenMal = openMal, onOpenPlexShow = openPlexShow, onNavigate = { nav.navigate(it) })
         }
         composable("stats") {
             StatsScreen()
+        }
+        composable("cleanup") {
+            CleanupScreen()
+        }
+        composable("history") {
+            HistoryScreen(onOpenSeries = openSeries, onOpenPlexShow = openPlexShow)
         }
         composable("plex/{key}", arguments = listOf(navArgument("key") { type = NavType.StringType })) { entry ->
             PlexShowScreen(ratingKey = entry.arguments?.getString("key").orEmpty(), onOpenSeries = openSeries, onOpenMal = openMal)
@@ -124,6 +133,8 @@ private fun AppRoot() {
             }
         }
     }
+    // « Série terminée » : note MAL proposée quand la synchro vient de finir une série.
+    RatingPrompt()
 }
 
 private val Tabs = listOf("Accueil", "En cours", "Parcourir", "Calendrier", "Saison", "Découvrir", "Watchlist", "Liste MAL", "Plex", "Recherche", "Réglages")
@@ -133,7 +144,8 @@ private fun MainTabs(
     onOpenSeries: (SeriesRef) -> Unit,
     onOpenMal: (Int) -> Unit,
     onOpenPlexShow: (String) -> Unit,
-    onOpenStats: () -> Unit,
+    /** Écrans secondaires : « stats », « cleanup », « history ». */
+    onNavigate: (String) -> Unit,
 ) {
     var selected by rememberSaveable { mutableIntStateOf(0) }
     // Au retour d'une fiche, Android redonne le focus au premier onglet (Accueil), qui serait alors
@@ -185,14 +197,14 @@ private fun MainTabs(
             UpdateBanner()
         }
         when (selected) {
-            0 -> HomeScreen(onOpenSeries, onOpenPlexShow, onOpenMal)
+            0 -> HomeScreen(onOpenSeries, onOpenPlexShow, onOpenMal, onNavigate)
             1 -> WatchlistScreen(onOpenSeries, SeriesListSource.STARTED)
             2 -> BrowseScreen(onOpenSeries, onOpenMal)
             3 -> CalendarScreen(onOpenSeries)
             4 -> SeasonScreen(onOpenSeries, onOpenMal)
             5 -> DiscoverScreen(onOpenSeries, onOpenMal)
             6 -> WatchlistScreen(onOpenSeries)
-            7 -> MalListScreen(onOpenSeries, onOpenMal, onOpenStats)
+            7 -> MalListScreen(onOpenSeries, onOpenMal, onNavigate)
             8 -> PlexScreen(onOpenPlexShow)
             9 -> SearchScreen(onOpenSeries, onOpenMal, onOpenPlexShow)
             else -> SettingsScreen()

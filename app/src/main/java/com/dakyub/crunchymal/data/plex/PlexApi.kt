@@ -98,6 +98,13 @@ data class PlexItem(
     val duration: Long = 0,
     /** Dernier visionnage (secondes depuis 1970), 0 si jamais vu. */
     val lastViewedAt: Long = 0,
+    // Historique de visionnage
+    /** Date du visionnage (secondes depuis 1970). */
+    val viewedAt: Long = 0,
+    /** Série de l'épisode (« /library/metadata/<id> »), quand [grandparentRatingKey] manque. */
+    val grandparentKey: String? = null,
+    /** Compte qui a regardé (1 = propriétaire du serveur). */
+    @SerialName("accountID") val accountId: Int? = null,
 ) {
     val watched: Boolean get() = viewCount > 0
     val episodeLabel: String get() = "S${parentIndex ?: "?"} E${index ?: "?"}"
@@ -261,6 +268,11 @@ class PlexApi(context: Context) {
 
     /** Toutes les saisons d'une bibliothèque de séries. */
     suspend fun seasons(sectionKey: String): List<PlexItem> = getAll("/library/sections/$sectionKey/all?type=3")
+
+    /** Historique de visionnage du propriétaire du serveur : épisodes, les plus récents d'abord. */
+    suspend fun history(size: Int = 300): List<PlexItem> =
+        get("/status/sessions/history/all?sort=viewedAt:desc&X-Plex-Container-Start=0&X-Plex-Container-Size=$size").items
+            .filter { it.type == "episode" && (it.accountId == null || it.accountId == 1) }
 
     /** « Reprendre » : épisodes en cours ou suivants (On Deck). */
     suspend fun onDeck(): List<PlexItem> = get("/library/onDeck").items.filter { it.type == "episode" }

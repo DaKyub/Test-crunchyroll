@@ -235,6 +235,7 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
     private val continueLoader = continueWatching()
     private val newEpisodesLoader = newEpisodesRow()
     private val sequelsLoader = sequelsRow()
+    private val forYouLoader = forYouRow()
     private val gemsLoader = gemsRow()
     private val adnGemsLoader = adnGemsRow()
     /** Rangées filtrées sur la note MAL (8+) : la note est demandée pour toutes leurs séries. */
@@ -270,6 +271,7 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
             // Suites des séries terminées sur MAL, juste après « Reprendre ».
             if (graph.malAuth.loggedIn.value) {
                 list.add(list.indexOfFirst { it.second === continueLoader } + 1, "Suites de tes séries terminées" to sequelsLoader)
+                list.add(list.indexOfFirst { it.second === sequelsLoader } + 1, "Recommandé pour toi (d'après tes notes MAL)" to forYouLoader)
             }
 
             // Les rangées s'affichent au fur et à mesure, dans l'ordre du fil officiel.
@@ -368,6 +370,29 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
             malCardItem(
                 info.toAnime(), found[info.malId], platforms[info.malId], graph.providers.selected.value, crUsable,
                 subtitle = "Suite de « ${info.prequelTitle} » · $status",
+            ).card
+        }
+    }
+
+    /** Recommandations MAL d'après tes séries notées 8+ (calculées une fois par jour), sans celles vues depuis. */
+    private fun forYouRow(): suspend () -> List<CardItem> = {
+        val crUsable = graph.auth.loggedIn.value
+        val items = graph.forYou.items()
+        val seen = graph.mal.myListSeenIds.value
+        val visible = items.filter { it.malId !in seen }
+        graph.prepareMalAnime(visible.map { it.toAnime() })
+        CacheLoads.awaitAll()
+        val found = graph.availability.found.value
+        val platforms = graph.watchPlatforms.found.value
+        val statuses = graph.mal.myListStatuses.value
+        visible.map { item ->
+            val because = item.because.firstOrNull()?.let { first ->
+                "Comme « $first »" + if (item.because.size > 1) " et ${item.because.size - 1} autre" + (if (item.because.size > 2) "s" else "") else ""
+            }
+            val planned = "Dans tes « À voir »".takeIf { statuses[item.malId] == "plan_to_watch" }
+            malCardItem(
+                item.toAnime(), found[item.malId], platforms[item.malId], graph.providers.selected.value, crUsable,
+                subtitle = listOfNotNull(planned, because).joinToString(" · ").ifBlank { null },
             ).card
         }
     }
@@ -510,7 +535,12 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
 }
 
 @Composable
-fun HomeScreen(onOpenSeries: (SeriesRef) -> Unit, onOpenPlexShow: (String) -> Unit = {}, onOpenMal: (Int) -> Unit = {}) {
+fun HomeScreen(
+    onOpenSeries: (SeriesRef) -> Unit,
+    onOpenPlexShow: (String) -> Unit = {},
+    onOpenMal: (Int) -> Unit = {},
+    onNavigate: (String) -> Unit = {},
+) {
     val graph = LocalGraph.current
     val vm = viewModel { HomeViewModel(graph) }
     val state by vm.state.collectAsState()
@@ -543,6 +573,7 @@ fun HomeScreen(onOpenSeries: (SeriesRef) -> Unit, onOpenPlexShow: (String) -> Un
                         modifier = Modifier.horizontalScroll(rememberScrollState()),
                     ) {
                         OutlinedButton(onClick = { tonightOpen = true }) { Text("🎲 Que regarder ce soir ?") }
+                        OutlinedButton(onClick = { onNavigate("history") }) { Text("🕘 Historique") }
                         if (malLoggedIn) ViewersButton()
                         CycleButton("Tri", filters.sort.label, vm::nextSort)
                         CycleButton("MAL ≥", filters.minScore?.toString() ?: "toutes", vm::nextMinScore)

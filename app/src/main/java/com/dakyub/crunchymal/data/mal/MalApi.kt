@@ -231,13 +231,16 @@ class MalApi(private val clientId: () -> String) {
     }
 
     /** Animes recommandés par les membres MAL pour [malId], les plus recommandés d'abord. */
-    suspend fun recommendationIds(malId: Int): List<Int> {
+    suspend fun recommendationIds(malId: Int): List<Int> = recommendationCounts(malId).map { it.first }
+
+    /** Recommandations des membres MAL : fiche recommandée → nombre de recommandations, les plus citées d'abord. */
+    suspend fun recommendationCounts(malId: Int): List<Pair<Int, Int>> {
         val url = "$BASE/anime/$malId".toHttpUrl().newBuilder()
             .addQueryParameter("fields", "recommendations")
             .build().toString()
         return Http.json.decodeFromString<RecommendationsNode>(get(url)).recommendations
             .sortedByDescending { it.count }
-            .map { it.node.id }
+            .map { it.node.id to it.count }
     }
 
     /** Fiche complète (avec affiche et résumé) pour l'écran de détail. */

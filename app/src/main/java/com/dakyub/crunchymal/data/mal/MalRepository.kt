@@ -261,6 +261,8 @@ class MalRepository(context: Context, clientId: () -> String, val auth: MalAuth)
             .also { recommendationCache[malId] = it }
     }
 
+    suspend fun recommendationCounts(malId: Int): List<Pair<Int, Int>> = api.recommendationCounts(malId)
+
     /** Correction manuelle ; [anime] null = "pas sur MAL". */
     suspend fun setManual(key: String, anime: MalAnime?) {
         val now = System.currentTimeMillis()

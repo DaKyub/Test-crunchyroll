@@ -3,7 +3,13 @@ package com.dakyub.crunchymal.data.mal
 import com.dakyub.crunchymal.data.CompanionTags
 import com.dakyub.crunchymal.data.CompanionsRepository
 import com.dakyub.crunchymal.data.Settings
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 import java.util.concurrent.ConcurrentHashMap
+
+/** Série que la synchro vient de passer « Terminé » sur MAL, sans note : l'app propose de la noter. */
+data class RatingRequest(val malId: Int, val title: String)
 
 /**
  * Synchronisation automatique de la liste MAL : le nombre d'épisodes vus sur Crunchyroll / ADN est
@@ -16,6 +22,16 @@ class MalSync(private val mal: MalRepository, private val settings: Settings, pr
 
     /** Dernier nombre d'épisodes traité par fiche MAL pendant la session (évite les appels répétés). */
     private val handled = ConcurrentHashMap<Int, Int>()
+
+    private val _toRate = MutableStateFlow<List<RatingRequest>>(emptyList())
+
+    /** Séries terminées à noter (fenêtre « Série terminée » au premier plan de l'app). */
+    val toRate: StateFlow<List<RatingRequest>> = _toRate
+
+    /** Notée, ou « Plus tard » : la fenêtre ne la propose plus. */
+    fun dismissRating(malId: Int) {
+        _toRate.update { list -> list.filterNot { it.malId == malId } }
+    }
 
     /** Renvoie un message à afficher si la fiche MAL a été mise à jour, sinon null. */
     suspend fun sync(malId: Int, watched: Int): String? {
@@ -30,7 +46,12 @@ class MalSync(private val mal: MalRepository, private val settings: Settings, pr
             if (episodes > (status?.episodesWatched ?: 0)) {
                 val newStatus = if (total > 0 && episodes >= total) "completed" else "watching"
                 mal.updateMyStatus(malId, newStatus, status?.score ?: 0, episodes)
-                val title = mal.records.value.values.firstOrNull { it.malId == malId }?.title ?: "MAL"
+                val record = mal.records.value.values.firstOrNull { it.malId == malId }
+                val title = record?.title ?: "MAL"
+                if (newStatus == "completed" && (status?.score ?: 0) == 0) {
+                    val request = RatingRequest(malId, record?.englishTitle ?: record?.title ?: "Série #$malId")
+                    _toRate.update { list -> if (list.any { it.malId == malId }) list else list + request }
+                }
                 message = "$title : " + if (newStatus == "completed") "terminé sur MAL ✓" else "$episodes/${total.takeIf { it > 0 } ?: "?"} ép. sur MAL"
             }
         }

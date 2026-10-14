@@ -1,6 +1,7 @@
 package com.dakyub.crunchymal
 
 import com.dakyub.crunchymal.data.mal.SequelsRepository
+import com.dakyub.crunchymal.data.mal.ForYouRepository
 import com.dakyub.crunchymal.data.mal.MalCompletion
 import com.dakyub.crunchymal.data.plex.PlexLibrary
 import android.content.Context
@@ -59,6 +60,7 @@ class Graph(context: Context) {
     val homeChannel = HomeChannel(context, settings) { key -> PlexApp.intent(plex.machineId, key, settings.plexLinkFormat) }
     val arrivals = ArrivalWatcher(context, api, adn, mal)
     val sequels = SequelsRepository(context, mal, availability)
+    val forYou = ForYouRepository(context, mal)
     val plex = PlexApi(context)
     val plexLibrary = PlexLibrary(context, plex, mal, watchPlatforms, malSync)
     val tagServer = TagServer(context, mal, companions, SettingsBackup(context, mal))

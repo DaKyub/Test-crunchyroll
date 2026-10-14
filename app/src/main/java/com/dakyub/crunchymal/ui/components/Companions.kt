@@ -78,23 +78,32 @@ fun CompanionsBadge(people: Set<String>, modifier: Modifier = Modifier) {
     )
 }
 
-/** Bouton des fiches : affiche avec qui la série a été vue et ouvre la fenêtre pour le modifier. */
+/** Bouton des fiches : affiche avec qui la série a été vue (ou est prévue) et ouvre la fenêtre pour le modifier. */
 @Composable
 fun CompanionsButton(choices: List<MalEntryChoice>) {
     val graph = LocalGraph.current
     val records by graph.mal.records.collectAsState()
     val marks by graph.companions.byMalId.collectAsState()
+    val plannedMarks by graph.companions.plannedByMalId.collectAsState()
     var open by remember { mutableStateOf(false) }
-    val current = choices.firstNotNullOfOrNull { records[it.malKey]?.malId }?.let { marks[it] }.orEmpty()
+    val malId = choices.firstNotNullOfOrNull { records[it.malKey]?.malId }
+    val current = malId?.let { marks[it] }.orEmpty()
+    val planned = malId?.let { plannedMarks[it] }.orEmpty()
     OutlinedButton(onClick = { open = true }) {
-        Text(if (current.isEmpty()) "Vu avec…" else "👥 " + companionsLabel(current))
+        Text(
+            when {
+                current.isNotEmpty() -> "👥 " + companionsLabel(current)
+                planned.isNotEmpty() -> "📌 À voir : " + companionsLabel(planned)
+                else -> "Vu avec / à voir avec…"
+            }
+        )
     }
     if (open) CompanionsDialog(choices, onDismiss = { open = false })
 }
 
 /**
- * Coche les personnes avec qui la série a été vue (« Seul » compris) et l'enregistre en tags MAL.
- * Une série absente de la liste MAL y est ajoutée (Terminé ou En cours).
+ * Coche les personnes avec qui la série a été vue (« Seul » compris) et celles avec qui elle est à voir,
+ * et l'enregistre en tags MAL. Une série absente de la liste MAL y est ajoutée (Terminé, En cours ou À voir).
  */
 @Composable
 fun CompanionsDialog(choices: List<MalEntryChoice>, onDismiss: () -> Unit) {
@@ -113,6 +122,7 @@ fun CompanionsDialog(choices: List<MalEntryChoice>, onDismiss: () -> Unit) {
     var inList by remember(malId) { mutableStateOf<Boolean?>(null) }
     var tags by remember(malId) { mutableStateOf(emptyList<String>()) }
     var selected by remember(malId) { mutableStateOf(emptySet<String>()) }
+    var planned by remember(malId) { mutableStateOf(emptySet<String>()) }
     var message by remember(malId) { mutableStateOf<String?>(null) }
     var addStatus by remember { mutableStateOf("completed") }
     var newName by remember { mutableStateOf("") }
@@ -127,6 +137,7 @@ fun CompanionsDialog(choices: List<MalEntryChoice>, onDismiss: () -> Unit) {
                 inList = current?.status != null
                 tags = current?.tags.orEmpty()
                 selected = graph.companions.peopleIn(tags)
+                planned = graph.companions.plannedIn(tags)
                 message = null
             }
             .onFailure { message = "Erreur : ${it.message}" }
@@ -140,7 +151,7 @@ fun CompanionsDialog(choices: List<MalEntryChoice>, onDismiss: () -> Unit) {
                 .padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Text("Vu avec…", style = MaterialTheme.typography.titleLarge)
+            Text("Vu avec / à voir avec…", style = MaterialTheme.typography.titleLarge)
             when {
                 !loggedIn -> Text("Connecte d'abord ton compte MAL dans Réglages → Compte MyAnimeList.")
                 available.isEmpty() -> Text("Aucune fiche MAL associée (corrige la correspondance d'abord).")
@@ -166,8 +177,8 @@ fun CompanionsDialog(choices: List<MalEntryChoice>, onDismiss: () -> Unit) {
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
+                    val options = (listOf(CompanionTags.ALONE) + people + selected + planned).distinctBy { it.lowercase() }
                     Text("Vue avec", style = MaterialTheme.typography.labelLarge)
-                    val options = (listOf(CompanionTags.ALONE) + people + selected).distinctBy { it.lowercase() }
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(options) { person ->
                             val checked = selected.any { it.equals(person, true) }
@@ -179,12 +190,21 @@ fun CompanionsDialog(choices: List<MalEntryChoice>, onDismiss: () -> Unit) {
                             item { OutlinedButton(onClick = { adding = true }) { Text("+ Autre personne", maxLines = 1) } }
                         }
                     }
+                    Text("À voir avec", style = MaterialTheme.typography.labelLarge)
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(options) { person ->
+                            val checked = planned.any { it.equals(person, true) }
+                            FilterChip(selected = checked, onClick = {
+                                planned = if (checked) planned.filterNot { it.equals(person, true) }.toSet() else planned + person
+                            }) { Text(if (checked) "✓ $person" else person, maxLines = 1) }
+                        }
+                    }
                     if (adding) {
                         val add = {
                             val name = CompanionTags.clean(newName)
                             if (name.isNotEmpty()) {
+                                // Ajoutée aux deux rangées sans être cochée : à toi de choisir « vue » ou « à voir ».
                                 graph.companions.addPerson(name)
-                                selected = selected + name
                                 newName = ""
                                 adding = false
                             }
@@ -198,7 +218,7 @@ fun CompanionsDialog(choices: List<MalEntryChoice>, onDismiss: () -> Unit) {
                     if (inList == false) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text("Absente de ta liste MAL, ajoutée comme", style = MaterialTheme.typography.labelLarge)
-                            listOf("completed" to "Terminé", "watching" to "En cours").forEach { (value, label) ->
+                            listOf("completed" to "Terminé", "watching" to "En cours", "plan_to_watch" to "À voir").forEach { (value, label) ->
                                 FilterChip(selected = addStatus == value, onClick = { addStatus = value }) { Text(label) }
                             }
                         }
@@ -209,6 +229,9 @@ fun CompanionsDialog(choices: List<MalEntryChoice>, onDismiss: () -> Unit) {
                             onClick = click@{
                                 val id = malId ?: return@click
                                 val chosen = selected
+                                val chosenPlanned = planned
+                                // Seulement « à voir avec » : une série absente de la liste y entre en « À voir ».
+                                val newStatus = if (chosen.isEmpty() && chosenPlanned.isNotEmpty()) "plan_to_watch" else addStatus
                                 val targets = if (allEntries) available.mapNotNull { records[it.malKey]?.malId }.distinct() else listOf(id)
                                 message = "Enregistrement…"
                                 scope.launch {
@@ -220,9 +243,13 @@ fun CompanionsDialog(choices: List<MalEntryChoice>, onDismiss: () -> Unit) {
                                                 val status = graph.mal.myStatus(target).first
                                                 (status?.status != null) to status?.tags.orEmpty()
                                             }
-                                            graph.companions.set(target, chosen, current, statusIfNew = if (listed) null else addStatus)
+                                            graph.companions.set(
+                                                target, chosen, current,
+                                                statusIfNew = if (listed) null else newStatus,
+                                                planned = chosenPlanned,
+                                            )
                                             if (target == id) {
-                                                tags = CompanionTags.merge(current, chosen)
+                                                tags = graph.companions.tagsFor(current, chosen, chosenPlanned)
                                                 inList = true
                                             }
                                         }.onFailure { errors += it.message ?: it.javaClass.simpleName }

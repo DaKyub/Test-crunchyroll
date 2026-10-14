@@ -70,8 +70,13 @@ data class MalListVisible(val rows: List<MalListRow> = emptyList(), val checked:
 class MalListViewModel(private val graph: Graph) : ViewModel() {
     val ui = MutableStateFlow(MalListUi())
 
+    /** Marques « vu avec » et « à voir avec » réunies : le filtre « Avec » couvre les deux. */
+    private val allMarks = combine(graph.companions.byMalId, graph.companions.plannedByMalId) { seen, planned ->
+        (seen.keys + planned.keys).associateWith { seen[it].orEmpty() + planned[it].orEmpty() }
+    }
+
     val visible = combine(
-        ui, graph.availability.found, graph.providers.selected, graph.watchPlatforms.found, graph.companions.byMalId,
+        ui, graph.availability.found, graph.providers.selected, graph.watchPlatforms.found, allMarks,
     ) { u, found, providers, platforms, marks ->
         val entries = u.entries
             .filter { entry -> entry.status.status?.let { it in u.statuses } == true }
@@ -164,7 +169,7 @@ class MalListViewModel(private val graph: Graph) : ViewModel() {
 }
 
 @Composable
-fun MalListScreen(onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (Int) -> Unit, onOpenStats: () -> Unit = {}) {
+fun MalListScreen(onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (Int) -> Unit, onNavigate: (String) -> Unit = {}) {
     val graph = LocalGraph.current
     val loggedIn by graph.malAuth.loggedIn.collectAsState()
     if (!loggedIn) {
@@ -209,12 +214,13 @@ fun MalListScreen(onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (Int) -> Unit, o
             ) {
                 CycleButton("Tri", ui.sort.label, vm::nextSort)
                 CycleButton("Plateforme", ui.platform ?: "toutes", vm::nextPlatform)
-                CycleButton("Vu avec", ui.companion?.label ?: "toutes", vm::nextCompanion)
+                CycleButton("Vu / à voir avec", ui.companion?.label ?: "toutes", vm::nextCompanion)
                 FilterChip(selected = ui.availableOnly, onClick = vm::toggleAvailableOnly) {
                     Text(if (ui.availableOnly) "✓ Disponibles seulement" else "Disponibles seulement", style = MaterialTheme.typography.labelMedium)
                 }
                 OutlinedButton(onClick = vm::load) { Text("Actualiser", style = MaterialTheme.typography.labelLarge) }
-                OutlinedButton(onClick = onOpenStats) { Text("📊 Statistiques", style = MaterialTheme.typography.labelLarge) }
+                OutlinedButton(onClick = { onNavigate("stats") }) { Text("📊 Statistiques", style = MaterialTheme.typography.labelLarge) }
+                OutlinedButton(onClick = { onNavigate("cleanup") }) { Text("🧹 Ménage", style = MaterialTheme.typography.labelLarge) }
                 Text(
                     "${visible.rows.size} séries · disponibilité vérifiée ${visible.checked}/${visible.total}",
                     style = MaterialTheme.typography.labelMedium,
