@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal
 
+import com.dakyub.crunchymal.data.mal.MalCompletion
 import com.dakyub.crunchymal.data.plex.PlexLibrary
 import android.content.Context
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -51,6 +52,7 @@ class Graph(context: Context) {
     val history = HistoryRepository(context, api)
     val started = StartedSeriesRepository(api, history, adn, adnWatchlist)
     val malSync = MalSync(mal, settings)
+    val malCompletion = MalCompletion(settings, mal)
     val homeChannel = HomeChannel(context, settings) { key -> PlexApp.intent(plex.machineId, key, settings.plexLinkFormat) }
     val arrivals = ArrivalWatcher(context, api, adn, mal)
     val plex = PlexApi(context)

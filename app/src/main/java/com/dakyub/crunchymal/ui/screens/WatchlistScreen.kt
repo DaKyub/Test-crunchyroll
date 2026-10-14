@@ -96,12 +96,20 @@ class WatchlistViewModel(private val graph: Graph, private val source: SeriesLis
     )
     private var loadedFor: Pair<Set<Provider>, Boolean>? = null
 
-    val ui = combine(loaded, filters, graph.progress.summaries, graph.mal.records, graph.companions.byMalId) { l, f, summaries, mal, marks ->
-        val rows = l.entries.map { e ->
-            val summary = summaries[e.series.progressKey]
-            val status = summary?.status ?: if (e.neverWatched) WatchStatus.NOT_STARTED else null
-            Triple(e, status, mal[e.series.malKey]?.score)
-        }
+    // Marques « vu avec » et fiches terminées sur MAL (statut corrigé, option qui les masque).
+    private val malState = combine(graph.companions.byMalId, graph.malCompletion.state) { marks, completion -> marks to completion }
+
+    val ui = combine(loaded, filters, graph.progress.summaries, graph.mal.records, malState) { l, f, summaries, mal, malMarks ->
+        val (marks, completion) = malMarks
+        fun malDone(e: WatchlistEntry) = completion.isCompleted(mal[e.series.malKey]?.malId, summaries[e.series.progressKey]?.total)
+        val rows = l.entries
+            .filter { e -> !completion.hide || !malDone(e) }
+            .map { e ->
+                val summary = summaries[e.series.progressKey]
+                // Terminée sur MAL (vue avant, ou sur l'autre service) : comptée comme « Tout vu ».
+                val status = if (malDone(e)) WatchStatus.COMPLETED else summary?.status ?: if (e.neverWatched) WatchStatus.NOT_STARTED else null
+                Triple(e, status, mal[e.series.malKey]?.score)
+            }
         val filtered = rows
             .filter { (_, status, _) -> f.statuses.accepts(status) }
             .filter { (_, _, score) -> f.minScore == null || (score != null && score >= f.minScore) }
@@ -125,6 +133,7 @@ class WatchlistViewModel(private val graph: Graph, private val source: SeriesLis
                     series = e.series,
                     episodeId = summary?.nextEpisodeId ?: e.nextEpisodeId,
                     subtitle = when {
+                        status == WatchStatus.COMPLETED && summary?.status != WatchStatus.COMPLETED -> "✓ Terminé (MAL)"
                         summary != null && status == WatchStatus.COMPLETED -> "✓ ${summary.watched}/${summary.total} ép."
                         summary != null && status == WatchStatus.UP_TO_DATE -> "À jour · ${summary.watched}/${summary.total} ép."
                         summary != null -> "${summary.watched}/${summary.total} ép." + (summary.nextLabel?.let { " · suite : $it" } ?: "")

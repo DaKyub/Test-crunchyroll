@@ -116,10 +116,14 @@ class BrowseViewModel(private val graph: Graph) : ViewModel() {
 
     // La connexion ADN change ce qui est calculable : elle relance le calcul avec l'historique Crunchyroll.
     // Avec les marques « vu avec » (tags MAL) pour le filtre du même nom.
-    private val watchedFlow = combine(graph.adn.loggedIn, crWatched, graph.companions.byMalId) { _, watched, marks -> watched to marks }
+    private val watchedFlow = combine(graph.adn.loggedIn, crWatched, graph.companions.byMalId, graph.malCompletion.state) { _, watched, marks, completion ->
+        Triple(watched, marks, completion)
+    }
 
     val visible = combine(ui, graph.progress.summaries, graph.mal.records, watchedFlow, graph.watchPlatforms.catalog) { u, summaries, mal, watchedAndMarks, catalog ->
-        val (watched, marks) = watchedAndMarks
+        val (watched, marks, completion) = watchedAndMarks
+        /** Terminée sur MAL (vue avant, ou sur l'autre service) : comptée comme « Tout vu ». */
+        fun malDone(item: CardItem) = completion.isCompleted(mal[item.series.malKey]?.malId, summaries[item.series.progressKey]?.total)
         val malStatuses = graph.mal.myListStatuses.value
         /** Plateformes en France (TMDB + ce que l'app sait déjà), ou null tant que ce n'est pas vérifié. */
         fun platformsOf(item: CardItem): Set<String>? {
@@ -136,10 +140,13 @@ class BrowseViewModel(private val graph: Graph) : ViewModel() {
                     else -> WatchStatus.NOT_STARTED
                 }
             }
+            if (malDone(item)) return WatchStatus.COMPLETED
             return summaries[item.series.progressKey]?.status
                 ?: if (item.series.provider == Provider.CRUNCHYROLL && watched != null && item.series.id !in watched) WatchStatus.NOT_STARTED else null
         }
-        val rows = u.results.map { item -> Triple(item, statusOf(item), mal[item.series.malKey]?.score) }
+        val rows = u.results
+            .filter { item -> !completion.hide || !malDone(item) }
+            .map { item -> Triple(item, statusOf(item), mal[item.series.malKey]?.score) }
         val filtered = rows
             .filter { (_, status, _) -> u.statuses.accepts(status) }
             .filter { (_, _, score) -> u.minScore == null || (score != null && score >= u.minScore) }
@@ -150,7 +157,11 @@ class BrowseViewModel(private val graph: Graph) : ViewModel() {
         BrowseVisible(
             items = sorted.map { (item, _, _) ->
                 val summary = summaries[item.series.progressKey]
-                if (summary != null && u.statuses.isNotEmpty()) item.copy(subtitle = "${summary.watched}/${summary.total} ép.") else item
+                when {
+                    !item.isPlatformItem && malDone(item) && summary?.status != WatchStatus.COMPLETED -> item.copy(subtitle = "✓ Terminé (MAL)")
+                    summary != null && u.statuses.isNotEmpty() -> item.copy(subtitle = "${summary.watched}/${summary.total} ép.")
+                    else -> item
+                }
             },
             progressKnown = trackable.count { statusOf(it) != null },
             progressNeeded = if (u.statuses.isEmpty()) 0 else trackable.size,

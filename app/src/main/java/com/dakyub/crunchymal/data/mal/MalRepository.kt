@@ -119,13 +119,23 @@ class MalRepository(context: Context, clientId: () -> String, val auth: MalAuth)
     /** Statut dans la liste MAL de l'utilisateur connecté, et nombre total d'épisodes. */
     suspend fun myStatus(malId: Int): Pair<MalListStatus?, Int> = api.myStatus(malId, auth.accessToken())
 
-    suspend fun updateMyStatus(malId: Int, status: String, score: Int, episodesWatched: Int?) =
+    suspend fun updateMyStatus(malId: Int, status: String, score: Int, episodesWatched: Int?) {
         api.updateStatus(malId, auth.accessToken(), status, score, episodesWatched)
+        _myListStatuses.update { it + (malId to status) }
+        if (status != "plan_to_watch") _myListSeenIds.update { it + malId }
+        _myListCompleted.update { if (status == "completed") it + (malId to (episodesWatched ?: it[malId] ?: 0)) else it - malId }
+    }
+
+    /** Fiches « Terminé » de la liste MAL → nombre d'épisodes de l'anime (0 = inconnu). */
+    private val _myListCompleted = MutableStateFlow<Map<Int, Int>>(emptyMap())
+    val myListCompleted: StateFlow<Map<Int, Int>> = _myListCompleted
 
     suspend fun myList(): List<MalListEntry> = api.userList(auth.accessToken()).also { list ->
         _myListSeenIds.value = list.filter { it.status.status != null && it.status.status != "plan_to_watch" }
             .map { it.anime.malId }.toSet()
         _myListStatuses.value = list.mapNotNull { e -> e.status.status?.let { e.anime.malId to it } }.toMap()
+        _myListCompleted.value = list.filter { it.status.status == "completed" }
+            .associate { it.anime.malId to (it.anime.episodes ?: it.status.episodesWatched) }
         myListFetchedAt = System.currentTimeMillis()
         lastList = list
         _myListTags.value = list.filter { it.status.tags.isNotEmpty() }.associate { it.anime.malId to it.status.tags }

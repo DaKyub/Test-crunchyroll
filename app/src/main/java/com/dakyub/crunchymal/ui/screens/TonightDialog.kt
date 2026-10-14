@@ -117,6 +117,8 @@ fun TonightDialog(
         val platforms = graph.watchPlatforms.found.value
         val providers = graph.providers.selected.value
         val crUsable = graph.auth.loggedIn.value
+        val completion = graph.malCompletion.state.value
+        val summaries = graph.progress.summaries.value
         return candidates.orEmpty().mapNotNull { candidate ->
             if (candidate.inProgress && !includeInProgress || !candidate.inProgress && !includeToWatch) return@mapNotNull null
             val resolved = candidate.anime?.let { anime ->
@@ -125,6 +127,9 @@ fun TonightDialog(
                 candidate.copy(card = item.card)
             } ?: candidate
             val info = resolved.info(records)
+            // En cours sur Crunchyroll / ADN mais terminée sur MAL (vue ailleurs) : rien à regarder.
+            val total = summaries[resolved.card.series.progressKey]?.total
+            if (candidate.inProgress && total != null && completion.isCompleted(info.malId, total)) return@mapNotNull null
             val ok = (companion?.accepts(info.malId?.let { marks[it] }.orEmpty()) ?: true) &&
                 (genre == null || genre in info.genres) &&
                 (minScore == null || (info.score ?: 0.0) >= minScore!!)

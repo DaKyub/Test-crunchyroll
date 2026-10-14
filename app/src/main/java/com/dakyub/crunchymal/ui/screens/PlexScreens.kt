@@ -122,9 +122,12 @@ data class PlexUi(
 class PlexViewModel(private val graph: Graph) : ViewModel() {
     val ui = MutableStateFlow(PlexUi())
 
-    val visible = combine(ui, graph.mal.records, graph.companions.byMalId) { u, mal, marks ->
+    val visible = combine(ui, graph.mal.records, graph.companions.byMalId, graph.malCompletion.state) { u, mal, marks, completion ->
+        // Terminée sur MAL (vue ailleurs) : comptée comme « Tout vu », masquée si l'option est activée.
+        fun malDone(show: PlexItem) = completion.isCompleted(mal["plex:${show.ratingKey}"]?.malId, show.leafCount)
         u.shows
-            .filter { u.statuses.accepts(it.status()) }
+            .filter { show -> !completion.hide || !malDone(show) }
+            .filter { show -> u.statuses.accepts(if (malDone(show)) WatchStatus.COMPLETED else show.status()) }
             .filter { show -> u.companion?.accepts(mal["plex:${show.ratingKey}"]?.malId?.let { marks[it] }.orEmpty()) ?: true }
             .filter { show -> u.minScore == null || (mal["plex:${show.ratingKey}"]?.score ?: -1.0) >= u.minScore }
             .let { list ->
@@ -183,6 +186,8 @@ fun PlexScreen(onOpenPlexShow: (String) -> Unit) {
     val malLoggedIn by graph.malAuth.loggedIn.collectAsState()
     // Badge « Plex 1/3 » quand des saisons manquent sur le serveur (index Plex, saisons d'après TMDB).
     val libraryShows by graph.plexLibrary.shows.collectAsState()
+    val completion by graph.malCompletion.state.collectAsState()
+    val malRecords by graph.mal.records.collectAsState()
     val plexLabels = remember(libraryShows) {
         libraryShows.associate { it.ratingKey to PlexMatch(it.ratingKey, it.seasons, it.totalSeasons).label }
     }
@@ -254,7 +259,12 @@ fun PlexScreen(onOpenPlexShow: (String) -> Unit) {
         MediaCard(
             item = CardItem(
                 series = show.showRef(graph),
-                subtitle = if (show.leafCount > 0) "${show.viewedLeafCount}/${show.leafCount} ép." else show.year?.toString(),
+                subtitle = when {
+                    show.viewedLeafCount < show.leafCount &&
+                        completion.isCompleted(malRecords["plex:${show.ratingKey}"]?.malId, show.leafCount) -> "✓ Terminé (MAL)"
+                    show.leafCount > 0 -> "${show.viewedLeafCount}/${show.leafCount} ép."
+                    else -> show.year?.toString()
+                },
                 progress = show.leafCount.takeIf { it > 0 }?.let { show.viewedLeafCount.toFloat() / it }?.takeIf { it > 0f },
                 badges = listOf(plexLabels[show.ratingKey] ?: "Plex"),
             ),

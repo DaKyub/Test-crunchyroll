@@ -72,11 +72,14 @@ class SeasonViewModel(private val graph: Graph) : ViewModel() {
     val ui = MutableStateFlow(SeasonUi())
 
     val visible = combine(
-        ui, graph.availability.found, graph.watchPlatforms.found, graph.providers.selected, graph.mal.myListSeenIds,
-    ) { u, found, platforms, providers, seen ->
+        ui, graph.availability.found, graph.watchPlatforms.found, graph.providers.selected,
+        combine(graph.mal.myListSeenIds, graph.malCompletion.state) { seen, completion -> seen to completion },
+    ) { u, found, platforms, providers, seenAndCompletion ->
+        val (seen, completion) = seenAndCompletion
         val crUsable = graph.auth.loggedIn.value
         val items = u.anime
             .filter { !u.tvOnly || it.type?.lowercase() in setOf("tv", "ona") }
+            .filter { !completion.hides(it.malId) }
             .sortedByDescending { it.score ?: -1.0 }
             .map { anime ->
                 malCardItem(

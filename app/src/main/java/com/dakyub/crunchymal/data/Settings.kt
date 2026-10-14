@@ -1,5 +1,7 @@
 package com.dakyub.crunchymal.data
 
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import android.content.Context
 import com.dakyub.crunchymal.BuildConfig
 import com.dakyub.crunchymal.data.crunchyroll.CrConfig
@@ -87,6 +89,17 @@ class Settings(context: Context) {
     var newEpisodeNotifications: Boolean
         get() = prefs.getBoolean("new_episode_notifications", true)
         set(value) = prefs.edit().putBoolean("new_episode_notifications", value).apply()
+
+    private val _hideMalCompleted = MutableStateFlow(prefs.getBoolean("hide_mal_completed", false))
+
+    /** Masquer des listes les séries / saisons « Terminé » sur la liste MAL. */
+    val hideMalCompletedFlow: StateFlow<Boolean> = _hideMalCompleted
+    var hideMalCompleted: Boolean
+        get() = _hideMalCompleted.value
+        set(value) {
+            prefs.edit().putBoolean("hide_mal_completed", value).apply()
+            _hideMalCompleted.value = value
+        }
 
     /** Prénoms des personnes avec qui les séries sont regardées (marques « vu avec »). */
     var companions: List<String>

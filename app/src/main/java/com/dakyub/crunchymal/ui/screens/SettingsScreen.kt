@@ -133,6 +133,7 @@ fun SettingsScreen() {
             var channel by remember { mutableStateOf(settings.homeChannel) }
             var notifications by remember { mutableStateOf(settings.newEpisodeNotifications) }
             var arrivals by remember { mutableStateOf(settings.arrivalAlerts) }
+            var hideCompleted by remember { mutableStateOf(settings.hideMalCompleted) }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
                 FilterChip(selected = malSync, onClick = { malSync = !malSync; settings.malAutoSync = malSync }) {
                     Text(if (malSync) "✓ Synchro auto de ma liste MAL" else "Synchro auto de ma liste MAL")
@@ -151,6 +152,9 @@ fun SettingsScreen() {
                 FilterChip(selected = arrivals, onClick = { arrivals = !arrivals; settings.arrivalAlerts = arrivals }) {
                     Text(if (arrivals) "✓ Alertes « À voir » disponibles" else "Alertes « À voir » disponibles")
                 }
+                FilterChip(selected = hideCompleted, onClick = { hideCompleted = !hideCompleted; settings.hideMalCompleted = hideCompleted }) {
+                    Text(if (hideCompleted) "✓ Masquer ce que j'ai terminé sur MAL" else "Masquer ce que j'ai terminé sur MAL")
+                }
             }
         }
         item {
@@ -159,7 +163,10 @@ fun SettingsScreen() {
                     "les séries « Terminé » ou « Abandonné » ne sont pas modifiées). Chaîne : remplie à chaque ouverture de l'accueil ; " +
                     "si elle n'apparaît pas, ajoute « CrunchyMAL » dans Paramètres Android TV → Écran d'accueil → Chaînes. " +
                     "Notifications : vérification toutes les 4 h des séries de ta watchlist. Alertes : quand un anime « À voir » " +
-                    "de ta liste MAL arrive sur Crunchyroll ou ADN (vérifié toutes les 12 h, à partir du deuxième passage).",
+                    "de ta liste MAL arrive sur Crunchyroll ou ADN (vérifié toutes les 12 h, à partir du deuxième passage). " +
+                    "Masquer : les séries « Terminé » sur ta liste MAL disparaissent de l'accueil, Parcourir, En cours, Watchlist, " +
+                    "Saison, Plex et des recommandations (une série Crunchyroll n'est cachée que si elle n'a pas plus d'épisodes " +
+                    "que sa fiche MAL). Même sans l'option, elles comptent comme « Tout vu » dans les filtres de statut.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

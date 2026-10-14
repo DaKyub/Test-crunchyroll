@@ -92,6 +92,7 @@ fun MalRecommendationsRow(malId: Int?, onOpenSeries: (SeriesRef) -> Unit, onOpen
     val crLoggedIn by graph.auth.loggedIn.collectAsState()
     val seen by graph.mal.myListSeenIds.collectAsState()
     var platform by remember { mutableStateOf<String?>(null) }
+    val completion by graph.malCompletion.state.collectAsState()
     LaunchedEffect(recommendations) {
         recommendations?.let { graph.prepareMalAnime(it) }
         graph.mal.refreshMyListSeenIds()
@@ -107,6 +108,7 @@ fun MalRecommendationsRow(malId: Int?, onOpenSeries: (SeriesRef) -> Unit, onOpen
             list.isEmpty() -> Text("Aucune recommandation sur MAL.", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             else -> {
                 val items = list
+                    .filter { !completion.hides(it.malId) }
                     .sortedBy { it.malId in seen }
                     .map { anime ->
                         malCardItem(

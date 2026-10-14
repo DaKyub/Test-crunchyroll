@@ -133,13 +133,18 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
     private var progressJob: Job? = null
 
     /** Rangées après filtres (statut, note MAL) et tri ; les rangées vides disparaissent. */
-    private val seenAndMarks = combine(graph.mal.myListSeenIds, graph.companions.byMalId) { seen, marks -> seen to marks }
+    private val seenAndMarks = combine(graph.mal.myListSeenIds, graph.companions.byMalId, graph.malCompletion.state) { seen, marks, completion ->
+        Triple(seen, marks, completion)
+    }
 
     val visible = combine(state, filters, graph.progress.summaries, graph.mal.records, seenAndMarks) { st, f, summaries, mal, seenMarks ->
-        val (malSeen, marks) = seenMarks
-        fun statusOf(item: CardItem) = summaries[item.series.progressKey]?.status
+        val (malSeen, marks, completion) = seenMarks
+        /** Terminée sur MAL (vue avant, ou sur l'autre service) : comptée comme « Tout vu ». */
+        fun malDone(item: CardItem) = completion.isCompleted(mal[item.series.malKey]?.malId, summaries[item.series.progressKey]?.total)
+        fun statusOf(item: CardItem) = if (malDone(item)) WatchStatus.COMPLETED else summaries[item.series.progressKey]?.status
         val rows = st.rows.mapNotNull { row ->
             val items = row.items
+                .filter { item -> !completion.hide || !malDone(item) }
                 .filter { f.statuses.accepts(statusOf(it)) }
                 .filter { item -> f.minScore == null || (mal[item.series.malKey]?.score ?: -1.0) >= f.minScore }
                 .filter { item -> row.minMal == null || (mal[item.series.malKey]?.score ?: -1.0) >= row.minMal }
@@ -194,7 +199,8 @@ class HomeViewModel(private val graph: Graph) : ViewModel() {
     /** Demande les notes MAL et/ou la progression de toutes les séries quand un filtre en a besoin. */
     private fun applyFilterNeeds() {
         val f = filters.value
-        if (f.needsMal) {
+        // Option « masquer ce que j'ai terminé sur MAL » : il faut la fiche MAL de chaque série.
+        if (f.needsMal || graph.settings.hideMalCompleted) {
             state.value.rows.flatMap { it.items }.distinctBy { it.series.malKey }
                 .forEach { graph.mal.request(it.series.malKey, it.series.malTitles) }
         }
