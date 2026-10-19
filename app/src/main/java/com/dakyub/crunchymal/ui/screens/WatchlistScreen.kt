@@ -90,9 +90,12 @@ internal data class Loaded(val loading: Boolean = true, val error: String? = nul
 
 class WatchlistViewModel(private val graph: Graph, private val source: SeriesListSource) : ViewModel() {
     private val loaded = MutableStateFlow(Loaded())
-    // « En cours » s'ouvre sur les séries à reprendre ; les autres statuts restent à cocher.
+    // « En cours » s'ouvre sur les séries à reprendre et celles en diffusion où l'on est à jour ;
+    // les autres statuts restent à cocher.
     private val filters = MutableStateFlow(
-        WatchlistFilters(statuses = if (source == SeriesListSource.STARTED) setOf(WatchStatus.IN_PROGRESS) else emptySet())
+        WatchlistFilters(
+            statuses = if (source == SeriesListSource.STARTED) setOf(WatchStatus.IN_PROGRESS, WatchStatus.UP_TO_DATE) else emptySet()
+        )
     )
     private var loadedFor: Pair<Set<Provider>, Boolean>? = null
 

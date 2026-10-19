@@ -7,7 +7,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 /** Fiches « Terminé » de la liste MAL (→ nombre d'épisodes) et option qui les masque des listes. */
 data class MalCompletionState(val completed: Map<Int, Int> = emptyMap(), val hide: Boolean = false) {
@@ -31,4 +33,13 @@ class MalCompletion(settings: Settings, mal: MalRepository) {
     val state: StateFlow<MalCompletionState> =
         combine(mal.myListCompleted, settings.hideMalCompletedFlow) { completed, hide -> MalCompletionState(completed, hide) }
             .stateIn(scope, SharingStarted.Eagerly, MalCompletionState(mal.myListCompleted.value, settings.hideMalCompleted))
+
+    init {
+        // Sans lecture de la liste MAL, aucune série n'est connue comme terminée : on la lit dès que le
+        // compte est connecté (et non plus seulement en ouvrant Liste MAL ou les statistiques).
+        scope.launch {
+            mal.auth.loggedIn.first { it }
+            if (mal.myListCompleted.value.isEmpty()) runCatching { mal.myListCached(maxAgeMs = 30 * 60_000) }
+        }
+    }
 }

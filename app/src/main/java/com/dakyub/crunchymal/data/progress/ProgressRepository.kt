@@ -2,6 +2,8 @@ package com.dakyub.crunchymal.data.progress
 
 import com.dakyub.crunchymal.data.CacheLoads
 import com.dakyub.crunchymal.data.CacheWriter
+import com.dakyub.crunchymal.data.DateUtils
+import com.dakyub.crunchymal.data.adn.WATCHED_RATIO
 import android.content.Context
 import com.dakyub.crunchymal.data.Http
 import com.dakyub.crunchymal.data.crunchyroll.CrApi
@@ -25,7 +27,8 @@ import java.util.concurrent.ConcurrentHashMap
 
 /**
  * NOT_STARTED : rien vu · IN_PROGRESS : commencée, dernier épisode pas vu ·
- * UP_TO_DATE : dernier épisode disponible vu, avec des trous avant · COMPLETED : tous les épisodes vus.
+ * UP_TO_DATE : dernier épisode disponible vu (trous avant, ou tout vu d'une série encore en diffusion) ·
+ * COMPLETED : tous les épisodes vus, diffusion finie.
  */
 enum class WatchStatus { NOT_STARTED, IN_PROGRESS, UP_TO_DATE, COMPLETED }
 
@@ -43,11 +46,14 @@ data class ProgressSummary(
     val remainingAfterLast: Int? = null,
     /** Date de sortie (ISO) de l'épisode suivant. */
     val nextReleased: String? = null,
+    /** Encore en diffusion (épisodes annoncés, ou dernier sorti il y a peu) ; null = ancienne version du cache. */
+    val airing: Boolean? = null,
 ) {
     val status: WatchStatus
         get() = when {
             watched == 0 && !started -> WatchStatus.NOT_STARTED
-            total > 0 && watched >= total -> WatchStatus.COMPLETED
+            // Tout vu mais encore en diffusion : « À jour », pas « Terminé ».
+            total > 0 && watched >= total -> if (airing == true) WatchStatus.UP_TO_DATE else WatchStatus.COMPLETED
             lastWatched == true -> WatchStatus.UP_TO_DATE
             else -> WatchStatus.IN_PROGRESS
         }
@@ -87,7 +93,7 @@ class ProgressRepository(context: Context, private val api: CrApi) {
     }.getOrElse { emptyMap() }
 
     fun isFresh(s: ProgressSummary) =
-        s.remainingAfterLast != null && System.currentTimeMillis() - s.computedAt < TTL
+        s.remainingAfterLast != null && s.airing != null && System.currentTimeMillis() - s.computedAt < TTL
 
     /** Enregistre un résumé calculé ailleurs (progression ADN, clé "adn:<id>"). */
     suspend fun put(key: String, summary: ProgressSummary) {
@@ -131,9 +137,11 @@ class ProgressRepository(context: Context, private val api: CrApi) {
                 episodes = eps.sortedBy { it.sequenceNumber }.map { ep ->
                     val ids = (listOf(ep.id) + ep.versions.map { it.guid }).distinct()
                     val heads = ids.mapNotNull { playheads[it] }
+                    // Vu : marqué « fini », ou regardé à 85 % au moins (épisode quitté pendant le générique).
+                    val playhead = heads.maxOfOrNull { it.playhead } ?: 0
                     EpisodeNode(
                         episode = ep,
-                        watched = heads.any { it.fullyWatched },
+                        watched = heads.any { it.fullyWatched } || (ep.durationMs > 0 && playhead * 1000 >= ep.durationMs * WATCHED_RATIO),
                         playheadSec = heads.maxOfOrNull { it.playhead } ?: 0,
                         available = ep.isAvailable(nowIso),
                     )
@@ -160,6 +168,7 @@ class ProgressRepository(context: Context, private val api: CrApi) {
                 lastWatched = flat.lastOrNull()?.watched == true,
                 remainingAfterLast = if (lastWatchedIndex >= 0) flat.size - lastWatchedIndex - 1 else flat.size,
                 nextReleased = next?.episode?.releaseDate?.takeIf { it.isNotBlank() },
+                airing = isAiring(nodes.flatMap { it.episodes }.any { !it.available }, flat.lastOrNull()?.episode?.releaseDate),
             ),
         )
     }
@@ -200,3 +209,7 @@ class ProgressRepository(context: Context, private val api: CrApi) {
         const val TTL = 6L * 3600 * 1000
     }
 }
+
+/** En diffusion : épisodes annoncés pas encore sortis, ou dernier épisode sorti il y a moins de 10 jours. */
+fun isAiring(hasUpcoming: Boolean, lastReleased: String?): Boolean =
+    hasUpcoming || (lastReleased?.takeIf { it.length >= 19 }?.take(19)?.let { it >= DateUtils.isoDaysAgo(10) } == true)

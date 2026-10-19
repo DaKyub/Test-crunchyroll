@@ -97,6 +97,7 @@ class AdnProgressRepository(private val adn: AdnApi, private val store: Progress
                 lastWatched = flat.lastOrNull()?.watched == true,
                 remainingAfterLast = if (lastWatchedIndex >= 0) flat.size - lastWatchedIndex - 1 else flat.size,
                 nextReleased = next?.video?.releaseDate?.takeIf { it.isNotBlank() },
+                airing = isAiring(nodes.any { !it.available }, flat.lastOrNull()?.video?.releaseDate),
             )
         }
         AdnSeriesTree(showId, nodes, summary)
