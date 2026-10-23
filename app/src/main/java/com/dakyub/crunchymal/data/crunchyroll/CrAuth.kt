@@ -38,9 +38,31 @@ sealed interface PollResult {
     data class Error(val message: String) : PollResult
 }
 
+/** Crunchyroll refuse les identifiants client (Basic) de l'app et aucun autre n'a été trouvé. */
+class ClientRejectedException(reason: String) :
+    java.io.IOException("Identifiant client Crunchyroll refusé ($reason). Mets à jour l'app Crunchyroll officielle ou colle-le dans Réglages → Compte et avancé.")
+
+/** Erreur due aux identifiants client (et non au jeton de l'utilisateur). */
+private fun HttpException.isClientRejected(): Boolean =
+    body.contains("invalid_client", ignoreCase = true) || body.contains("unauthorized_client", ignoreCase = true)
+
 class CrAuth(context: Context, private val settings: Settings) {
     private val prefs = context.getSharedPreferences("auth", Context.MODE_PRIVATE)
     private val mutex = Mutex()
+
+    /** Recherche des identifiants client dans l'app officielle quand Crunchyroll refuse les nôtres. */
+    val credentials = ClientCredentials(context, settings)
+
+    /** Exécute [block] ; si Crunchyroll refuse les identifiants client, en cherche d'autres et réessaie une fois. */
+    private suspend fun <T> withClientRecovery(block: suspend () -> T): T = try {
+        block()
+    } catch (e: HttpException) {
+        if (!e.isClientRejected() && e.code != 401) throw e
+        when (val found = credentials.recover()) {
+            is ClientCredentials.Result.Found -> block()
+            is ClientCredentials.Result.Failed -> if (e.isClientRejected()) throw ClientRejectedException(found.reason) else throw e
+        }
+    }
 
     private val _loggedIn = MutableStateFlow(
         !prefs.getString("refresh_token", null).isNullOrBlank() &&
@@ -56,10 +78,13 @@ class CrAuth(context: Context, private val settings: Settings) {
         .header("User-Agent", settings.userAgent)
 
     suspend fun requestDeviceCode(): CrDeviceCode {
-        val request = clientRequest("${CrConfig.BASE}/auth/v1/device/code")
-            .post(FormBody.Builder().build())
-            .build()
-        val code = Http.json.decodeFromString<CrDeviceCode>(Http.client.fetch(request))
+        val code = withClientRecovery {
+            // Requête construite à chaque essai : les identifiants ont pu changer entre-temps.
+            val request = clientRequest("${CrConfig.BASE}/auth/v1/device/code")
+                .post(FormBody.Builder().build())
+                .build()
+            Http.json.decodeFromString<CrDeviceCode>(Http.client.fetch(request))
+        }
         if (code.deviceCode.isBlank() || code.userCode.isBlank()) error("Réponse de code d'appareil invalide")
         return code
     }
@@ -149,10 +174,14 @@ class CrAuth(context: Context, private val settings: Settings) {
             .add("device_name", Build.MODEL ?: "Android TV")
             .add("device_type", "ANDROIDTV")
             .build()
-        val request = clientRequest("${CrConfig.BASE}/auth/v1/token").post(form).build()
         try {
-            saveToken(Http.json.decodeFromString<CrToken>(Http.client.fetch(request)))
+            val token = withClientRecovery {
+                Http.json.decodeFromString<CrToken>(Http.client.fetch(clientRequest("${CrConfig.BASE}/auth/v1/token").post(form).build()))
+            }
+            saveToken(token)
         } catch (e: HttpException) {
+            // Identifiants client refusés : le compte reste connecté (jeton gardé), seule l'app est en cause.
+            if (e.isClientRejected()) throw ClientRejectedException("même après recherche dans l'app officielle")
             if (e.code == 400 || e.code == 401) {
                 logout()
                 throw NotLoggedInException()

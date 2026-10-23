@@ -54,7 +54,7 @@ object AppAnalyzer {
                     for (entry in dexEntries) {
                         try {
                             zip.getInputStream(entry).use { input -> tmp.outputStream().use { input.copyTo(it) } }
-                            scanDex(tmp, found, extra)
+                            scanDex(tmp, found) { interesting.containsMatchIn(it) || extra?.containsMatchIn(it) == true }
                         } catch (t: Throwable) {
                             out += "${entry.name} illisible : ${t.javaClass.simpleName} ${t.message}"
                         } finally {
@@ -95,8 +95,30 @@ object AppAnalyzer {
             s.removePrefix("L").removeSuffix(";").replace('/', '.').removePrefix("com.crunchyroll.")
         } else s
 
+    /** Toutes les chaînes du code de [packageName] qui passent [filter] (vide si l'app est absente). */
+    fun strings(context: Context, packageName: String, filter: (String) -> Boolean): Set<String> {
+        val appInfo = runCatching { context.packageManager.getApplicationInfo(packageName, 0) }.getOrNull() ?: return emptySet()
+        val found = mutableSetOf<String>()
+        val tmp = File(context.cacheDir, "strings.dex")
+        for (apk in listOf(appInfo.sourceDir) + appInfo.splitSourceDirs.orEmpty()) {
+            runCatching {
+                ZipFile(apk).use { zip ->
+                    zip.entries().asSequence().filter { it.name.matches(dexName) }.toList().forEach { entry ->
+                        try {
+                            zip.getInputStream(entry).use { input -> tmp.outputStream().use { input.copyTo(it) } }
+                            scanDex(tmp, found, filter)
+                        } finally {
+                            tmp.delete()
+                        }
+                    }
+                }
+            }
+        }
+        return found
+    }
+
     /** Parcourt la table des chaînes du .dex (format : https://source.android.com/docs/core/runtime/dex-format). */
-    private fun scanDex(file: File, found: MutableSet<String>, extra: Regex?) {
+    private fun scanDex(file: File, found: MutableSet<String>, filter: (String) -> Boolean) {
         RandomAccessFile(file, "r").use { raf ->
             val buf: MappedByteBuffer = raf.channel.map(FileChannel.MapMode.READ_ONLY, 0, raf.length())
             buf.order(ByteOrder.LITTLE_ENDIAN)
@@ -117,7 +139,7 @@ object AppAnalyzer {
                 }
                 if (len < 3 || len >= bytes.size) continue
                 val s = String(bytes, 0, len, Charsets.UTF_8)
-                if (interesting.containsMatchIn(s) || extra?.containsMatchIn(s) == true) found += s
+                if (filter(s)) found += s
             }
         }
     }

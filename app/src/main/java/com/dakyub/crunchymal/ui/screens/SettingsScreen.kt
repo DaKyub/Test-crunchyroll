@@ -31,6 +31,7 @@ import com.dakyub.crunchymal.CrunchyMalApp
 import com.dakyub.crunchymal.AdnApp
 import com.dakyub.crunchymal.ManifestReader
 import com.dakyub.crunchymal.AppAnalyzer
+import com.dakyub.crunchymal.data.crunchyroll.ClientCredentials
 import com.dakyub.crunchymal.data.Provider
 import com.dakyub.crunchymal.data.adn.AdnShow
 import com.dakyub.crunchymal.data.adn.AdnVideo
@@ -591,7 +592,9 @@ fun SettingsScreen() {
         }
         item {
             Text(
-                "Identifiants client de l'app TV Crunchyroll (laisser vide pour la valeur du build)",
+                "Identifiants client de l'app TV Crunchyroll (laisser vide pour la valeur du build). " +
+                    "S'ils sont refusés, l'app les cherche automatiquement dans l'app Crunchyroll officielle installée ; " +
+                    "le bouton ci-dessous force cette recherche.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -613,6 +616,25 @@ fun SettingsScreen() {
                     }
                 }) { Text("Se déconnecter") }
             }
+        }
+        item {
+            var searching by remember { mutableStateOf(false) }
+            OutlinedButton(enabled = !searching, onClick = {
+                searching = true
+                scope.launch {
+                    val result = graph.auth.credentials.recover(manual = true)
+                    searching = false
+                    when (result) {
+                        is ClientCredentials.Result.Found -> {
+                            basic = settings.basicAuthOverride
+                            ua = settings.userAgentOverride
+                            graph.mal.configChanged()
+                            toast("Identifiant trouvé dans l'app Crunchyroll ✓")
+                        }
+                        is ClientCredentials.Result.Failed -> toast("Échec : ${result.reason}")
+                    }
+                }
+            }) { Text(if (searching) "Recherche…" else "Chercher dans l'app Crunchyroll") }
         }
     }
 }
