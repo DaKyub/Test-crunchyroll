@@ -31,48 +31,57 @@ class ClientCredentials(context: Context, private val settings: Settings) {
         val now = System.currentTimeMillis()
         if (!manual && now - lastAttempt < RETRY_MS) return@withContext Result.Failed("recherche déjà faite il y a peu")
         lastAttempt = now
-        val installed = runCatching { context.packageManager.getPackageInfo(OfficialApp.PACKAGE, 0) }.getOrNull()
-            ?: return@withContext Result.Failed("l'app Crunchyroll officielle n'est pas installée")
+        // Toute erreur (mémoire, lecture de l'app…) renvoie un échec au lieu de faire planter l'app.
+        runCatching { search() }.getOrElse { Result.Failed("erreur interne : ${it.javaClass.simpleName}") }
+    }
 
-        // Toutes les chaînes « jeton » (lettres/chiffres et séparateurs) d'une taille plausible.
-        val strings = AppAnalyzer.strings(context, OfficialApp.PACKAGE) { s -> s.length in 8..120 && TOKEN.matches(s) }
+    private fun search(): Result {
+        val installed = runCatching { context.packageManager.getPackageInfo(OfficialApp.PACKAGE, 0) }.getOrNull()
+            ?: return Result.Failed("l'app Crunchyroll officielle n'est pas installée")
+
+        // Chaînes « jeton » assez longues et contenant un chiffre : écarte la grande majorité du code
+        // (noms de classes, chemins, mots), pour ne pas saturer la mémoire.
+        val strings = AppAnalyzer.strings(context, OfficialApp.PACKAGE) { s ->
+            s.length in 16..120 && s.any(Char::isDigit) && TOKEN.matches(s)
+        }
         val userAgent = "Crunchyroll/ANDROIDTV/${installed.versionName}_${installed.longVersionCodeCompat()} " +
             "(Android ${Build.VERSION.RELEASE}; en-US; ${Build.MODEL})"
         val current = settings.basicAuth
 
         // 1) Valeurs base64 qui se décodent déjà en « identifiant:secret » : la valeur « Basic » toute faite.
-        val decoded = strings.filter { B64.matches(it) }.mapNotNull { b64 ->
+        val decoded = strings.asSequence().filter { B64.matches(it) }.mapNotNull { b64 ->
             val text = runCatching { String(Base64.decode(b64, Base64.DEFAULT)) }.getOrNull() ?: return@mapNotNull null
             val parts = text.split(':')
             if (parts.size == 2 && ID.matches(parts[0]) && parts[1].length >= 10) "Basic $b64" else null
         }
-        // 2) Sinon, chaque identifiant plausible associé à chaque secret plausible.
-        val ids = strings.filter { ID.matches(it) }
-        val secrets = strings.filter { SECRET.matches(it) && it.any(Char::isDigit) && it.any(Char::isLetter) }
-        val pairs = ids.flatMap { id -> secrets.map { basic("$id:$it") } }
-        // Beaucoup d'identifiants s'utilisent aussi sans secret (client « public ») : on les tente aussi.
-        val idsOnly = if (ids.size <= 30) ids.map { basic("$it:") } else emptyList()
+        // 2) Sinon, chaque identifiant plausible associé à chaque secret plausible (listes bornées).
+        val ids = strings.filter { ID.matches(it) }.take(MAX_IDS)
+        val secrets = strings.filter { SECRET.matches(it) && it.any(Char::isLetter) }.take(MAX_SECRETS)
+        val pairs = ids.asSequence().flatMap { id -> secrets.asSequence().map { basic("$id:$it") } }
+        val idsOnly = ids.asSequence().map { basic("$it:") }
 
-        val candidates = (decoded + pairs + idsOnly).distinct().filter { it != current }
-        // Diagnostic affiché en cas d'échec (sans jamais montrer les valeurs elles-mêmes).
-        val found = "appli v${installed.versionName} · ${strings.size} chaînes · ${decoded.size} base64 · " +
-            "${ids.size} id × ${secrets.size} secret"
-        if (candidates.isEmpty()) return@withContext Result.Failed("aucun identifiant trouvé ($found)")
-
+        val found = "appli v${installed.versionName} · ${strings.size} chaînes · ${ids.size} id · ${secrets.size} secret"
         var tested = 0
         var reachErrors = 0
-        for (candidate in candidates.take(MAX_TRIES)) {
+        var any = false
+        // Séquence paresseuse : on ne construit jamais tout le produit en mémoire.
+        for (candidate in (decoded + pairs + idsOnly).distinct().filter { it != current }.take(MAX_TRIES)) {
+            any = true
             when (test(candidate, userAgent)) {
                 200 -> {
                     settings.basicAuthOverride = candidate
                     settings.userAgentOverride = userAgent
-                    return@withContext Result.Found
+                    return Result.Found
                 }
                 400, 401, 403 -> tested++
-                else -> { reachErrors++; if (reachErrors >= 3) return@withContext Result.Failed("Crunchyroll injoignable (Cloudflare ou réseau)") }
+                else -> {
+                    reachErrors++
+                    if (reachErrors >= 3) return Result.Failed("Crunchyroll injoignable (Cloudflare ou réseau)")
+                }
             }
         }
-        Result.Failed("$tested identifiant(s) testé(s), tous refusés ($found)")
+        return if (!any) Result.Failed("aucun identifiant trouvé ($found)")
+        else Result.Failed("$tested identifiant(s) testé(s), tous refusés ($found)")
     }
 
     /** Jeton anonyme : 200 si Crunchyroll accepte ces identifiants client. */
@@ -99,14 +108,13 @@ class ClientCredentials(context: Context, private val settings: Settings) {
     private companion object {
         const val RETRY_MS = 10 * 60_000L
         const val MAX_TRIES = 200
+        const val MAX_IDS = 80
+        const val MAX_SECRETS = 80
         /** Chaîne « jeton » : lettres, chiffres et séparateurs base64 / URL. */
         val TOKEN = Regex("""^[A-Za-z0-9+/=_-]+$""")
-        /**
-         * Identifiant client : 12 à 40 caractères minuscules/chiffres avec séparateurs, et au moins un chiffre
-         * ou un séparateur (pour écarter les mots courants du code).
-         */
-        val ID = Regex("""^(?=.{12,40}$)(?=.*[0-9_-])[a-z0-9]+([_-][a-z0-9]+)*$""")
-        /** Secret : jeton d'au moins 20 caractères (lettres + chiffres). */
+        /** Identifiant client : 12 à 40 caractères minuscules/chiffres, séparateurs éventuels. */
+        val ID = Regex("""^(?=.{12,40}$)[a-z0-9]+([_-][a-z0-9]+)*$""")
+        /** Secret : jeton d'au moins 20 caractères. */
         val SECRET = Regex("""^[A-Za-z0-9_-]{20,64}$""")
         /** Base64 « standard » d'une valeur d'au moins ~12 octets. */
         val B64 = Regex("""^[A-Za-z0-9+/]{16,160}={0,2}$""")
