@@ -48,11 +48,14 @@ class ClientCredentials(context: Context, private val settings: Settings) {
             "(Android ${Build.VERSION.RELEASE}; en-US; ${Build.MODEL})"
         val current = settings.basicAuth
 
-        // 1) Valeurs base64 qui se décodent déjà en « identifiant:secret » : la valeur « Basic » toute faite.
+        // 1) Valeurs base64 qui se décodent déjà en « identifiant:secret » : la valeur « Basic » toute faite,
+        // acceptée sans imposer de format précis (c'est la plus fiable).
         val decoded = strings.asSequence().filter { B64.matches(it) }.mapNotNull { b64 ->
             val text = runCatching { String(Base64.decode(b64, Base64.DEFAULT)) }.getOrNull() ?: return@mapNotNull null
             val parts = text.split(':')
-            if (parts.size == 2 && ID.matches(parts[0]) && parts[1].length >= 10) "Basic $b64" else null
+            val ok = parts.size == 2 && parts[0].length in 6..40 && parts[1].length in 6..64 &&
+                text.all { it.code in 33..126 }
+            if (ok) "Basic $b64" else null
         }
         // 2) Sinon, chaque identifiant plausible associé à chaque secret plausible (listes bornées).
         val ids = strings.filter { ID.matches(it) }.take(MAX_IDS)
@@ -67,13 +70,14 @@ class ClientCredentials(context: Context, private val settings: Settings) {
         // Séquence paresseuse : on ne construit jamais tout le produit en mémoire.
         for (candidate in (decoded + pairs + idsOnly).distinct().filter { it != current }.take(MAX_TRIES)) {
             any = true
-            when (test(candidate, userAgent)) {
-                200 -> {
+            val code = test(candidate, userAgent)
+            when {
+                code in 200..299 -> {
                     settings.basicAuthOverride = candidate
                     settings.userAgentOverride = userAgent
                     return Result.Found
                 }
-                400, 401, 403 -> tested++
+                code in 400..403 -> tested++
                 else -> {
                     reachErrors++
                     if (reachErrors >= 3) return Result.Failed("Crunchyroll injoignable (Cloudflare ou réseau)")
@@ -84,17 +88,15 @@ class ClientCredentials(context: Context, private val settings: Settings) {
         else Result.Failed("$tested identifiant(s) testé(s), tous refusés ($found)")
     }
 
-    /** Jeton anonyme : 200 si Crunchyroll accepte ces identifiants client. */
+    /**
+     * Teste les identifiants sur le point d'accès réellement utilisé à la connexion (code d'appareil) :
+     * un client accepté répond 2xx, un client refusé 400/401/403. On valide donc exactement ce qui échoue.
+     */
     private fun test(basicAuth: String, userAgent: String): Int = runCatching {
-        val form = FormBody.Builder()
-            .add("grant_type", "client_id")
-            .add("device_id", settings.deviceId)
-            .add("device_type", "ANDROIDTV")
-            .build()
-        val request = Request.Builder().url("${CrConfig.BASE}/auth/v1/token")
+        val request = Request.Builder().url("${CrConfig.BASE}/auth/v1/device/code")
             .header("Authorization", basicAuth)
             .header("User-Agent", userAgent)
-            .post(form)
+            .post(FormBody.Builder().build())
             .build()
         Http.client.newCall(request).execute().use { it.code }
     }.getOrDefault(-1)
@@ -107,15 +109,15 @@ class ClientCredentials(context: Context, private val settings: Settings) {
 
     private companion object {
         const val RETRY_MS = 10 * 60_000L
-        const val MAX_TRIES = 200
-        const val MAX_IDS = 80
-        const val MAX_SECRETS = 80
+        const val MAX_TRIES = 400
+        const val MAX_IDS = 60
+        const val MAX_SECRETS = 60
         /** Chaîne « jeton » : lettres, chiffres et séparateurs base64 / URL. */
         val TOKEN = Regex("""^[A-Za-z0-9+/=_-]+$""")
-        /** Identifiant client : 12 à 40 caractères minuscules/chiffres, séparateurs éventuels. */
-        val ID = Regex("""^(?=.{12,40}$)[a-z0-9]+([_-][a-z0-9]+)*$""")
-        /** Secret : jeton d'au moins 20 caractères. */
-        val SECRET = Regex("""^[A-Za-z0-9_-]{20,64}$""")
+        /** Identifiant client : 14 à 28 caractères minuscules/chiffres, séparateurs éventuels (format observé ~20). */
+        val ID = Regex("""^(?=.{14,28}$)[a-z0-9]+([_-][a-z0-9]+)*$""")
+        /** Secret : jeton de ~32 caractères (28 à 44). */
+        val SECRET = Regex("""^[A-Za-z0-9_-]{28,44}$""")
         /** Base64 « standard » d'une valeur d'au moins ~12 octets. */
         val B64 = Regex("""^[A-Za-z0-9+/]{16,160}={0,2}$""")
     }
