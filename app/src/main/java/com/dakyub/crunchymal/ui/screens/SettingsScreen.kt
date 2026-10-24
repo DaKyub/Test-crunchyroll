@@ -593,8 +593,8 @@ fun SettingsScreen() {
         item {
             Text(
                 "Identifiants client de l'app TV Crunchyroll (laisser vide pour la valeur du build). " +
-                    "S'ils sont refusés, l'app les cherche automatiquement dans l'app Crunchyroll officielle installée ; " +
-                    "le bouton ci-dessous force cette recherche.",
+                    "S'ils sont refusés, l'app les met à jour automatiquement depuis une source publique en ligne ; " +
+                    "le bouton ci-dessous force cette mise à jour.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -632,12 +632,12 @@ fun SettingsScreen() {
                                 basic = settings.basicAuthOverride
                                 ua = settings.userAgentOverride
                                 graph.mal.configChanged()
-                                report = "Identifiant trouvé dans l'app Crunchyroll ✓"
+                                report = "Identifiant mis à jour depuis la source en ligne ✓"
                             }
                             is ClientCredentials.Result.Failed -> report = "Échec : ${result.reason}"
                         }
                     }
-                }) { Text(if (searching) "Recherche…" else "Chercher dans l'app Crunchyroll") }
+                }) { Text(if (searching) "Mise à jour…" else "Mettre à jour l'identifiant en ligne") }
                 report?.let {
                     Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
