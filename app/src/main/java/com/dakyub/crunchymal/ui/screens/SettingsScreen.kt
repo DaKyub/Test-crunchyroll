@@ -619,22 +619,29 @@ fun SettingsScreen() {
         }
         item {
             var searching by remember { mutableStateOf(false) }
-            OutlinedButton(enabled = !searching, onClick = {
-                searching = true
-                scope.launch {
-                    val result = graph.auth.credentials.recover(manual = true)
-                    searching = false
-                    when (result) {
-                        is ClientCredentials.Result.Found -> {
-                            basic = settings.basicAuthOverride
-                            ua = settings.userAgentOverride
-                            graph.mal.configChanged()
-                            toast("Identifiant trouvé dans l'app Crunchyroll ✓")
+            var report by remember { mutableStateOf<String?>(null) }
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(enabled = !searching, onClick = {
+                    searching = true
+                    report = null
+                    scope.launch {
+                        val result = graph.auth.credentials.recover(manual = true)
+                        searching = false
+                        when (result) {
+                            is ClientCredentials.Result.Found -> {
+                                basic = settings.basicAuthOverride
+                                ua = settings.userAgentOverride
+                                graph.mal.configChanged()
+                                report = "Identifiant trouvé dans l'app Crunchyroll ✓"
+                            }
+                            is ClientCredentials.Result.Failed -> report = "Échec : ${result.reason}"
                         }
-                        is ClientCredentials.Result.Failed -> toast("Échec : ${result.reason}")
                     }
+                }) { Text(if (searching) "Recherche…" else "Chercher dans l'app Crunchyroll") }
+                report?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-            }) { Text(if (searching) "Recherche…" else "Chercher dans l'app Crunchyroll") }
+            }
         }
     }
 }

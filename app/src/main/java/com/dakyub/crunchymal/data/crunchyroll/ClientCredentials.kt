@@ -57,49 +57,52 @@ class ClientCredentials(context: Context, private val settings: Settings) {
                 text.all { it.code in 33..126 }
             if (ok) "Basic $b64" else null
         }
-        // 2) Sinon, chaque identifiant plausible associé à chaque secret plausible (listes bornées).
-        val ids = strings.filter { ID.matches(it) }.take(MAX_IDS)
-        val secrets = strings.filter { SECRET.matches(it) && it.any(Char::isLetter) }.take(MAX_SECRETS)
-        val pairs = ids.asSequence().flatMap { id -> secrets.asSequence().map { basic("$id:$it") } }
-        val idsOnly = ids.asSequence().map { basic("$it:") }
+        val idsOnly = strings.asSequence().filter { ID.matches(it) }.map { basic("$it:") }
 
-        val found = "appli v${installed.versionName} · ${strings.size} chaînes · ${ids.size} id · ${secrets.size} secret"
-        var tested = 0
-        var reachErrors = 0
-        var any = false
-        // Séquence paresseuse : on ne construit jamais tout le produit en mémoire.
-        for (candidate in (decoded + pairs + idsOnly).distinct().filter { it != current }.take(MAX_TRIES)) {
-            any = true
-            val code = test(candidate, userAgent)
-            when {
-                code in 200..299 -> {
+        // Mode diagnostic : on ne teste QUE la valeur déjà en place et les valeurs « Basic » toutes faites
+        // (plus quelques identifiants seuls), sans marteler Crunchyroll avec des milliers de combinaisons.
+        val candidates = (sequenceOf(current.takeIf { it.isNotBlank() }).filterNotNull() + decoded + idsOnly)
+            .distinct().take(MAX_TRIES).toList()
+        val found = "v${installed.versionName} · ${strings.size} chaînes · ${decoded.count()} base64"
+        if (candidates.isEmpty()) return Result.Failed("aucune valeur à tester ($found)")
+
+        // Répartition des codes HTTP et premier corps de réponse non-2xx (pour reconnaître un blocage Cloudflare).
+        val codes = sortedMapOf<Int, Int>()
+        var sample = ""
+        for (candidate in candidates) {
+            val probe = test(candidate, userAgent)
+            if (probe.code in 200..299) {
+                // On ne remplace la valeur en place que si ce n'est pas déjà elle.
+                if (candidate != current) {
                     settings.basicAuthOverride = candidate
                     settings.userAgentOverride = userAgent
-                    return Result.Found
                 }
-                code in 400..403 -> tested++
-                else -> {
-                    reachErrors++
-                    if (reachErrors >= 3) return Result.Failed("Crunchyroll injoignable (Cloudflare ou réseau)")
-                }
+                return Result.Found
             }
+            codes[probe.code] = (codes[probe.code] ?: 0) + 1
+            if (sample.isEmpty() && probe.body.isNotBlank()) sample = probe.body.take(140).replace(Regex("""\s+"""), " ")
         }
-        return if (!any) Result.Failed("aucun identifiant trouvé ($found)")
-        else Result.Failed("$tested identifiant(s) testé(s), tous refusés ($found)")
+        val codeList = codes.entries.joinToString(" ") { "${it.key}×${it.value}" }
+        return Result.Failed("codes $codeList · $found · « $sample »")
     }
+
+    private data class Probe(val code: Int, val body: String)
 
     /**
      * Teste les identifiants sur le point d'accès réellement utilisé à la connexion (code d'appareil) :
-     * un client accepté répond 2xx, un client refusé 400/401/403. On valide donc exactement ce qui échoue.
+     * un client accepté répond 2xx. Renvoie le code HTTP et un extrait du corps pour le diagnostic.
      */
-    private fun test(basicAuth: String, userAgent: String): Int = runCatching {
+    private fun test(basicAuth: String, userAgent: String): Probe = runCatching {
         val request = Request.Builder().url("${CrConfig.BASE}/auth/v1/device/code")
             .header("Authorization", basicAuth)
             .header("User-Agent", userAgent)
             .post(FormBody.Builder().build())
             .build()
-        Http.client.newCall(request).execute().use { it.code }
-    }.getOrDefault(-1)
+        Http.client.newCall(request).execute().use { r ->
+            // Sur 2xx le corps peut contenir un jeton : on ne le garde pas, seul l'échec nous intéresse.
+            Probe(r.code, if (r.isSuccessful) "" else r.body?.string().orEmpty())
+        }
+    }.getOrElse { Probe(-1, it.javaClass.simpleName) }
 
     private fun basic(raw: String) = "Basic " + Base64.encodeToString(raw.toByteArray(), Base64.NO_WRAP)
 
@@ -109,15 +112,11 @@ class ClientCredentials(context: Context, private val settings: Settings) {
 
     private companion object {
         const val RETRY_MS = 10 * 60_000L
-        const val MAX_TRIES = 400
-        const val MAX_IDS = 60
-        const val MAX_SECRETS = 60
+        const val MAX_TRIES = 40
         /** Chaîne « jeton » : lettres, chiffres et séparateurs base64 / URL. */
         val TOKEN = Regex("""^[A-Za-z0-9+/=_-]+$""")
         /** Identifiant client : 14 à 28 caractères minuscules/chiffres, séparateurs éventuels (format observé ~20). */
         val ID = Regex("""^(?=.{14,28}$)[a-z0-9]+([_-][a-z0-9]+)*$""")
-        /** Secret : jeton de ~32 caractères (28 à 44). */
-        val SECRET = Regex("""^[A-Za-z0-9_-]{28,44}$""")
         /** Base64 « standard » d'une valeur d'au moins ~12 octets. */
         val B64 = Regex("""^[A-Za-z0-9+/]{16,160}={0,2}$""")
     }
