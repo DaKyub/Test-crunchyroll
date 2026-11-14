@@ -231,14 +231,14 @@ class MalApi(private val clientId: () -> String) {
         return Http.json.decodeFromString<Node>(get(url)).toAnime()
     }
 
-    /** Animes de la saison ([season] : winter, spring, summer, fall), les mieux notés d'abord. */
+    /** Animes de la saison ([season] : winter, spring, summer, fall), les mieux notés d'abord. Liste d'un onglet : prioritaire. */
     suspend fun seasonal(year: Int, season: String, limit: Int = 100): List<MalAnime> {
         val url = "$BASE/anime/season/$year/$season".toHttpUrl().newBuilder()
             .addQueryParameter("sort", "anime_score")
             .addQueryParameter("limit", limit.toString())
             .addQueryParameter("fields", "$FIELDS,main_picture")
             .build().toString()
-        return Http.json.decodeFromString<SearchResponse>(get(url)).data.map { it.node.toAnime() }
+        return Http.json.decodeFromString<SearchResponse>(get(url, priority = true)).data.map { it.node.toAnime() }
     }
 
     /**
@@ -252,7 +252,7 @@ class MalApi(private val clientId: () -> String) {
             .addQueryParameter("offset", offset.toString())
             .addQueryParameter("fields", "$FIELDS,main_picture")
             .build().toString()
-        return Http.json.decodeFromString<SearchResponse>(get(url)).data.map { it.node.toAnime() }
+        return Http.json.decodeFromString<SearchResponse>(get(url, priority = true)).data.map { it.node.toAnime() }
     }
 
     /** Suites directes (relation « sequel ») de l'anime [malId]. */

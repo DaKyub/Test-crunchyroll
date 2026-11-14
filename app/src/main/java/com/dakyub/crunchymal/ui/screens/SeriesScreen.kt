@@ -377,6 +377,12 @@ fun SeriesScreen(
                         item {
                             // Ordre chronologique d'après MAL (OVA et films à leur place), avec leur type.
                             val order = chronologicalOrder(ref.malKey, tree.seasons, malRecords)
+                            // Fiches en cache sans type ni date : complétées pour cette série seulement.
+                            LaunchedEffect(tree.seasons.size, malRecords.size) {
+                                tree.seasons.forEachIndexed { index, node ->
+                                    graph.mal.requestType(seasonMalKey(ref.malKey, index, node.season, malRecords))
+                                }
+                            }
                             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 items(order) { index ->
                                     val node = tree.seasons[index]

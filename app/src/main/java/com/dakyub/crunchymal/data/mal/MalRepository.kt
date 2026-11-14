@@ -92,7 +92,7 @@ class MalRepository(context: Context, clientId: () -> String, val auth: MalAuth)
         return when {
             r.manual && r.malId == null -> false
             r.malId == null -> age > NO_MATCH_TTL
-            r.genres == null || r.airing == null || r.type == null -> true
+            r.genres == null || r.airing == null -> true
             else -> age > SCORE_TTL
         }
     }
@@ -120,6 +120,25 @@ class MalRepository(context: Context, clientId: () -> String, val auth: MalAuth)
             } catch (e: Exception) {
                 Log.w("MalRepository", "Échec MAL pour $key", e)
                 _lastError.value = e.message ?: e.javaClass.simpleName
+            } finally {
+                pending.remove(key)
+            }
+        }
+    }
+
+    /**
+     * Complète une fiche en cache qui n'a pas encore son type ni sa date (fiches antérieures à leur ajout),
+     * seulement là où ils servent (ordre des saisons) : les rafraîchir toutes d'un coup saturerait MAL.
+     */
+    fun requestType(key: String) {
+        val existing = _records.value[key] ?: return
+        if (existing.malId == null || existing.type != null) return
+        if (!pending.add(key)) return
+        scope.launch {
+            try {
+                put(key, resolve(existing, emptyList()))
+            } catch (e: Exception) {
+                Log.w("MalRepository", "Échec MAL pour $key", e)
             } finally {
                 pending.remove(key)
             }
