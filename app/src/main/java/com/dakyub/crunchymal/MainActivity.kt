@@ -56,6 +56,7 @@ import com.dakyub.crunchymal.ui.screens.SearchScreen
 import com.dakyub.crunchymal.ui.screens.SeasonScreen
 import com.dakyub.crunchymal.ui.screens.SeriesScreen
 import com.dakyub.crunchymal.ui.screens.SettingsScreen
+import com.dakyub.crunchymal.ui.screens.SettingsFieldsScreen
 import com.dakyub.crunchymal.ui.screens.SeriesListSource
 import com.dakyub.crunchymal.ui.screens.WatchlistScreen
 import com.dakyub.crunchymal.ui.theme.CrunchyMalTheme
@@ -103,6 +104,9 @@ private fun AppRoot() {
     NavHost(navController = nav, startDestination = "main") {
         composable("main") {
             MainTabs(onOpenSeries = openSeries, onOpenMal = openMal, onOpenPlexShow = openPlexShow, onNavigate = { nav.navigate(it) })
+        }
+        composable("settings/fields") {
+            SettingsFieldsScreen(onBack = { nav.popBackStack() })
         }
         composable("stats") {
             StatsScreen()
@@ -207,7 +211,7 @@ private fun MainTabs(
             7 -> MalListScreen(onOpenSeries, onOpenMal, onNavigate)
             8 -> PlexScreen(onOpenPlexShow)
             9 -> SearchScreen(onOpenSeries, onOpenMal, onOpenPlexShow)
-            else -> SettingsScreen()
+            else -> SettingsScreen(onNavigate)
         }
     }
 }

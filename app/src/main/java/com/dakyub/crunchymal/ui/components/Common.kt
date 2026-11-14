@@ -31,8 +31,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.clickable
@@ -186,8 +186,10 @@ fun seasonChipColors(accent: Color): SelectableChipColors = FilterChipDefaults.c
 )
 
 /**
- * Champ texte utilisable à la télécommande. Au repos, c'est une case qu'on peut survoler sans ouvrir le
- * clavier ; le clavier système ne s'ouvre qu'avec OK, et se referme avec Retour ou la touche de validation.
+ * Champ texte utilisable à la télécommande. Au repos, la sélection se pose sur le cadre du champ sans ouvrir
+ * le clavier ; OK passe la sélection au champ lui-même (le clavier s'ouvre), et la touche de validation
+ * ou le départ du champ la rend au cadre. Rien n'est retiré de l'écran pendant ce va-et-vient : un élément
+ * sélectionné qui disparaît renverrait la sélection sur les onglets (et ouvrirait l'un d'eux).
  */
 @Composable
 fun TvTextField(
@@ -200,29 +202,31 @@ fun TvTextField(
 ) {
     val colors = MaterialTheme.colorScheme
     var editing by remember { mutableStateOf(false) }
-    val boxFocus = remember { FocusRequester() }
+    val frameFocus = remember { FocusRequester() }
     val fieldFocus = remember { FocusRequester() }
-    val keyboard = LocalSoftwareKeyboardController.current
-    // Retour à la case (et non au premier élément de l'écran) une fois la saisie terminée.
-    var returnFocus by remember { mutableStateOf(false) }
+    val frameInteraction = remember { MutableInteractionSource() }
+    val frameFocused by frameInteraction.collectIsFocusedAsState()
+    var fieldFocused by remember { mutableStateOf(false) }
     LaunchedEffect(editing) {
-        if (editing) {
-            fieldFocus.requestFocus()
-            keyboard?.show()
-        } else if (returnFocus) {
-            returnFocus = false
-            runCatching { boxFocus.requestFocus() }
-        }
+        if (editing) runCatching { fieldFocus.requestFocus() }
     }
     fun stop() {
-        returnFocus = true
+        if (!editing) return
+        runCatching { frameFocus.requestFocus() }
         editing = false
     }
 
-    val shape = RoundedCornerShape(8.dp)
-    val frame = modifier.fillMaxWidth()
-    if (editing) {
-        var hadFocus by remember { mutableStateOf(false) }
+    Box(
+        modifier
+            .fillMaxWidth()
+            .focusRequester(frameFocus)
+            .border(
+                BorderStroke(2.dp, if (frameFocused || fieldFocused) colors.primary else colors.surfaceVariant),
+                RoundedCornerShape(8.dp),
+            )
+            .clickable(interactionSource = frameInteraction, indication = null) { editing = true }
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+    ) {
         BasicTextField(
             value = value,
             onValueChange = onValueChange,
@@ -235,13 +239,16 @@ fun TvTextField(
                 onSearch = { onSubmit(); stop() },
                 onDone = { onSubmit(); stop() },
             ),
-            modifier = frame
+            modifier = Modifier
+                .fillMaxWidth()
+                // Le champ n'est sélectionnable qu'après OK : la télécommande ne fait que passer sur le cadre.
+                .focusProperties { canFocus = editing }
                 .focusRequester(fieldFocus)
                 .onFocusChanged { state ->
-                    if (state.isFocused) hadFocus = true else if (hadFocus) stop()
-                }
-                .border(BorderStroke(2.dp, colors.primary), shape)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                    val was = fieldFocused
+                    fieldFocused = state.isFocused
+                    if (was && !state.isFocused) editing = false
+                },
             decorationBox = { inner ->
                 Box {
                     if (value.isEmpty()) {
@@ -251,24 +258,5 @@ fun TvTextField(
                 }
             },
         )
-    } else {
-        val interaction = remember { MutableInteractionSource() }
-        val focused by interaction.collectIsFocusedAsState()
-        Box(
-            frame
-                .focusRequester(boxFocus)
-                .border(BorderStroke(2.dp, if (focused) colors.primary else colors.surfaceVariant), shape)
-                .clickable(interactionSource = interaction, indication = null) { editing = true }
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-        ) {
-            val shown = if (password) "•".repeat(value.length.coerceAtMost(24)) else value
-            Text(
-                shown.ifEmpty { placeholder },
-                style = MaterialTheme.typography.titleMedium,
-                color = if (value.isEmpty()) colors.onSurfaceVariant else colors.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
     }
 }

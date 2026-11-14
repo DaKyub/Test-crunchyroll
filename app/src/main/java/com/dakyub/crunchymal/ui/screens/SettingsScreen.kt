@@ -55,13 +55,7 @@ private val Locales = listOf("fr-FR" to "Français", "en-US" to "English")
 private val Audios = listOf("ja-JP" to "Japonais", "fr-FR" to "Français", "en-US" to "Anglais")
 
 @Composable
-fun SettingsScreen() {
-    // « Saisie des champs » : tous les champs de texte sur un écran (et depuis le téléphone).
-    var showFields by rememberSaveable { mutableStateOf(false) }
-    if (showFields) {
-        SettingsFieldsScreen(onBack = { showFields = false })
-        return
-    }
+fun SettingsScreen(onNavigate: (String) -> Unit = {}) {
     val graph = LocalGraph.current
     val settings = graph.settings
     val context = LocalContext.current
@@ -109,7 +103,8 @@ fun SettingsScreen() {
     ) {
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Button(onClick = { showFields = true }) { Text("Saisie des champs (clés, comptes, jetons…)") }
+                // Écran à part (navigation) : remplacer le contenu ici ferait perdre la sélection au profit des onglets.
+                Button(onClick = { onNavigate("settings/fields") }) { Text("Saisie des champs (clés, comptes, jetons…)") }
                 Text(
                     "Tous les champs de texte sur un seul écran, à remplir à la télécommande ou depuis le téléphone.",
                     style = MaterialTheme.typography.bodySmall,

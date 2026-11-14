@@ -1,6 +1,5 @@
 package com.dakyub.crunchymal.ui.screens
 
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -38,7 +37,6 @@ import kotlinx.coroutines.launch
 fun SettingsFieldsScreen(onBack: () -> Unit) {
     val graph = LocalGraph.current
     val scope = rememberCoroutineScope()
-    BackHandler(onBack = onBack)
 
     var fields by remember { mutableStateOf(graph.settingsFields.current()) }
     // Valeurs saisies sur la TV (clé → texte), comparées aux valeurs enregistrées.
