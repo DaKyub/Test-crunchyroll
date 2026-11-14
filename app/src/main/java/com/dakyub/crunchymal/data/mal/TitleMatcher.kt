@@ -46,6 +46,36 @@ object TitleMatcher {
             .replace(nonAlnum, " ")
             .trim()
 
+    /**
+     * Titre préparé une fois pour de nombreuses comparaisons ([similarity] de deux profils) : forme normalisée
+     * et bigrammes. Comparer deux listes de centaines de titres avec [similarity] sur des chaînes renormalise
+     * chaque titre des milliers de fois (fusion Crunchyroll + ADN de Parcourir : ~15 s sur la Shield).
+     */
+    class Profile internal constructor(val key: String, internal val bigrams: Map<Int, Int>) {
+        internal val count = (key.length - 1).coerceAtLeast(0)
+    }
+
+    fun profile(title: String): Profile {
+        val key = normalize(title).replace(" ", "")
+        val bigrams = HashMap<Int, Int>()
+        for (i in 0 until key.length - 1) {
+            val code = (key[i].code shl 16) or key[i + 1].code
+            bigrams[code] = (bigrams[code] ?: 0) + 1
+        }
+        return Profile(key, bigrams)
+    }
+
+    /** Même calcul que [similarity] sur des chaînes, sans renormaliser les titres. */
+    fun similarity(a: Profile, b: Profile): Double {
+        if (a.key.isEmpty() || b.key.isEmpty()) return 0.0
+        if (a.key == b.key) return 1.0
+        if (a.count < 1 || b.count < 1) return 0.0
+        val (small, large) = if (a.bigrams.size <= b.bigrams.size) a to b else b to a
+        var common = 0
+        for ((k, v) in small.bigrams) common += minOf(v, large.bigrams[k] ?: 0)
+        return 2.0 * common / (a.count + b.count)
+    }
+
     /** Coefficient de Dice sur les bigrammes de caractères (0..1). */
     fun similarity(a: String, b: String): Double {
         val x = normalize(a).replace(" ", "")
