@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Jeton GitHub CrunchyMAL</title>
+<style>
+:root { --bg:#f6f6f7; --card:#fff; --text:#16161a; --muted:#6b6b76; --line:#e2e2e6; --accent:#f47521; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#121214; --card:#1c1c20; --text:#ececf0; --muted:#9a9aa6; --line:#2c2c33; }
+}
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--text); font:15px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; padding:16px; }
+h1 { margin:0 0 12px; font-size:20px; }
+section { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:14px; }
+p { margin:0 0 10px; color:var(--muted); font-size:14px; }
+textarea { display:block; width:100%; min-height:90px; margin:0 0 10px; font:14px monospace; padding:8px; border-radius:8px;
+  border:1px solid var(--line); background:var(--bg); color:var(--text); word-break:break-all; }
+button { font-size:15px; padding:10px 14px; border-radius:10px; border:0; background:var(--accent); color:#fff; }
+button:disabled { opacity:.5; }
+#msg { font-size:14px; margin-top:10px; white-space:pre-wrap; }
+#msg.err { color:#d33; }
+</style>
+</head>
+<body>
+<h1>Jeton GitHub</h1>
+<section>
+  <p>Colle ici le jeton GitHub (github_pat_…) qui sert à envoyer les diagnostics. Il est enregistré sur la Shield
+    puis testé auprès de GitHub ; le résultat s'affiche ci-dessous.</p>
+  <textarea id="token" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="github_pat_…"></textarea>
+  <button id="send">Enregistrer et tester</button>
+  <div id="msg"></div>
+</section>
+<script>
+var key = new URLSearchParams(location.search).get('k') || '';
+var field = document.getElementById('token');
+var send = document.getElementById('send');
+var msg = document.getElementById('msg');
+function show(text, cls) { msg.textContent = text; msg.className = cls || ''; }
+send.addEventListener('click', function () {
+  var token = field.value.trim();
+  if (!token) return show('Colle d\'abord le jeton.', 'err');
+  send.disabled = true;
+  show('Enregistrement et test…');
+  fetch('/api/token?k=' + encodeURIComponent(key), {
+    method: 'POST', body: JSON.stringify({ token: token }), headers: { 'Content-Type': 'application/json' }
+  }).then(function (r) {
+    return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || ('Erreur ' + r.status)); return j; });
+  }).then(function (j) {
+    field.value = '';
+    show(j.result);
+  }).catch(function (e) {
+    show(e.message, 'err');
+  }).then(function () { send.disabled = false; });
+});
+</script>
+</body>
+</html>

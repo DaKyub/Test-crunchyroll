@@ -42,8 +42,8 @@ class Settings(context: Context) {
 
     /** Jeton GitHub (permission Issues sur le dépôt de l'app) pour l'envoi des diagnostics. */
     var githubToken: String
-        get() = prefs.getString("github_token", "")!!
-        set(value) = prefs.edit().putString("github_token", value.trim()).apply()
+        get() = cleanGithubToken(prefs.getString("github_token", "")!!)
+        set(value) = prefs.edit().putString("github_token", cleanGithubToken(value)).apply()
 
     /** Clé OMDb (notes IMDb des épisodes), gratuite sur omdbapi.com. */
     var omdbKey: String
@@ -139,4 +139,17 @@ class Settings(context: Context) {
         get() = prefs.getString("device_id", null) ?: UUID.randomUUID().toString().also {
             prefs.edit().putString("device_id", it).apply()
         }
+}
+
+/**
+ * Nettoie un jeton GitHub collé : retire les caractères invisibles ou parasites (espaces, retours à la
+ * ligne, guillemets, préfixe « Bearer »…) qu'un copier-coller peut ramener. Un jeton ne contient que
+ * des lettres, des chiffres et « _ ».
+ */
+fun cleanGithubToken(raw: String): String {
+    // Les caractères invisibles sont retirés avant tout : au milieu du jeton, ils le couperaient en deux.
+    val compact = raw.filterNot { it.isWhitespace() || Character.getType(it) == Character.FORMAT.toInt() || it in "\"'`<>" }
+        .replace(Regex("^(Bearer|token)", RegexOption.IGNORE_CASE), "")
+    Regex("""github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9]+""").find(compact)?.let { return it.value }
+    return compact.filter { (it in 'a'..'z') || (it in 'A'..'Z') || (it in '0'..'9') || it == '_' }
 }

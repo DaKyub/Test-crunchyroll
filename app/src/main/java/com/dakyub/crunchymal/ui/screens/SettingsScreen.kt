@@ -15,6 +15,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -80,6 +81,9 @@ fun SettingsScreen() {
     var adnAnalyzing by remember { mutableStateOf(false) }
     var githubToken by remember { mutableStateOf(settings.githubToken) }
     val diagStatus by graph.diagnostics.status.collectAsState()
+    // Jeton reçu depuis la page web du téléphone : le champ reprend la valeur enregistrée.
+    val tokenRevision by graph.diagnostics.tokenRevision.collectAsState()
+    LaunchedEffect(tokenRevision) { if (tokenRevision > 0) githubToken = settings.githubToken }
     val lastDiagnostic by graph.diagnostics.last.collectAsState()
 
     fun toast(msg: String) = Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
@@ -549,12 +553,48 @@ fun SettingsScreen() {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Button(onClick = {
                     settings.githubToken = githubToken
+                    githubToken = settings.githubToken
                     toast("Jeton GitHub enregistré")
+                    graph.diagnostics.launchTest()
                 }) { Text("Enregistrer le jeton") }
+                OutlinedButton(onClick = { graph.diagnostics.launchTest() }) { Text("Tester le jeton") }
                 OutlinedButton(onClick = { val appContext = context.applicationContext
                     sendDiagnostic("Diagnostic général") { generalDiagnostic(graph, appContext) } }) {
                     Text("Envoyer un diagnostic général")
                 }
+            }
+        }
+        item {
+            val server by graph.tagServer.state.collectAsState()
+            var requested by rememberSaveable { mutableStateOf(false) }
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Un seul bouton dont seul le texte change : il garde le focus.
+                val running = requested && server.url != null
+                OutlinedButton(onClick = {
+                    if (running) {
+                        requested = false
+                        graph.tagServer.stop()
+                    } else {
+                        requested = true
+                        graph.tagServer.start()
+                    }
+                }) { Text(if (running) "Arrêter la page web" else "Saisir le jeton depuis le téléphone") }
+                val url = server.url?.replace("/?k=", "/token?k=")
+                if (requested && url != null) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(24.dp), verticalAlignment = Alignment.CenterVertically) {
+                        QrCode(url, size = 180.dp)
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("Scanne ce QR code avec ton téléphone (même Wi-Fi), ou ouvre :", style = MaterialTheme.typography.bodyMedium)
+                            Text(url, style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                "Colle le jeton sur la page : il est enregistré et testé, le résultat s'affiche sur le téléphone et ici.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+                if (requested) server.error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
             }
         }
         diagStatus?.let { status ->

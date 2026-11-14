@@ -5,6 +5,7 @@ import android.content.Intent
 import android.util.Log
 import com.dakyub.crunchymal.data.CompanionTags
 import com.dakyub.crunchymal.data.CompanionsRepository
+import com.dakyub.crunchymal.data.DiagnosticsUploader
 import com.dakyub.crunchymal.data.Http
 import com.dakyub.crunchymal.data.SettingsBackup
 import com.dakyub.crunchymal.data.mal.MalRepository
@@ -69,10 +70,16 @@ private data class WebError(val error: String)
 @Serializable
 private data class WebRestored(val restored: Int)
 
+@Serializable
+private data class WebToken(val token: String = "")
+
+@Serializable
+private data class WebTokenResult(val result: String)
+
 /**
  * Petit serveur HTTP sur le réseau local : le téléphone (même Wi-Fi) ouvre une page qui liste toute la
  * liste MAL avec une case par personne, pour marquer d'un coup « vu seul » / « vu avec Prénom ».
- * La page /backup sauvegarde et restaure les réglages de l'app.
+ * La page /backup sauvegarde et restaure les réglages de l'app, la page /token reçoit le jeton GitHub.
  * Un jeton aléatoire, renouvelé à chaque démarrage, est exigé dans l'adresse.
  */
 class TagServer(
@@ -80,6 +87,7 @@ class TagServer(
     private val mal: MalRepository,
     private val companions: CompanionsRepository,
     private val backup: SettingsBackup,
+    private val diagnostics: DiagnosticsUploader,
 ) {
     data class State(val url: String? = null, val error: String? = null)
 
@@ -188,6 +196,13 @@ class TagServer(
                     withContext(Dispatchers.Main) { restartApp() }
                 }
                 Http.json.encodeToString(WebRestored(restored))
+            }
+            method == "GET" && path == "/token" ->
+                respond(s, 200, "text/html; charset=utf-8", context.assets.open("token.html").use { it.readBytes() })
+            method == "POST" && path == "/api/token" -> json(s) {
+                val token = Http.json.decodeFromString<WebToken>(body).token
+                if (token.isBlank()) throw IllegalArgumentException("Jeton vide.")
+                Http.json.encodeToString(WebTokenResult(diagnostics.setTokenAndTest(token)))
             }
             else -> respond(s, 404, "text/plain", "Introuvable".toByteArray())
         }

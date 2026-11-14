@@ -63,7 +63,7 @@ class Graph(context: Context) {
     val forYou = ForYouRepository(context, mal)
     val plex = PlexApi(context)
     val plexLibrary = PlexLibrary(context, plex, mal, watchPlatforms, malSync)
-    val tagServer = TagServer(context, mal, companions, SettingsBackup(context, mal))
+    val tagServer = TagServer(context, mal, companions, SettingsBackup(context, mal), diagnostics)
 
     /** Calcule (si besoin) la progression d'une série, quel que soit son service. */
     suspend fun ensureProgress(ref: SeriesRef, force: Boolean = false) = when (ref.provider) {
