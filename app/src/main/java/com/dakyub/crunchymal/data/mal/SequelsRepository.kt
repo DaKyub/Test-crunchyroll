@@ -26,13 +26,15 @@ data class SequelInfo(
     /** Titre de l'anime terminé dont c'est la suite. */
     val prequelTitle: String = "",
     val checkedAt: Long = 0,
+    /** Début de diffusion complet (« 2019-07-05 »), pour l'ordre chronologique de la licence. */
+    val startDate: String? = null,
 ) {
     val aired: Boolean get() = airing == "currently_airing" || airing == "finished_airing"
 
     fun toAnime() = MalAnime(
         malId = malId, title = title, titleEnglish = titleEnglish, titleJapanese = null, synonyms = emptyList(),
         score = score, scoredBy = null, type = type, episodes = null, startYear = startYear,
-        pictureUrl = picture, airing = airing,
+        pictureUrl = picture, airing = airing, startDate = startDate,
     )
 }
 
@@ -109,15 +111,17 @@ class SequelsRepository(context: Context, private val mal: MalRepository, privat
     }
 
     /**
-     * Suites de la série d'une fiche, dans l'ordre de diffusion : on suit les relations « suite » de MAL depuis
-     * [startIds] (fiches MAL de la série et de ses saisons) et on garde celles qui ne sont pas dans [startIds].
-     * Relations gardées 2 semaines, fiches 3 jours ; requêtes MAL prioritaires (fiche ouverte).
+     * Licence d'une fiche dans l'ordre chronologique : les fiches MAL de la série et de ses saisons ([startIds])
+     * et toutes leurs suites (relations « suite » de MAL, de proche en proche). Relations gardées 2 semaines,
+     * fiches 3 jours ; requêtes MAL prioritaires (fiche ouverte). Une fiche sans date est mise à la fin.
      */
     suspend fun chain(startIds: Collection<Int>): List<MalAnime> {
         val now = System.currentTimeMillis()
         val queue = ArrayDeque(startIds.distinct())
         val visited = queue.toMutableSet()
         val result = mutableListOf<MalAnime>()
+        // Les fiches de départ aussi (avec leur date) : elles situent les suites dans la licence.
+        startIds.distinct().forEach { id -> info(id, now)?.let { result += it.toAnime() } }
         var steps = 0
         while (queue.isNotEmpty() && steps++ < MAX_CHAIN) {
             val id = queue.removeFirst()
@@ -128,18 +132,22 @@ class SequelsRepository(context: Context, private val mal: MalRepository, privat
             for (sequel in next) {
                 if (!visited.add(sequel)) continue
                 queue += sequel
-                val info = data.known[sequel]?.takeIf { now - it.checkedAt < DETAILS_TTL }
-                    ?: runCatching { mal.details(sequel, priority = true) }.getOrNull()?.let { anime ->
-                        SequelInfo(sequel, anime.title, anime.titleEnglish, anime.pictureUrl, anime.airing, anime.type, anime.startYear, anime.score, checkedAt = now)
-                            .also { info -> update { it.copy(known = it.known + (sequel to info)) } }
-                    }
-                    ?: data.known[sequel]
-                info?.let { result += it.toAnime() }
+                info(sequel, now)?.let { result += it.toAnime() }
             }
         }
         save()
-        return result
+        return result.sortedWith(compareBy({ it.startDate ?: it.startYear?.toString() ?: "9999" }, { it.malId }))
     }
+
+    /** Fiche (en cache 3 jours) d'un anime de la licence ; ancienne fiche ou celle sans date redemandée. */
+    private suspend fun info(id: Int, now: Long): SequelInfo? =
+        data.known[id]?.takeIf { now - it.checkedAt < DETAILS_TTL && it.startDate != null }
+            ?: runCatching { mal.details(id, priority = true) }.getOrNull()?.let { anime ->
+                SequelInfo(id, anime.title, anime.titleEnglish, anime.pictureUrl, anime.airing, anime.type, anime.startYear, anime.score,
+                    checkedAt = now, startDate = anime.startDate ?: anime.startYear?.toString())
+                    .also { info -> update { it.copy(known = it.known + (id to info)) } }
+            }
+            ?: data.known[id]
 
     @Synchronized
     private fun update(change: (SequelFile) -> SequelFile) {

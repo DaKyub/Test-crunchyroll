@@ -155,9 +155,11 @@ fun SequelsRow(
 ) {
     if (malIds.isEmpty()) return
     val graph = LocalGraph.current
-    val sequels by produceState<List<MalAnime>?>(null, malIds) {
+    // Toute la licence connue (fiche + suites), dans l'ordre chronologique : sert à situer chaque suite.
+    val franchise by produceState<List<MalAnime>?>(null, malIds) {
         value = runCatching { graph.sequels.chain(malIds) }.getOrDefault(emptyList())
     }
+    val sequels = franchise?.filter { it.malId !in malIds }
     val found by graph.availability.found.collectAsState()
     val platforms by graph.watchPlatforms.found.collectAsState()
     val providers by graph.providers.selected.collectAsState()
@@ -172,7 +174,7 @@ fun SequelsRow(
         !hideIfOnThisPage || currentPageId == null || found[anime.malId]?.let { it.adn?.id == currentPageId || it.crunchyroll?.id == currentPageId } != true
     }.takeIf { it.isNotEmpty() } ?: return
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Suites", style = MaterialTheme.typography.titleMedium)
+        Text("Suites (ordre de sortie, position dans la licence)", style = MaterialTheme.typography.titleMedium)
         LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             items(list, key = { it.malId }) { anime ->
                 // Disponibilité qui renvoie vers cette fiche : la suite n'y est pas, on l'ignore.
@@ -182,9 +184,13 @@ fun SequelsRow(
                         adn = a.adn?.takeIf { it.id != currentPageId },
                     )
                 }
+                // Position dans la licence (1re, 2e…), fiche et suites comprises, par date de sortie.
+                val position = franchise.orEmpty().indexOfFirst { it.malId == anime.malId } + 1
+                val total = franchise.orEmpty().size
                 val item = malCardItem(
                     anime, availability, platforms[anime.malId], providers, crLoggedIn,
-                    subtitle = sequelStatus(anime, availability, platforms[anime.malId], found.containsKey(anime.malId), anime.malId in seen),
+                    subtitle = (if (position > 0) "${if (position == 1) "1re" else "${position}e"}/$total · " else "") +
+                        sequelStatus(anime, availability, platforms[anime.malId], found.containsKey(anime.malId), anime.malId in seen),
                 )
                 MediaCard(
                     item = item.card,
@@ -209,9 +215,10 @@ private fun sequelStatus(
         "ova" -> "OVA · "
         "ona" -> "ONA · "
         "special", "tv_special" -> "Spécial · "
-        else -> ""
+        else -> "Saison TV · "
     }
-    val status = when {
+    val year = anime.startYear?.takeIf { anime.airing != "not_yet_aired" }?.let { "$it · " }.orEmpty()
+    val status = year + when {
         anime.airing == "not_yet_aired" -> "Pas encore sortie" + (anime.startYear?.let { " · prévue $it" } ?: "")
         availability?.crunchyroll != null && availability.adn != null -> "Sur Crunchyroll et ADN"
         availability?.crunchyroll != null -> "Sur Crunchyroll"

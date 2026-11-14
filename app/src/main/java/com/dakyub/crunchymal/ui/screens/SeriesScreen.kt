@@ -207,23 +207,47 @@ private fun seasonMalKey(seriesKey: String, index: Int, season: CrSeason, record
     else -> "seasonmal:${season.id}"
 }
 
-/**
- * Nom d'une saison : « OVA 2016 », « Film 2021 »… quand la fiche MAL n'est pas une série TV (Crunchyroll les
- * numérote comme des saisons), sinon [tvLabel] avec le numéro Crunchyroll.
- */
-private fun seasonLabel(season: CrSeason, record: MalRecord?, tvLabel: String = "S"): String =
+/** Titre Crunchyroll d'une saison qui n'est pas une saison TV (« … OAD », « OVA », « Film »…). */
+private val nonTvSeasonTitle = Regex("""(?i)\b(OVA|OAV|OAD|ONA|special|spécial|movie|film)s?\b""")
+
+/** Type d'une saison : celui de MAL s'il est connu, sinon déduit du titre Crunchyroll. */
+private fun seasonType(season: CrSeason, record: MalRecord?): String? =
     malTypeLabel(record?.takeIf { it.malId != null }?.type)
-        ?.let { type -> listOfNotNull(type, record?.startDate?.take(4)).joinToString(" ") }
-        ?: "$tvLabel${season.seasonNumber}"
+        ?: nonTvSeasonTitle.find(season.title)?.value?.uppercase()?.let { word ->
+            when (word.trimEnd('S')) {
+                "OVA", "OAV", "OAD" -> "OVA"
+                "ONA" -> "ONA"
+                "MOVIE", "FILM" -> "Film"
+                else -> "Spécial"
+            }
+        }
 
 /**
- * Ordre d'affichage des saisons (indices dans [seasons]) : chronologique d'après les dates MAL, car Crunchyroll
- * place les OVA et films à la fin. Une saison sans date reste juste après la précédente.
+ * Début de diffusion d'une saison : date MAL si la fiche est connue, sinon date de diffusion d'origine du
+ * premier épisode d'après Crunchyroll. Vide si aucune n'est connue.
+ */
+private fun seasonStart(node: SeasonNode, record: MalRecord?): String =
+    record?.takeIf { it.malId != null }?.startDate
+        ?: node.episodes.mapNotNull { it.episode.episodeAirDate.takeIf { d -> d.length >= 4 } }.minOrNull()?.take(10)
+        ?: ""
+
+/**
+ * Nom d'une saison : « OVA 2016 », « Film 2021 »… quand ce n'est pas une saison TV (Crunchyroll les
+ * numérote comme des saisons), sinon [tvLabel] avec le numéro Crunchyroll.
+ */
+private fun seasonLabel(node: SeasonNode, record: MalRecord?, tvLabel: String = "S"): String =
+    seasonType(node.season, record)
+        ?.let { type -> listOfNotNull(type, seasonStart(node, record).take(4).ifBlank { null }).joinToString(" ") }
+        ?: "$tvLabel${node.season.seasonNumber}"
+
+/**
+ * Ordre d'affichage des saisons (indices dans [seasons]) : chronologique, car Crunchyroll place les OVA et
+ * films à la fin. Dates MAL, ou à défaut celles des épisodes ; une saison sans date reste après la précédente.
  */
 private fun chronologicalOrder(seriesKey: String, seasons: List<SeasonNode>, records: Map<String, MalRecord>): List<Int> {
     var last = ""
     val dates = seasons.mapIndexed { index, node ->
-        records[seasonMalKey(seriesKey, index, node.season, records)]?.takeIf { it.malId != null }?.startDate?.also { last = it } ?: last
+        seasonStart(node, records[seasonMalKey(seriesKey, index, node.season, records)]).ifBlank { null }?.also { last = it } ?: last
     }
     return seasons.indices.sortedWith(compareBy({ dates[it] }, { it }))
 }
@@ -232,7 +256,7 @@ private fun chronologicalOrder(seriesKey: String, seasons: List<SeasonNode>, rec
 private fun seasonChoices(seriesId: String, seasons: List<SeasonNode>, records: Map<String, MalRecord>): List<MalEntryChoice> =
     seasons.mapIndexed { index, node ->
         val key = seasonMalKey("series:$seriesId", index, node.season, records)
-        MalEntryChoice(seasonLabel(node.season, records[key], tvLabel = "Saison "), key)
+        MalEntryChoice(seasonLabel(node, records[key], tvLabel = "Saison "), key)
     }
 
 @Composable
@@ -398,7 +422,7 @@ fun SeriesScreen(
                                         colors = seasonChipColors(CrunchyOrange),
                                     ) {
                                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            Text("${seasonLabel(s, malRecords[key])} · $watched/${node.episodes.size}")
+                                            Text("${seasonLabel(node, malRecords[key])} · $watched/${node.episodes.size}")
                                             MalBadge(key, titles)
                                             // Diffusion de la saison d'après MAL (en cours, terminée, pas encore sortie).
                                             airingLabel(malRecords[key]?.airing)?.let { Text(it, style = MaterialTheme.typography.labelSmall) }
