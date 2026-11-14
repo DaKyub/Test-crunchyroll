@@ -59,8 +59,7 @@ data class Availability(
 class AvailabilityRepository(context: Context, private val cr: CrApi, private val adn: AdnApi) {
     private val file = File(context.filesDir, "availability_cache.json")
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val pending = ConcurrentHashMap.newKeySet<Int>()
-    private val semaphore = Semaphore(3)
+    private val queue = PriorityWorkQueue(scope, workers = 3, name = "Disponibilité")
     private val writeLock = Mutex()
 
     private val _found = MutableStateFlow<Map<Int, Availability>>(emptyMap())
@@ -72,29 +71,24 @@ class AvailabilityRepository(context: Context, private val cr: CrApi, private va
         if (file.exists()) Http.json.decodeFromString<Map<Int, Availability>>(file.readText()) else emptyMap()
     }.getOrElse { emptyMap() }
 
-    fun request(anime: MalAnime, crunchyrollEnabled: Boolean) {
+    /** [background] : demande d'une tâche de fond (jamais mise en pause au changement d'onglet). */
+    fun request(anime: MalAnime, crunchyrollEnabled: Boolean, background: Boolean = false) {
         if (!loaded.isCompleted) {
-            scope.launch { loaded.join(); request(anime, crunchyrollEnabled) }
+            scope.launch { loaded.join(); request(anime, crunchyrollEnabled, background) }
             return
         }
         val existing = _found.value[anime.malId]
         // Ancienne recherche incomplète : on la refait avec les titres de base (saisons 2, 3…).
         val outdated = existing != null && existing.version < VERSION && (existing.crunchyroll == null || existing.adn == null)
         if (existing != null && !outdated && System.currentTimeMillis() - existing.checkedAt < TTL) return
-        if (!pending.add(anime.malId)) return
-        scope.launch {
-            try {
-                semaphore.withPermit {
-                    val titles = anime.allTitles.filter { it.length >= 3 }.take(4)
-                    val crFound = if (crunchyrollEnabled) runCatching { searchCrunchyroll(titles) }.getOrNull() else existing?.crunchyroll
-                    val adnFound = runCatching { searchAdn(titles) }.getOrNull()
-                    val result = Availability(crFound, adnFound, System.currentTimeMillis(), VERSION)
-                    _found.update { it + (anime.malId to result) }
-                    writer.schedule()
-                }
-            } finally {
-                pending.remove(anime.malId)
-            }
+        // Trois recherches à la fois ; l'onglet courant et les demandes récentes d'abord.
+        queue.submit(anime.malId.toString(), background) {
+            val titles = anime.allTitles.filter { it.length >= 3 }.take(4)
+            val crFound = if (crunchyrollEnabled) runCatching { searchCrunchyroll(titles) }.getOrNull() else existing?.crunchyroll
+            val adnFound = runCatching { searchAdn(titles) }.getOrNull()
+            val result = Availability(crFound, adnFound, System.currentTimeMillis(), VERSION)
+            _found.update { it + (anime.malId to result) }
+            writer.schedule()
         }
     }
 

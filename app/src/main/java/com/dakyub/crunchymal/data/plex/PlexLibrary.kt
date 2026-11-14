@@ -246,7 +246,7 @@ class PlexLibrary(
         val retried = mutableSetOf<String>()
         _shows.value.forEach { show ->
             val retry = show.englishTitle != null && !show.malRetried
-            mal.request("plex:${show.ratingKey}", show.malTitles, retryMissing = retry)
+            mal.request("plex:${show.ratingKey}", show.malTitles, retryMissing = retry, background = true)
             if (retry) retried += show.ratingKey
         }
         if (retried.isNotEmpty()) {

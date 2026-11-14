@@ -147,8 +147,8 @@ class WatchPlatformsRepository(context: Context, private val settings: Settings)
         File(context.filesDir, "watch_platforms_cache.json").delete()
     }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val pending = ConcurrentHashMap.newKeySet<Int>()
-    private val semaphore = Semaphore(3)
+    /** Recherches TMDB / MAL : trois à la fois, l'onglet courant et les demandes récentes d'abord. */
+    private val queue = PriorityWorkQueue(scope, workers = 3, name = "Plateformes")
     private val writeLock = Mutex()
 
     private val _found = MutableStateFlow<Map<Int, WatchPlatforms>>(emptyMap())
@@ -157,7 +157,6 @@ class WatchPlatformsRepository(context: Context, private val settings: Settings)
     private val foundWriter = CacheWriter(file, ready = loaded) { Http.json.encodeToString(_found.value) }
 
     private val catalogFile = File(context.filesDir, "catalog_platforms_cache.json")
-    private val catalogPending = ConcurrentHashMap.newKeySet<String>()
     private var catalogSave: Job? = null
     private val _catalog = MutableStateFlow<Map<String, WatchPlatforms>>(emptyMap())
     private val catalogLoaded = CacheLoads.into(_catalog) {
@@ -192,15 +191,10 @@ class WatchPlatformsRepository(context: Context, private val settings: Settings)
         }
         val existing = _catalog.value[key]
         if (existing != null && System.currentTimeMillis() - existing.checkedAt < TTL) return
-        if (!catalogPending.add(key)) return
-        scope.launch {
-            try {
-                val result = semaphore.withPermit { runCatching { lookup() }.getOrNull() } ?: return@launch
-                _catalog.update { it + (key to result) }
-                saveCatalogSoon()
-            } finally {
-                catalogPending.remove(key)
-            }
+        queue.submit("catalog:$key") {
+            val result = runCatching { lookup() }.getOrNull() ?: return@submit
+            _catalog.update { it + (key to result) }
+            saveCatalogSoon()
         }
     }
 
@@ -227,15 +221,10 @@ class WatchPlatformsRepository(context: Context, private val settings: Settings)
         }
         val existing = _found.value[anime.malId]
         if (existing != null && System.currentTimeMillis() - existing.checkedAt < TTL) return
-        if (!pending.add(anime.malId)) return
-        scope.launch {
-            try {
-                semaphore.withPermit { lookup(anime) }?.let { result ->
-                    _found.update { it + (anime.malId to result) }
-                    foundWriter.schedule()
-                }
-            } finally {
-                pending.remove(anime.malId)
+        queue.submit("mal:${anime.malId}") {
+            lookup(anime)?.let { result ->
+                _found.update { it + (anime.malId to result) }
+                foundWriter.schedule()
             }
         }
     }

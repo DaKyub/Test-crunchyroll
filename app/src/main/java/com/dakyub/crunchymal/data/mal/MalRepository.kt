@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal.data.mal
 
+import com.dakyub.crunchymal.data.PriorityWorkQueue
 import com.dakyub.crunchymal.data.CacheLoads
 import com.dakyub.crunchymal.data.CacheWriter
 import kotlinx.serialization.encodeToString
@@ -45,7 +46,8 @@ class MalRepository(context: Context, clientId: () -> String, val auth: MalAuth)
     private val file = File(context.filesDir, "mal_cache.json")
     private val api = MalApi(clientId)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val pending = ConcurrentHashMap.newKeySet<String>()
+    /** Recherches de notes : deux à la fois (le débit est de toute façon limité par [MalApi]). */
+    private val queue = PriorityWorkQueue(scope, workers = 2, name = "MAL")
     private val writeLock = Mutex()
 
     private val _records = MutableStateFlow<Map<String, MalRecord>>(emptyMap())
@@ -93,6 +95,8 @@ class MalRepository(context: Context, clientId: () -> String, val auth: MalAuth)
             r.manual && r.malId == null -> false
             r.malId == null -> age > NO_MATCH_TTL
             r.genres == null || r.airing == null -> true
+            // Une note bouge peu une fois la diffusion terminée : 30 jours, 7 pendant la diffusion.
+            r.airing == "currently_airing" || r.airing == "not_yet_aired" -> age > AIRING_TTL
             else -> age > SCORE_TTL
         }
     }
@@ -101,9 +105,9 @@ class MalRepository(context: Context, clientId: () -> String, val auth: MalAuth)
      * Demande (en arrière-plan) la note MAL associée à [key]. Le résultat arrive dans [records].
      * [titles] : titres Crunchyroll servant à la recherche (titre anglais déduit du slug en premier).
      */
-    fun request(key: String, titles: List<String>, retryMissing: Boolean = false) {
+    fun request(key: String, titles: List<String>, retryMissing: Boolean = false, background: Boolean = false) {
         if (!loaded.isCompleted) {
-            scope.launch { loaded.join(); request(key, titles, retryMissing) }
+            scope.launch { loaded.join(); request(key, titles, retryMissing, background) }
             return
         }
         val existing = _records.value[key]
@@ -112,16 +116,14 @@ class MalRepository(context: Context, clientId: () -> String, val auth: MalAuth)
         if (existing != null && !isStale(existing) && !retry) return
         val queries = titles.map { it.trim() }.filter { it.length >= 3 }.distinct()
         if (queries.isEmpty() && existing?.malId == null) return
-        if (!pending.add(key)) return
-        scope.launch {
+        // File partagée : fiches affichées d'abord, puis l'onglet courant, la demande la plus récente en tête.
+        queue.submit(key, background) {
             try {
-                put(key, resolve(existing, queries))
+                put(key, resolve(_records.value[key] ?: existing, queries))
                 _lastError.value = null
             } catch (e: Exception) {
                 Log.w("MalRepository", "Échec MAL pour $key", e)
                 _lastError.value = e.message ?: e.javaClass.simpleName
-            } finally {
-                pending.remove(key)
             }
         }
     }
@@ -133,16 +135,7 @@ class MalRepository(context: Context, clientId: () -> String, val auth: MalAuth)
     fun requestType(key: String) {
         val existing = _records.value[key] ?: return
         if (existing.malId == null || existing.type != null) return
-        if (!pending.add(key)) return
-        scope.launch {
-            try {
-                put(key, resolve(existing, emptyList()))
-            } catch (e: Exception) {
-                Log.w("MalRepository", "Échec MAL pour $key", e)
-            } finally {
-                pending.remove(key)
-            }
-        }
+        queue.submit(key) { put(key, resolve(existing, emptyList())) }
     }
 
     private suspend fun resolve(existing: MalRecord?, queries: List<String>): MalRecord {
@@ -315,7 +308,8 @@ class MalRepository(context: Context, clientId: () -> String, val auth: MalAuth)
     )
 
     private companion object {
-        const val SCORE_TTL = 7L * 24 * 3600 * 1000
+        const val SCORE_TTL = 30L * 24 * 3600 * 1000
+        const val AIRING_TTL = 7L * 24 * 3600 * 1000
         const val NO_MATCH_TTL = 3L * 24 * 3600 * 1000
     }
 }

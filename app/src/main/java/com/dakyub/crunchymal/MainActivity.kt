@@ -1,5 +1,7 @@
 package com.dakyub.crunchymal
 
+import com.dakyub.crunchymal.data.Foreground
+import androidx.compose.runtime.DisposableEffect
 import com.dakyub.crunchymal.ui.screens.StatsScreen
 import com.dakyub.crunchymal.ui.screens.DiscoverScreen
 import android.os.Bundle
@@ -152,6 +154,10 @@ private fun MainTabs(
     onNavigate: (String) -> Unit,
 ) {
     var selected by rememberSaveable { mutableIntStateOf(0) }
+    // Onglet au premier plan : ses recherches de fond (notes, plateformes) passent en premier, celles des
+    // onglets quittés sont mises en pause. Sur une fiche ou un écran secondaire : « page ».
+    LaunchedEffect(selected) { Foreground.set("tab:$selected") }
+    DisposableEffect(Unit) { onDispose { Foreground.set("page") } }
     // Au retour d'une fiche, Android redonne le focus au premier onglet (Accueil), qui serait alors
     // sélectionné : pendant ce retour, le focus est redirigé vers l'onglet où l'on était.
     val tabRequesters = remember { List(Tabs.size) { FocusRequester() } }

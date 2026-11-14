@@ -92,7 +92,7 @@ class SequelsRepository(context: Context, private val mal: MalRepository, privat
         save()
         _sequels.value = sorted(infos)
         // Disponibilité sur Crunchyroll / ADN des suites déjà diffusées (rangée et alertes).
-        infos.filter { it.aired }.forEach { availability.request(it.toAnime(), crunchyrollEnabled) }
+        infos.filter { it.aired }.forEach { availability.request(it.toAnime(), crunchyrollEnabled, background = true) }
     }
 
     /**
