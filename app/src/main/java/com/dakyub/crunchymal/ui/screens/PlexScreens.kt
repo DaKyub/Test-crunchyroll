@@ -71,6 +71,7 @@ import com.dakyub.crunchymal.ui.components.MalBadge
 import com.dakyub.crunchymal.ui.components.MalEntryChoice
 import com.dakyub.crunchymal.ui.components.MalListDialog
 import com.dakyub.crunchymal.ui.components.MalRecommendationsRow
+import com.dakyub.crunchymal.ui.components.SequelsRow
 import com.dakyub.crunchymal.ui.components.MediaCard
 import com.dakyub.crunchymal.ui.components.PosterGrid
 import com.dakyub.crunchymal.ui.components.airingLabel
@@ -516,6 +517,7 @@ fun PlexShowScreen(ratingKey: String, onOpenSeries: (SeriesRef) -> Unit, onOpenM
                 // Saisons qui manquent sur le serveur, et où les regarder.
                 item { MissingSeasons(ratingKey, seasons.map { it.first }.toSet(), record?.malId, onOpenSeries) }
                 // Recommandations des membres MAL, avec où les regarder.
+                item { SequelsRow(setOfNotNull(record?.malId), null, onOpenSeries, onOpenMal) }
                 item { MalRecommendationsRow(record?.malId, onOpenSeries, onOpenMal) }
             }
         }

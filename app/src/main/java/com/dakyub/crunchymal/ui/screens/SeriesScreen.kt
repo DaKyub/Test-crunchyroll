@@ -64,6 +64,7 @@ import com.dakyub.crunchymal.data.progress.SeriesTree
 import com.dakyub.crunchymal.ui.components.CenteredMessage
 import com.dakyub.crunchymal.ui.components.MalBadge
 import com.dakyub.crunchymal.ui.components.MalRecommendationsRow
+import com.dakyub.crunchymal.ui.components.SequelsRow
 import com.dakyub.crunchymal.ui.components.airingLabel
 import com.dakyub.crunchymal.ui.theme.CrunchyOrange
 import com.dakyub.crunchymal.ui.components.seasonChipColors
@@ -420,6 +421,13 @@ fun SeriesScreen(
                         }
                     }
                     // Recommandations : membres MAL, puis séries similaires d'après Crunchyroll.
+                    // Suites absentes de la fiche (une fois les saisons connues, pour ne pas proposer la saison 2).
+                    if (tree != null) {
+                        val sequelStart = (listOfNotNull(malRecords[ref.malKey]?.malId) + tree.seasons.mapIndexedNotNull { index, node ->
+                            malRecords[seasonMalKey(ref.malKey, index, node.season, malRecords)]?.malId
+                        }).toSet()
+                        item { SequelsRow(sequelStart, series.id, onOpenSeries, onOpenMal) }
+                    }
                     item { MalRecommendationsRow(malRecords[ref.malKey]?.malId, onOpenSeries, onOpenMal) }
                     item { CrSimilarRow(series.id, onOpenSeries) }
                 }

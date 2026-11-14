@@ -46,6 +46,7 @@ import com.dakyub.crunchymal.ui.components.CenteredMessage
 import com.dakyub.crunchymal.ui.components.GenresLine
 import com.dakyub.crunchymal.ui.components.MalBadge
 import com.dakyub.crunchymal.ui.components.MalRecommendationsRow
+import com.dakyub.crunchymal.ui.components.SequelsRow
 import com.dakyub.crunchymal.ui.components.airingLabel
 import com.dakyub.crunchymal.ui.components.MalEntryChoice
 import com.dakyub.crunchymal.ui.components.MalListDialog
@@ -180,6 +181,7 @@ fun MalSeriesScreen(malId: Int, onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (I
                     }
                 }
                 // Recommandations des membres MAL, avec où les regarder.
+                item { SequelsRow(setOf(malId), null, onOpenSeries, onOpenMal) }
                 item { MalRecommendationsRow(malId, onOpenSeries, onOpenMal) }
             }
         }

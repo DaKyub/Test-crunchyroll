@@ -138,6 +138,92 @@ fun MalRecommendationsRow(malId: Int?, onOpenSeries: (SeriesRef) -> Unit, onOpen
     }
 }
 
+/**
+ * Rangée « Suites » d'une fiche : saisons, films… qui suivent la série d'après MAL et ne sont pas sur la
+ * fiche ([malIds] : fiches MAL de la série et de ses saisons), chacune avec où la regarder ou sa sortie.
+ * [currentPageId] : une suite que la recherche rattache à cette même fiche n'est pas proposée comme
+ * disponible (Crunchyroll : les saisons de la fiche sont déjà dans [malIds]) ou, avec [hideIfOnThisPage]
+ * (ADN, saisons non reliées à MAL), est masquée car c'est une autre saison de cette fiche.
+ */
+@Composable
+fun SequelsRow(
+    malIds: Set<Int>,
+    currentPageId: String?,
+    onOpenSeries: (SeriesRef) -> Unit,
+    onOpenMal: (Int) -> Unit,
+    hideIfOnThisPage: Boolean = false,
+) {
+    if (malIds.isEmpty()) return
+    val graph = LocalGraph.current
+    val sequels by produceState<List<MalAnime>?>(null, malIds) {
+        value = runCatching { graph.sequels.chain(malIds) }.getOrDefault(emptyList())
+    }
+    val found by graph.availability.found.collectAsState()
+    val platforms by graph.watchPlatforms.found.collectAsState()
+    val providers by graph.providers.selected.collectAsState()
+    val crLoggedIn by graph.auth.loggedIn.collectAsState()
+    val seen by graph.mal.myListSeenIds.collectAsState()
+    LaunchedEffect(sequels) {
+        // Où les regarder : seulement pour celles déjà sorties.
+        sequels?.filter { it.airing != "not_yet_aired" }?.let { graph.prepareMalAnime(it) }
+        sequels?.filter { it.airing == "not_yet_aired" }?.forEach { graph.mal.seed("mal:${it.malId}", it) }
+    }
+    val list = sequels.orEmpty().filter { anime ->
+        !hideIfOnThisPage || currentPageId == null || found[anime.malId]?.let { it.adn?.id == currentPageId || it.crunchyroll?.id == currentPageId } != true
+    }.takeIf { it.isNotEmpty() } ?: return
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Suites", style = MaterialTheme.typography.titleMedium)
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            items(list, key = { it.malId }) { anime ->
+                // Disponibilité qui renvoie vers cette fiche : la suite n'y est pas, on l'ignore.
+                val availability = found[anime.malId]?.let { a ->
+                    a.copy(
+                        crunchyroll = a.crunchyroll?.takeIf { it.id != currentPageId },
+                        adn = a.adn?.takeIf { it.id != currentPageId },
+                    )
+                }
+                val item = malCardItem(
+                    anime, availability, platforms[anime.malId], providers, crLoggedIn,
+                    subtitle = sequelStatus(anime, availability, platforms[anime.malId], found.containsKey(anime.malId), anime.malId in seen),
+                )
+                MediaCard(
+                    item = item.card,
+                    showProviderBadge = false,
+                    onClick = { item.target?.let(onOpenSeries) ?: onOpenMal(anime.malId) },
+                )
+            }
+        }
+    }
+}
+
+/** Statut d'une suite : à venir, dans l'app, sur une autre plateforme, introuvable ou en cours de recherche. */
+private fun sequelStatus(
+    anime: MalAnime,
+    availability: Availability?,
+    platforms: WatchPlatforms?,
+    availabilityChecked: Boolean,
+    inMyList: Boolean,
+): String {
+    val kind = when (anime.type?.lowercase()) {
+        "movie" -> "Film · "
+        "ova" -> "OVA · "
+        "ona" -> "ONA · "
+        "special", "tv_special" -> "Spécial · "
+        else -> ""
+    }
+    val status = when {
+        anime.airing == "not_yet_aired" -> "Pas encore sortie" + (anime.startYear?.let { " · prévue $it" } ?: "")
+        availability?.crunchyroll != null && availability.adn != null -> "Sur Crunchyroll et ADN"
+        availability?.crunchyroll != null -> "Sur Crunchyroll"
+        availability?.adn != null -> "Sur ADN"
+        platforms != null && platforms.names.isNotEmpty() ->
+            (if (platforms.source == "TMDB") "Sur " else "Hors de France : ") + platforms.names.joinToString(", ")
+        availabilityChecked && platforms != null -> "Introuvable en France"
+        else -> "Recherche des plateformes…"
+    }
+    return kind + status + if (inMyList) " · ✓ dans ta liste MAL" else ""
+}
+
 /** Genres MAL en français (les autres restent en anglais). */
 private val MalGenreLabels = mapOf(
     "Adventure" to "Aventure", "Comedy" to "Comédie", "Drama" to "Drame", "Sci-Fi" to "Science-fiction",

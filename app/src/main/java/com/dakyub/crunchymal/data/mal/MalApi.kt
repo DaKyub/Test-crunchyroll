@@ -253,11 +253,11 @@ class MalApi(private val clientId: () -> String) {
     }
 
     /** Suites directes (relation « sequel ») de l'anime [malId]. */
-    suspend fun sequelIds(malId: Int): List<Int> {
+    suspend fun sequelIds(malId: Int, priority: Boolean = false): List<Int> {
         val url = "$BASE/anime/$malId".toHttpUrl().newBuilder()
             .addQueryParameter("fields", "related_anime")
             .build().toString()
-        return Http.json.decodeFromString<RelatedNode>(get(url)).related
+        return Http.json.decodeFromString<RelatedNode>(get(url, priority)).related
             .filter { it.relationType == "sequel" }
             .map { it.node.id }
             .filter { it > 0 }

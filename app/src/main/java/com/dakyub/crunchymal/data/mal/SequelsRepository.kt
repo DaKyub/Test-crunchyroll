@@ -44,6 +44,8 @@ private data class SequelFile(
     val sequels: Map<Int, SequelInfo> = emptyMap(),
     /** Suites déjà signalées comme disponibles (null = premier passage : on mémorise sans alerter). */
     val notified: Set<Int>? = null,
+    /** Fiches des suites affichées sur les pages (rangée « Suites »), toutes séries confondues. */
+    val known: Map<Int, SequelInfo> = emptyMap(),
 )
 
 /**
@@ -54,7 +56,7 @@ private data class SequelFile(
 class SequelsRepository(context: Context, private val mal: MalRepository, private val availability: AvailabilityRepository) {
     private val file = File(context.filesDir, "sequels.json")
     private val mutex = Mutex()
-    private var data = runCatching { Http.json.decodeFromString<SequelFile>(file.readText()) }.getOrElse { SequelFile() }
+    @Volatile private var data = runCatching { Http.json.decodeFromString<SequelFile>(file.readText()) }.getOrElse { SequelFile() }
 
     private val _sequels = MutableStateFlow(sorted(data.sequels.values))
     val sequels: StateFlow<List<SequelInfo>> = _sequels
@@ -74,7 +76,7 @@ class SequelsRepository(context: Context, private val mal: MalRepository, privat
         var checked = 0
         for (entry in completed.filter { now - (data.relatedAt[it.anime.malId] ?: 0) > RELATED_TTL }.take(MAX_PER_RUN)) {
             val ids = runCatching { mal.sequelIds(entry.anime.malId) }.getOrNull() ?: continue
-            data = data.copy(related = data.related + (entry.anime.malId to ids), relatedAt = data.relatedAt + (entry.anime.malId to now))
+            update { it.copy(related = it.related + (entry.anime.malId to ids), relatedAt = it.relatedAt + (entry.anime.malId to now)) }
             if (++checked % 25 == 0) save()
         }
         val candidates = completed.flatMap { e ->
@@ -86,7 +88,7 @@ class SequelsRepository(context: Context, private val mal: MalRepository, privat
             val anime = runCatching { mal.details(id) }.getOrNull() ?: return@mapNotNull existing
             SequelInfo(id, anime.title, anime.titleEnglish, anime.pictureUrl, anime.airing, anime.type, anime.startYear, anime.score, from, now)
         }
-        data = data.copy(sequels = infos.associateBy { it.malId })
+        update { it.copy(sequels = infos.associateBy { info -> info.malId }) }
         save()
         _sequels.value = sorted(infos)
         // Disponibilité sur Crunchyroll / ADN des suites déjà diffusées (rangée et alertes).
@@ -101,11 +103,50 @@ class SequelsRepository(context: Context, private val mal: MalRepository, privat
         val found = availability.found.value
         val available = _sequels.value.filter { it.aired && found[it.malId]?.let { a -> a.crunchyroll != null || a.adn != null } == true }
         val notified = data.notified
-        data = data.copy(notified = notified.orEmpty() + available.map { it.malId })
+        update { it.copy(notified = notified.orEmpty() + available.map { a -> a.malId }) }
         save()
         if (notified == null) emptyList() else available.filter { it.malId !in notified }
     }
 
+    /**
+     * Suites de la série d'une fiche, dans l'ordre de diffusion : on suit les relations « suite » de MAL depuis
+     * [startIds] (fiches MAL de la série et de ses saisons) et on garde celles qui ne sont pas dans [startIds].
+     * Relations gardées 2 semaines, fiches 3 jours ; requêtes MAL prioritaires (fiche ouverte).
+     */
+    suspend fun chain(startIds: Collection<Int>): List<MalAnime> {
+        val now = System.currentTimeMillis()
+        val queue = ArrayDeque(startIds.distinct())
+        val visited = queue.toMutableSet()
+        val result = mutableListOf<MalAnime>()
+        var steps = 0
+        while (queue.isNotEmpty() && steps++ < MAX_CHAIN) {
+            val id = queue.removeFirst()
+            val cached = data.related[id]?.takeIf { now - (data.relatedAt[id] ?: 0) < RELATED_TTL }
+            val next = cached ?: runCatching { mal.sequelIds(id, priority = true) }.getOrNull()?.also { ids ->
+                update { it.copy(related = it.related + (id to ids), relatedAt = it.relatedAt + (id to now)) }
+            } ?: continue
+            for (sequel in next) {
+                if (!visited.add(sequel)) continue
+                queue += sequel
+                val info = data.known[sequel]?.takeIf { now - it.checkedAt < DETAILS_TTL }
+                    ?: runCatching { mal.details(sequel, priority = true) }.getOrNull()?.let { anime ->
+                        SequelInfo(sequel, anime.title, anime.titleEnglish, anime.pictureUrl, anime.airing, anime.type, anime.startYear, anime.score, checkedAt = now)
+                            .also { info -> update { it.copy(known = it.known + (sequel to info)) } }
+                    }
+                    ?: data.known[sequel]
+                info?.let { result += it.toAnime() }
+            }
+        }
+        save()
+        return result
+    }
+
+    @Synchronized
+    private fun update(change: (SequelFile) -> SequelFile) {
+        data = change(data)
+    }
+
+    @Synchronized
     private fun save() {
         runCatching { file.writeText(Http.json.encodeToString(data)) }
     }
@@ -114,5 +155,7 @@ class SequelsRepository(context: Context, private val mal: MalRepository, privat
         const val RELATED_TTL = 14L * 24 * 3600 * 1000
         const val DETAILS_TTL = 3L * 24 * 3600 * 1000
         const val MAX_PER_RUN = 120
+        /** Fiches visitées au plus pour une chaîne de suites (séries très longues). */
+        const val MAX_CHAIN = 25
     }
 }

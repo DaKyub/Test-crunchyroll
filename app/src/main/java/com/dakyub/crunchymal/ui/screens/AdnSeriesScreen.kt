@@ -61,6 +61,7 @@ import com.dakyub.crunchymal.ui.components.CenteredMessage
 import com.dakyub.crunchymal.ui.components.GenresLine
 import com.dakyub.crunchymal.ui.components.MalBadge
 import com.dakyub.crunchymal.ui.components.MalRecommendationsRow
+import com.dakyub.crunchymal.ui.components.SequelsRow
 import com.dakyub.crunchymal.ui.components.airingLabel
 import com.dakyub.crunchymal.ui.components.seasonChipColors
 import com.dakyub.crunchymal.ui.theme.AdnBlue
@@ -380,6 +381,7 @@ fun AdnSeriesScreen(
                     }
                 }
                 // Recommandations des membres MAL, avec où les regarder.
+                item { SequelsRow(setOfNotNull(record?.malId), show.id.toString(), onOpenSeries, onOpenMal, hideIfOnThisPage = true) }
                 item { MalRecommendationsRow(record?.malId, onOpenSeries, onOpenMal) }
             }
         }
