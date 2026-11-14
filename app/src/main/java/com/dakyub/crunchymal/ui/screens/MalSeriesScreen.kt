@@ -55,6 +55,7 @@ import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.foundation.lazy.rememberLazyListState
 import com.dakyub.crunchymal.ui.components.ExpandableSynopsis
+import com.dakyub.crunchymal.ui.components.FrenchFirstSynopsis
 import kotlinx.coroutines.delay
 import java.util.Locale
 
@@ -145,10 +146,14 @@ fun MalSeriesScreen(malId: Int, onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (I
                                 )
                             }
                             GenresLine(anime.genres, emptyList())
-                            anime.synopsis?.let {
-                                // Focus sur le résumé : la fiche remonte tout en haut (titre, note MAL).
-                                ExpandableSynopsis(it, onFocused = { scope.launch { delay(150); listState.animateScrollToItem(0) } }, collapsedLines = 4)
-                            }
+                            // Focus sur le résumé : la fiche remonte tout en haut (titre, note MAL).
+                            // Résumé TMDB en français s'il existe, sinon celui de MAL (anglais).
+                            FrenchFirstSynopsis(
+                                anime.synopsis,
+                                titles = listOfNotNull(anime.titleEnglish, anime.title) + anime.synonyms,
+                                movie = anime.type?.lowercase() == "movie",
+                                onFocused = { scope.launch { delay(150); listState.animateScrollToItem(0) } },
+                            )
                             Text(
                                 when {
                                     found == null -> "Recherche des plateformes…"

@@ -42,3 +42,29 @@ fun SynopsisWithFallback(
         Text(source, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
+
+/**
+ * Résumé d'une fiche MAL (ouverte depuis la liste MAL, Netflix…) : celui de TMDB en français s'il existe,
+ * sinon celui de MAL ([english]). Rien n'est affiché le temps de la recherche TMDB, pour éviter que le
+ * texte anglais apparaisse puis change.
+ */
+@Composable
+fun FrenchFirstSynopsis(english: String?, titles: List<String>, movie: Boolean, onFocused: () -> Unit, collapsedLines: Int = 4) {
+    val graph = LocalGraph.current
+    val searchTitles = titles.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+    val french by produceState<String?>(if (graph.settings.tmdbKey.isBlank()) "" else null, searchTitles, movie) {
+        if (graph.settings.tmdbKey.isNotBlank()) {
+            value = runCatching { graph.watchPlatforms.frenchOverview(searchTitles, movie) }.getOrNull().orEmpty()
+        }
+    }
+    val text = french ?: return
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        when {
+            text.isNotBlank() -> {
+                ExpandableSynopsis(text, onFocused = onFocused, collapsedLines = collapsedLines)
+                Text("Résumé TMDB", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            !english.isNullOrBlank() -> ExpandableSynopsis(english, onFocused = onFocused, collapsedLines = collapsedLines)
+        }
+    }
+}
