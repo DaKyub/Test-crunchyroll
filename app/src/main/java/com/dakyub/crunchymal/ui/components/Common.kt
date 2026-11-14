@@ -31,6 +31,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.clickable
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
@@ -180,7 +185,10 @@ fun seasonChipColors(accent: Color): SelectableChipColors = FilterChipDefaults.c
     focusedSelectedContentColor = accent,
 )
 
-/** Champ texte utilisable à la télécommande (le clavier système s'ouvre sur OK). */
+/**
+ * Champ texte utilisable à la télécommande. Au repos, c'est une case qu'on peut survoler sans ouvrir le
+ * clavier ; le clavier système ne s'ouvre qu'avec OK, et se referme avec Retour ou la touche de validation.
+ */
 @Composable
 fun TvTextField(
     value: String,
@@ -190,33 +198,77 @@ fun TvTextField(
     onSubmit: () -> Unit = {},
     password: Boolean = false,
 ) {
-    val interaction = remember { MutableInteractionSource() }
-    val focused by interaction.collectIsFocusedAsState()
     val colors = MaterialTheme.colorScheme
-    BasicTextField(
-        value = value,
-        onValueChange = onValueChange,
-        singleLine = true,
-        interactionSource = interaction,
-        visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
-        textStyle = MaterialTheme.typography.titleMedium.copy(color = colors.onSurface),
-        cursorBrush = SolidColor(colors.primary),
-        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-        keyboardActions = KeyboardActions(onSearch = { onSubmit() }, onDone = { onSubmit() }),
-        modifier = modifier
-            .fillMaxWidth()
-            .border(
-                BorderStroke(2.dp, if (focused) colors.primary else colors.surfaceVariant),
-                RoundedCornerShape(8.dp),
-            )
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        decorationBox = { inner ->
-            Box {
-                if (value.isEmpty()) {
-                    Text(placeholder, style = MaterialTheme.typography.titleMedium, color = colors.onSurfaceVariant)
+    var editing by remember { mutableStateOf(false) }
+    val boxFocus = remember { FocusRequester() }
+    val fieldFocus = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    // Retour à la case (et non au premier élément de l'écran) une fois la saisie terminée.
+    var returnFocus by remember { mutableStateOf(false) }
+    LaunchedEffect(editing) {
+        if (editing) {
+            fieldFocus.requestFocus()
+            keyboard?.show()
+        } else if (returnFocus) {
+            returnFocus = false
+            runCatching { boxFocus.requestFocus() }
+        }
+    }
+    fun stop() {
+        returnFocus = true
+        editing = false
+    }
+
+    val shape = RoundedCornerShape(8.dp)
+    val frame = modifier.fillMaxWidth()
+    if (editing) {
+        var hadFocus by remember { mutableStateOf(false) }
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            singleLine = true,
+            visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
+            textStyle = MaterialTheme.typography.titleMedium.copy(color = colors.onSurface),
+            cursorBrush = SolidColor(colors.primary),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(
+                onSearch = { onSubmit(); stop() },
+                onDone = { onSubmit(); stop() },
+            ),
+            modifier = frame
+                .focusRequester(fieldFocus)
+                .onFocusChanged { state ->
+                    if (state.isFocused) hadFocus = true else if (hadFocus) stop()
                 }
-                inner()
-            }
-        },
-    )
+                .border(BorderStroke(2.dp, colors.primary), shape)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            decorationBox = { inner ->
+                Box {
+                    if (value.isEmpty()) {
+                        Text(placeholder, style = MaterialTheme.typography.titleMedium, color = colors.onSurfaceVariant)
+                    }
+                    inner()
+                }
+            },
+        )
+    } else {
+        val interaction = remember { MutableInteractionSource() }
+        val focused by interaction.collectIsFocusedAsState()
+        Box(
+            frame
+                .focusRequester(boxFocus)
+                .border(BorderStroke(2.dp, if (focused) colors.primary else colors.surfaceVariant), shape)
+                .clickable(interactionSource = interaction, indication = null) { editing = true }
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+        ) {
+            val shown = if (password) "•".repeat(value.length.coerceAtMost(24)) else value
+            Text(
+                shown.ifEmpty { placeholder },
+                style = MaterialTheme.typography.titleMedium,
+                color = if (value.isEmpty()) colors.onSurfaceVariant else colors.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
 }

@@ -5,6 +5,9 @@ import com.dakyub.crunchymal.data.HttpException
 import com.dakyub.crunchymal.data.fetch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -154,16 +157,46 @@ class MissingMalClientIdException : Exception("Client ID MyAnimeList manquant (P
 class MalApi(private val clientId: () -> String) {
     private val gate = Mutex()
     private var lastCall = 0L
+    /** Requêtes prioritaires (fiche ouverte par l'utilisateur) en attente : les autres leur cèdent la place. */
+    private val priorityWaiting = MutableStateFlow(0)
 
-    private suspend fun get(url: String): String {
+    /**
+     * Exécute [block] en respectant le débit de MAL. Une requête [priority] passe devant les centaines de
+     * recherches de fond (notes des cartes de Parcourir…) au lieu d'attendre la fin de la file.
+     */
+    private suspend fun <T> throttled(priority: Boolean, block: suspend () -> T): T {
+        suspend fun paced(): T {
+            val wait = lastCall + MIN_INTERVAL_MS - System.currentTimeMillis()
+            if (wait > 0) delay(wait)
+            lastCall = System.currentTimeMillis()
+            return block()
+        }
+        if (priority) {
+            priorityWaiting.update { it + 1 }
+            try {
+                return gate.withLock { paced() }
+            } finally {
+                priorityWaiting.update { it - 1 }
+            }
+        }
+        while (true) {
+            priorityWaiting.first { it == 0 }
+            gate.lock()
+            try {
+                // Une requête prioritaire est arrivée pendant l'attente : on lui laisse le tour.
+                if (priorityWaiting.value == 0) return paced()
+            } finally {
+                gate.unlock()
+            }
+        }
+    }
+
+    private suspend fun get(url: String, priority: Boolean = false): String {
         val id = clientId().trim()
         if (id.isBlank()) throw MissingMalClientIdException()
         var attempt = 0
         while (true) {
-            val result = gate.withLock {
-                val wait = lastCall + MIN_INTERVAL_MS - System.currentTimeMillis()
-                if (wait > 0) delay(wait)
-                lastCall = System.currentTimeMillis()
+            val result = throttled(priority) {
                 runCatching {
                     Http.client.fetch(Request.Builder().url(url).header("X-MAL-CLIENT-ID", id).build())
                 }
@@ -244,11 +277,11 @@ class MalApi(private val clientId: () -> String) {
     }
 
     /** Fiche complète (avec affiche et résumé) pour l'écran de détail. */
-    suspend fun details(malId: Int): MalAnime {
+    suspend fun details(malId: Int, priority: Boolean = false): MalAnime {
         val url = "$BASE/anime/$malId".toHttpUrl().newBuilder()
             .addQueryParameter("fields", "$FIELDS,main_picture,synopsis")
             .build().toString()
-        return Http.json.decodeFromString<Node>(get(url)).toAnime()
+        return Http.json.decodeFromString<Node>(get(url, priority)).toAnime()
     }
 
     /** Statut actuel dans la liste de l'utilisateur, et nombre d'épisodes de l'anime. */

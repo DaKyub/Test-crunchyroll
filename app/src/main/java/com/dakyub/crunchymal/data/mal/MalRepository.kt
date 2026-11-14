@@ -218,7 +218,9 @@ class MalRepository(context: Context, clientId: () -> String, val auth: MalAuth)
     private val detailsCache = java.util.concurrent.ConcurrentHashMap<Int, MalAnime>()
 
     /** Fiche complète (affiche, résumé), gardée le temps de la session. */
-    suspend fun details(malId: Int): MalAnime = detailsCache[malId] ?: api.details(malId).also { detailsCache[malId] = it }
+    /** [priority] : fiche ouverte par l'utilisateur, servie avant les recherches de fond. */
+    suspend fun details(malId: Int, priority: Boolean = false): MalAnime =
+        detailsCache[malId] ?: api.details(malId, priority).also { detailsCache[malId] = it }
 
     /** Résumé MAL (anglais) sans la mention finale « [Written by MAL Rewrite] ». */
     suspend fun synopsis(malId: Int): String? =

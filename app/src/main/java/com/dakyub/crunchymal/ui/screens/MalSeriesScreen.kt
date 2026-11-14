@@ -69,7 +69,7 @@ class MalSeriesViewModel(private val graph: Graph, private val malId: Int) : Vie
     fun load() {
         viewModelScope.launch {
             state.value = state.value.copy(loading = true, error = null)
-            runCatching { graph.mal.details(malId) }
+            runCatching { graph.mal.details(malId, priority = true) }
                 .onSuccess { anime ->
                     // Clé "mal:<id>" : utilisée par le badge et par « Ma liste MAL ».
                     graph.mal.seed("mal:$malId", anime)
