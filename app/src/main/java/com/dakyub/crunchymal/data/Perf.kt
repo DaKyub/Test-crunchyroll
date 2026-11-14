@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal.data
 
+import kotlinx.coroutines.launch
 import android.os.SystemClock
 import java.util.Locale
 
@@ -44,6 +45,21 @@ object Perf {
             return block().also { ok = true }
         } finally {
             record(group, label, now() - t0, if (ok) "" else "échec")
+        }
+    }
+
+    /**
+     * Surveille le fil principal (affichage, télécommande) : un retard de plus de 150 ms à reprendre une
+     * pause de 250 ms signifie que l'interface était occupée ou figée pendant ce temps.
+     */
+    fun startMainThreadMonitor() {
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main).launch {
+            while (true) {
+                val t0 = now()
+                kotlinx.coroutines.delay(250)
+                val lag = now() - t0 - 250
+                if (lag > 150) record("Fil principal", "retard (interface occupée)", lag)
+            }
         }
     }
 

@@ -2,6 +2,7 @@ package com.dakyub.crunchymal.data.plex
 
 import android.content.Context
 import com.dakyub.crunchymal.data.Http
+import com.dakyub.crunchymal.data.HttpException
 import com.dakyub.crunchymal.data.fetch
 import com.dakyub.crunchymal.server.LocalNetwork
 import kotlinx.coroutines.CoroutineScope
@@ -18,6 +19,7 @@ import kotlinx.serialization.decodeFromString
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.IOException
 import java.net.URLEncoder
 import java.util.UUID
 import java.util.concurrent.TimeUnit
@@ -227,9 +229,36 @@ class PlexApi(context: Context) {
         _login.value = null
     }
 
+    /** Serveur : connexion abandonnée après 4 s (et non 20) ; la lecture d'une grande bibliothèque peut être longue. */
+    private val server = Http.client.newBuilder().connectTimeout(4, TimeUnit.SECONDS).build()
+
+    /** Serveur injoignable jusqu'à cette heure : les requêtes échouent tout de suite au lieu d'attendre. */
+    @Volatile private var unreachableUntil = 0L
+    @Volatile private var lastRediscovery = 0L
+
     private suspend fun get(path: String): PlexContainer {
+        if (System.currentTimeMillis() < unreachableUntil) throw IOException("Serveur Plex injoignable (nouvel essai dans quelques minutes)")
+        return try {
+            request(path).also { unreachableUntil = 0 }
+        } catch (e: IOException) {
+            if (e is HttpException) throw e
+            // Adresse changée sur le réseau (nouvelle IP…) : on cherche à nouveau le serveur, au plus une fois
+            // toutes les 5 min, puis on réessaie une fois.
+            val now = System.currentTimeMillis()
+            if (accountToken.isNotBlank() && now - lastRediscovery > PAUSE_MS) {
+                lastRediscovery = now
+                if (runCatching { connect(accountToken) }.isSuccess) {
+                    runCatching { return request(path) }
+                }
+            }
+            unreachableUntil = System.currentTimeMillis() + PAUSE_MS
+            throw IOException("Serveur Plex injoignable", e)
+        }
+    }
+
+    private suspend fun request(path: String): PlexContainer {
         val url = (serverUri + path).toHttpUrl()
-        val body = Http.client.fetch(
+        val body = server.fetch(
             Request.Builder().url(url)
                 .header("Accept", "application/json")
                 .header("X-Plex-Token", serverToken)
@@ -382,5 +411,7 @@ class PlexApi(context: Context) {
 
     private companion object {
         const val PAGE = 300
+        /** Pause après un échec de connexion au serveur, et délai entre deux recherches de son adresse. */
+        const val PAUSE_MS = 5L * 60 * 1000
     }
 }

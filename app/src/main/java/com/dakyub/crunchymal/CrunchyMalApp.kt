@@ -10,6 +10,7 @@ class CrunchyMalApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        com.dakyub.crunchymal.data.Perf.startMainThreadMonitor()
         graph = Graph(this)
         installCrashRecorder()
         // Nouveaux épisodes (notifications) et chaîne de l'écran d'accueil, toutes les 4 h.

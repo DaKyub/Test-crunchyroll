@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal.ui.screens
 
+import com.dakyub.crunchymal.ui.components.PerfScreenTimer
 import com.dakyub.crunchymal.data.Perf
 import com.dakyub.crunchymal.ui.components.nextPlatformFilter
 import androidx.compose.foundation.layout.Arrangement
@@ -108,7 +109,9 @@ class SeasonViewModel(private val graph: Graph) : ViewModel() {
 
     fun load() {
         val season = ui.value.season
+        val asked = Perf.now()
         viewModelScope.launch {
+            Perf.record("Onglet Saison", "démarrage du chargement", Perf.now() - asked)
             ui.value = ui.value.copy(loading = true, error = null)
             runCatching { Perf.span("Onglet Saison", "${season.season.api} ${season.year}") { graph.mal.seasonal(season.year, season.season.api) } }
                 .onSuccess { list ->
@@ -147,6 +150,7 @@ fun SeasonScreen(onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (Int) -> Unit) {
         visible.items.isEmpty() -> "Aucun anime ne correspond à ces filtres."
         else -> null
     }
+    PerfScreenTimer("Onglet Saison", message, visible.items.isNotEmpty())
     PosterGrid(
         items = visible.items,
         message = message,

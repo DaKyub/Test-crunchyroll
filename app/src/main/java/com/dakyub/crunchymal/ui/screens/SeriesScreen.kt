@@ -210,9 +210,22 @@ private fun seasonMalKey(seriesKey: String, index: Int, season: CrSeason, record
 /** Titre Crunchyroll d'une saison qui n'est pas une saison TV (« … OAD », « OVA », « Film »…). */
 private val nonTvSeasonTitle = Regex("""(?i)\b(OVA|OAV|OAD|ONA|special|spécial|movie|film)s?\b""")
 
-/** Type d'une saison : celui de MAL s'il est connu, sinon déduit du titre Crunchyroll. */
-private fun seasonType(season: CrSeason, record: MalRecord?): String? =
-    malTypeLabel(record?.takeIf { it.malId != null }?.type)
+/**
+ * Élément de la licence (frise MAL) dont le titre correspond nettement à celui de la saison Crunchyroll
+ * (« … : Visions of Coleus ») : plus fiable que la fiche MAL de la saison quand celle-ci est mal choisie.
+ */
+private fun franchiseMatch(season: CrSeason, franchise: List<MalAnime>): MalAnime? {
+    if (season.title.isBlank() || genericSeasonTitle.matches(season.title)) return null
+    return franchise
+        .map { anime -> anime to anime.allTitles.filter { it.isNotBlank() }.maxOfOrNull { TitleMatcher.similarity(season.title, it) }.let { it ?: 0.0 } }
+        .filter { it.second >= 0.85 }
+        .maxByOrNull { it.second }?.first
+}
+
+/** Type d'une saison : celui de l'élément de licence correspondant, sinon de sa fiche MAL, sinon déduit du titre. */
+private fun seasonType(season: CrSeason, record: MalRecord?, match: MalAnime? = null): String? =
+    malTypeLabel(match?.type)
+        ?: malTypeLabel(record?.takeIf { it.malId != null }?.type)
         ?: nonTvSeasonTitle.find(season.title)?.value?.uppercase()?.let { word ->
             when (word.trimEnd('S')) {
                 "OVA", "OAV", "OAD" -> "OVA"
@@ -226,8 +239,9 @@ private fun seasonType(season: CrSeason, record: MalRecord?): String? =
  * Début de diffusion d'une saison : date MAL si la fiche est connue, sinon date de diffusion d'origine du
  * premier épisode d'après Crunchyroll. Vide si aucune n'est connue.
  */
-private fun seasonStart(node: SeasonNode, record: MalRecord?): String =
-    record?.takeIf { it.malId != null }?.startDate
+private fun seasonStart(node: SeasonNode, record: MalRecord?, match: MalAnime? = null): String =
+    match?.startDate
+        ?: record?.takeIf { it.malId != null }?.startDate
         ?: node.episodes.mapNotNull { it.episode.episodeAirDate.takeIf { d -> d.length >= 4 } }.minOrNull()?.take(10)
         ?: ""
 
@@ -235,28 +249,38 @@ private fun seasonStart(node: SeasonNode, record: MalRecord?): String =
  * Nom d'une saison : « OVA 2016 », « Film 2021 »… quand ce n'est pas une saison TV (Crunchyroll les
  * numérote comme des saisons), sinon [tvLabel] avec le numéro Crunchyroll.
  */
-private fun seasonLabel(node: SeasonNode, record: MalRecord?, tvLabel: String = "S"): String =
-    seasonType(node.season, record)
-        ?.let { type -> listOfNotNull(type, seasonStart(node, record).take(4).ifBlank { null }).joinToString(" ") }
+private fun seasonLabel(node: SeasonNode, record: MalRecord?, tvLabel: String = "S", match: MalAnime? = null): String =
+    seasonType(node.season, record, match)
+        ?.let { type -> listOfNotNull(type, seasonStart(node, record, match).take(4).ifBlank { null }).joinToString(" ") }
         ?: "$tvLabel${node.season.seasonNumber}"
 
 /**
  * Ordre d'affichage des saisons (indices dans [seasons]) : chronologique, car Crunchyroll place les OVA et
  * films à la fin. Dates MAL, ou à défaut celles des épisodes ; une saison sans date reste après la précédente.
  */
-private fun chronologicalOrder(seriesKey: String, seasons: List<SeasonNode>, records: Map<String, MalRecord>): List<Int> {
+private fun chronologicalOrder(
+    seriesKey: String,
+    seasons: List<SeasonNode>,
+    records: Map<String, MalRecord>,
+    matches: Map<Int, MalAnime> = emptyMap(),
+): List<Int> {
     var last = ""
     val dates = seasons.mapIndexed { index, node ->
-        seasonStart(node, records[seasonMalKey(seriesKey, index, node.season, records)]).ifBlank { null }?.also { last = it } ?: last
+        seasonStart(node, records[seasonMalKey(seriesKey, index, node.season, records)], matches[index]).ifBlank { null }?.also { last = it } ?: last
     }
     return seasons.indices.sortedWith(compareBy({ dates[it] }, { it }))
 }
 
 /** Fiches MAL de chaque saison, pour « Ma liste MAL » et « Vu avec… ». */
-private fun seasonChoices(seriesId: String, seasons: List<SeasonNode>, records: Map<String, MalRecord>): List<MalEntryChoice> =
+private fun seasonChoices(
+    seriesId: String,
+    seasons: List<SeasonNode>,
+    records: Map<String, MalRecord>,
+    matches: Map<Int, MalAnime> = emptyMap(),
+): List<MalEntryChoice> =
     seasons.mapIndexed { index, node ->
         val key = seasonMalKey("series:$seriesId", index, node.season, records)
-        MalEntryChoice(seasonLabel(node, records[key], tvLabel = "Saison "), key)
+        MalEntryChoice(seasonLabel(node, records[key], tvLabel = "Saison ", match = matches[index]), key)
     }
 
 @Composable
@@ -285,6 +309,17 @@ fun SeriesScreen(
             val tree = state.tree
             val summary = tree?.summary
             val listState = rememberLazyListState()
+            // Licence complète (frise MAL) : rangée « Toute la licence » et type / date des saisons (OVA…).
+            val sequelStart = remember(tree, malRecords) {
+                if (tree == null) emptySet() else (listOfNotNull(malRecords[ref.malKey]?.malId) + tree.seasons.mapIndexedNotNull { index, node ->
+                    malRecords[seasonMalKey(ref.malKey, index, node.season, malRecords)]?.malId
+                }).toSet()
+            }
+            val franchise by remember(sequelStart) { graph.sequels.franchise(sequelStart) }.collectAsState()
+            val seasonMatches = remember(tree, franchise) {
+                val list = franchise.orEmpty()
+                tree?.seasons?.mapIndexedNotNull { index, node -> franchiseMatch(node.season, list)?.let { index to it } }?.toMap().orEmpty()
+            }
             // Synchro MAL : épisodes vus de chaque saison reportés sur sa fiche MAL (option des réglages).
             val syncTargets = tree?.seasons?.mapIndexedNotNull { index, node ->
                 malRecords[seasonMalKey(ref.malKey, index, node.season, malRecords)]?.malId
@@ -381,7 +416,7 @@ fun SeriesScreen(
                             OutlinedButton(onClick = { malListOpen = true }) { Text("Ma liste MAL") }
                             CompanionsButton(
                                 listOf(MalEntryChoice("Série", "series:${series.id}")) +
-                                    seasonChoices(series.id, state.tree?.seasons.orEmpty(), malRecords)
+                                    seasonChoices(series.id, state.tree?.seasons.orEmpty(), malRecords, seasonMatches)
                             )
                             OutlinedButton(onClick = { correcting = ref.malKey to (ref.malTitles.firstOrNull() ?: series.title) }) {
                                 Text("Corriger MAL")
@@ -400,7 +435,7 @@ fun SeriesScreen(
                     } else if (tree.seasons.isNotEmpty()) {
                         item {
                             // Ordre chronologique d'après MAL (OVA et films à leur place), avec leur type.
-                            val order = chronologicalOrder(ref.malKey, tree.seasons, malRecords)
+                            val order = chronologicalOrder(ref.malKey, tree.seasons, malRecords, seasonMatches)
                             // Fiches en cache sans type ni date : complétées pour cette série seulement.
                             LaunchedEffect(tree.seasons.size, malRecords.size) {
                                 tree.seasons.forEachIndexed { index, node ->
@@ -422,7 +457,7 @@ fun SeriesScreen(
                                         colors = seasonChipColors(CrunchyOrange),
                                     ) {
                                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            Text("${seasonLabel(node, malRecords[key])} · $watched/${node.episodes.size}")
+                                            Text("${seasonLabel(node, malRecords[key], match = seasonMatches[index])} · $watched/${node.episodes.size}")
                                             MalBadge(key, titles)
                                             // Diffusion de la saison d'après MAL (en cours, terminée, pas encore sortie).
                                             airingLabel(malRecords[key]?.airing)?.let { Text(it, style = MaterialTheme.typography.labelSmall) }
@@ -481,9 +516,6 @@ fun SeriesScreen(
                     // Recommandations : membres MAL, puis séries similaires d'après Crunchyroll.
                     // Suites absentes de la fiche (une fois les saisons connues, pour ne pas proposer la saison 2).
                     if (tree != null) {
-                        val sequelStart = (listOfNotNull(malRecords[ref.malKey]?.malId) + tree.seasons.mapIndexedNotNull { index, node ->
-                            malRecords[seasonMalKey(ref.malKey, index, node.season, malRecords)]?.malId
-                        }).toSet()
                         item { SequelsRow(sequelStart, series.id, onOpenSeries, onOpenMal) }
                     }
                     item { MalRecommendationsRow(malRecords[ref.malKey]?.malId, onOpenSeries, onOpenMal) }

@@ -4,6 +4,11 @@ import android.content.Context
 import com.dakyub.crunchymal.data.AvailabilityRepository
 import com.dakyub.crunchymal.data.Http
 import kotlinx.coroutines.flow.MutableStateFlow
+import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -155,6 +160,21 @@ class SequelsRepository(context: Context, private val mal: MalRepository, privat
                     .also { info -> update { it.copy(known = it.known + (id to info)) } }
             }
             ?: data.known[id]
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val franchises = ConcurrentHashMap<Set<Int>, MutableStateFlow<List<MalAnime>?>>()
+
+    /**
+     * Frise de licence de [startIds], calculée une seule fois par session et partagée par ceux qui l'affichent
+     * (rangée « Toute la licence », ordre des saisons de la fiche). null tant que rien n'est connu.
+     */
+    fun franchise(startIds: Set<Int>): StateFlow<List<MalAnime>?> = franchises.computeIfAbsent(startIds) {
+        MutableStateFlow<List<MalAnime>?>(null).also { flow ->
+            scope.launch {
+                flow.value = runCatching { chain(startIds) { partial -> flow.value = partial } }.getOrDefault(flow.value.orEmpty())
+            }
+        }
+    }
 
     @Synchronized
     private fun update(change: (SequelFile) -> SequelFile) {

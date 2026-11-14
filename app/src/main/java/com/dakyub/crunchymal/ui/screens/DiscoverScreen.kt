@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal.ui.screens
 
+import com.dakyub.crunchymal.ui.components.PerfScreenTimer
 import com.dakyub.crunchymal.data.Perf
 import com.dakyub.crunchymal.ui.components.malGenreLabel
 import androidx.compose.foundation.horizontalScroll
@@ -164,9 +165,11 @@ class DiscoverViewModel(private val graph: Graph) : ViewModel() {
 
     fun load() {
         val ranking = ui.value.ranking
+        val asked = Perf.now()
         viewModelScope.launch {
+            Perf.record("Onglet Découvrir", "démarrage du chargement", Perf.now() - asked)
             ui.value = ui.value.copy(loading = true, error = null)
-            graph.mal.refreshMyListSeenIds()
+            Perf.span("Onglet Découvrir", "liste MAL perso") { graph.mal.refreshMyListSeenIds() }
             runCatching { Perf.span("Onglet Découvrir", "classement ${ranking.api}") { graph.mal.ranking(ranking.api) } }
                 .onSuccess { list ->
                     if (ui.value.ranking != ranking) return@onSuccess
@@ -216,6 +219,7 @@ fun DiscoverScreen(onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (Int) -> Unit) 
         visible.items.isEmpty() -> "Aucun anime ne correspond à ces filtres."
         else -> null
     }
+    PerfScreenTimer("Onglet Découvrir", message, visible.items.isNotEmpty())
     PosterGrid(
         items = visible.items,
         message = message,

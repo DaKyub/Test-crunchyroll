@@ -158,9 +158,7 @@ fun SequelsRow(
     if (malIds.isEmpty()) return
     val graph = LocalGraph.current
     // Toute la licence (préquelles, saisons, OVA, films, suites…) par date de sortie, affichée au fur et à mesure.
-    val franchise by produceState<List<MalAnime>?>(null, malIds) {
-        value = runCatching { graph.sequels.chain(malIds) { partial -> value = partial } }.getOrDefault(value.orEmpty())
-    }
+    val franchise by remember(malIds) { graph.sequels.franchise(malIds) }.collectAsState()
     val others = franchise?.filter { it.malId !in malIds }
     val found by graph.availability.found.collectAsState()
     val platforms by graph.watchPlatforms.found.collectAsState()

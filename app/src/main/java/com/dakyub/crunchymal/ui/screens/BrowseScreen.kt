@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal.ui.screens
 
+import com.dakyub.crunchymal.ui.components.PerfScreenTimer
 import com.dakyub.crunchymal.data.Perf
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
@@ -263,7 +264,9 @@ class BrowseViewModel(private val graph: Graph) : ViewModel() {
         if (selections.isEmpty()) return
         val alpha = ui.value.sort == BrowseSort.ALPHA
         job?.cancel()
+        val asked = Perf.now()
         job = viewModelScope.launch {
+            Perf.record("Onglet Parcourir", "démarrage du chargement", Perf.now() - asked)
             ui.value = ui.value.copy(loading = true, error = null)
             val results = selections.values.map { selection ->
                 async { selection.provider to runCatching { Perf.span("Onglet Parcourir", "${selection.provider.label} ${selection.title}") { load(selection, alpha) } } }
@@ -369,6 +372,7 @@ fun BrowseScreen(onOpenSeries: (SeriesRef) -> Unit, onOpenMal: (Int) -> Unit = {
         }
         else -> null
     }
+    PerfScreenTimer("Onglet Parcourir", message, visible.items.isNotEmpty())
     PosterGrid(
         items = visible.items,
         message = message,
