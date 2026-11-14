@@ -127,7 +127,7 @@ class ProgressRepository(context: Context, private val api: CrApi) {
 
     private suspend fun compute(seriesId: String): SeriesTree = coroutineScope {
         val seasons = originalSeasons(api.seasons(seriesId))
-        val episodesBySeason = seasons.map { season -> async { season to api.episodes(season.id) } }.awaitAll()
+        val episodesBySeason = seasons.map { season -> async { season to episodesOf(season) } }.awaitAll()
 
         val allIds = episodesBySeason.flatMap { (_, eps) -> eps.flatMap { ep -> listOf(ep.id) + ep.versions.map { it.guid } } }
         val playheads = api.playheads(allIds).associateBy { it.contentId }
@@ -175,6 +175,25 @@ class ProgressRepository(context: Context, private val api: CrApi) {
                 airing = isAiring(nodes.flatMap { it.episodes }.any { !it.available }, flat.lastOrNull()?.episode?.releaseDate),
             ),
         )
+    }
+
+    /**
+     * Épisodes d'une saison. Si sa version originale en a moins que prévu (VO absente de la région : Fairy Tail
+     * n'a qu'un épisode en VO en France), on prend la version (doublage) qui en a le plus, de préférence dans
+     * la langue audio choisie.
+     */
+    private suspend fun episodesOf(season: CrSeason): List<CrEpisode> = coroutineScope {
+        val own = runCatching { api.episodes(season.id) }.getOrElse { if (season.versions.isEmpty()) throw it else emptyList() }
+        val expected = season.numberOfEpisodes
+        if (own.isNotEmpty() && (expected == 0 || own.size >= expected)) return@coroutineScope own
+        val others = season.versions.filter { it.guid.isNotBlank() && it.guid != season.id }
+        if (others.isEmpty()) return@coroutineScope own
+        val candidates = others.map { version ->
+            async { version to runCatching { api.episodes(version.guid) }.getOrDefault(emptyList()) }
+        }.awaitAll()
+        val preferred = api.preferredAudio
+        val best = candidates.maxWithOrNull(compareBy({ it.second.size }, { it.first.audioLocale == preferred }, { it.first.audioLocale == "fr-FR" }))
+        if (best != null && best.second.size > own.size) best.second else own
     }
 
     /** Garde une seule version (l'originale) de chaque saison : les doublages sont des saisons à part. */

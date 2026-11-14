@@ -145,6 +145,8 @@ data class CrSeason(
     @SerialName("season_sequence_number") val seasonSequenceNumber: Int = 0,
     @SerialName("audio_locale") val audioLocale: String = "",
     val versions: List<CrVersion> = emptyList(),
+    /** Nombre d'épisodes annoncé pour la saison (toutes régions), 0 si inconnu. */
+    @SerialName("number_of_episodes") val numberOfEpisodes: Int = 0,
 )
 
 @Serializable

@@ -17,6 +17,9 @@ class CrApi(private val auth: CrAuth, private val settings: Settings) {
 
     private val account get() = auth.accountId
 
+    /** Langue audio préférée (réglages), pour choisir une version de saison. */
+    val preferredAudio: String get() = settings.preferredAudio
+
     /** [path] peut contenir une query déjà encodée ; la locale est ajoutée automatiquement. */
     private suspend fun call(
         method: String,
