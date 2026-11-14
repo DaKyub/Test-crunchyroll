@@ -270,6 +270,20 @@ class MalApi(private val clientId: () -> String) {
             .filter { it > 0 }
     }
 
+    /**
+     * Animes de la même histoire que [malId] : suites, préquelles, histoires parallèles, histoire principale,
+     * version complète et récapitulatifs (pas les spin-off ni les liens « personnage » / « autre »).
+     */
+    suspend fun franchiseIds(malId: Int, priority: Boolean = false): List<Int> {
+        val url = "$BASE/anime/$malId".toHttpUrl().newBuilder()
+            .addQueryParameter("fields", "related_anime")
+            .build().toString()
+        return Http.json.decodeFromString<RelatedNode>(get(url, priority)).related
+            .filter { it.relationType in FRANCHISE_RELATIONS }
+            .map { it.node.id }
+            .filter { it > 0 }
+    }
+
     /** Animes recommandés par les membres MAL pour [malId], les plus recommandés d'abord. */
     suspend fun recommendationIds(malId: Int): List<Int> = recommendationCounts(malId).map { it.first }
 
@@ -380,5 +394,6 @@ class MalApi(private val clientId: () -> String) {
         const val BASE = "https://api.myanimelist.net/v2"
         const val FIELDS = "id,title,alternative_titles,mean,num_scoring_users,media_type,num_episodes,start_date,genres,status"
         const val MIN_INTERVAL_MS = 400L
+        val FRANCHISE_RELATIONS = setOf("sequel", "prequel", "side_story", "parent_story", "full_story", "summary")
     }
 }

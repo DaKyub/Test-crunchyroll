@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -139,11 +140,12 @@ fun MalRecommendationsRow(malId: Int?, onOpenSeries: (SeriesRef) -> Unit, onOpen
 }
 
 /**
- * Rangée « Suites » d'une fiche : saisons, films… qui suivent la série d'après MAL et ne sont pas sur la
- * fiche ([malIds] : fiches MAL de la série et de ses saisons), chacune avec où la regarder ou sa sortie.
- * [currentPageId] : une suite que la recherche rattache à cette même fiche n'est pas proposée comme
+ * Frise « Toute la licence » d'une fiche : préquelles, saisons, OVA, films et suites de la même histoire
+ * d'après MAL, par date de sortie, avec la position de chacun ; ce qui est sur la fiche ([malIds] : fiches MAL
+ * de la série et de ses saisons) est marqué « sur cette fiche », le reste indique où le regarder.
+ * [currentPageId] : un anime que la recherche rattache à cette même fiche n'est pas proposé comme
  * disponible (Crunchyroll : les saisons de la fiche sont déjà dans [malIds]) ou, avec [hideIfOnThisPage]
- * (ADN, saisons non reliées à MAL), est masquée car c'est une autre saison de cette fiche.
+ * (ADN, saisons non reliées à MAL), est marqué « sur cette fiche » car c'en est une autre saison.
  */
 @Composable
 fun SequelsRow(
@@ -155,51 +157,61 @@ fun SequelsRow(
 ) {
     if (malIds.isEmpty()) return
     val graph = LocalGraph.current
-    // Toute la licence connue (fiche + suites), dans l'ordre chronologique : sert à situer chaque suite.
+    // Toute la licence (préquelles, saisons, OVA, films, suites…) par date de sortie, affichée au fur et à mesure.
     val franchise by produceState<List<MalAnime>?>(null, malIds) {
-        value = runCatching { graph.sequels.chain(malIds) }.getOrDefault(emptyList())
+        value = runCatching { graph.sequels.chain(malIds) { partial -> value = partial } }.getOrDefault(value.orEmpty())
     }
-    val sequels = franchise?.filter { it.malId !in malIds }
+    val others = franchise?.filter { it.malId !in malIds }
     val found by graph.availability.found.collectAsState()
     val platforms by graph.watchPlatforms.found.collectAsState()
     val providers by graph.providers.selected.collectAsState()
     val crLoggedIn by graph.auth.loggedIn.collectAsState()
     val seen by graph.mal.myListSeenIds.collectAsState()
-    LaunchedEffect(sequels) {
-        // Où les regarder : seulement pour celles déjà sorties.
-        sequels?.filter { it.airing != "not_yet_aired" }?.let { graph.prepareMalAnime(it) }
-        sequels?.filter { it.airing == "not_yet_aired" }?.forEach { graph.mal.seed("mal:${it.malId}", it) }
+    LaunchedEffect(others?.map { it.malId }) {
+        // Où les regarder : seulement pour ce qui est déjà sorti.
+        others?.filter { it.airing != "not_yet_aired" }?.let { graph.prepareMalAnime(it) }
+        others?.filter { it.airing == "not_yet_aired" }?.forEach { graph.mal.seed("mal:${it.malId}", it) }
     }
-    val list = sequels.orEmpty().filter { anime ->
-        !hideIfOnThisPage || currentPageId == null || found[anime.malId]?.let { it.adn?.id == currentPageId || it.crunchyroll?.id == currentPageId } != true
-    }.takeIf { it.isNotEmpty() } ?: return
+    val list = franchise.orEmpty()
+    // Rien d'autre que la fiche elle-même dans la licence : pas de frise.
+    if (others.isNullOrEmpty()) return
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Suites (ordre de sortie, position dans la licence)", style = MaterialTheme.typography.titleMedium)
+        Text("Toute la licence, par ordre de sortie", style = MaterialTheme.typography.titleMedium)
         LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            items(list, key = { it.malId }) { anime ->
-                // Disponibilité qui renvoie vers cette fiche : la suite n'y est pas, on l'ignore.
-                val availability = found[anime.malId]?.let { a ->
-                    a.copy(
-                        crunchyroll = a.crunchyroll?.takeIf { it.id != currentPageId },
-                        adn = a.adn?.takeIf { it.id != currentPageId },
-                    )
+            itemsIndexed(list, key = { _, anime -> anime.malId }) { index, anime ->
+                val position = "${if (index == 0) "1re" else "${index + 1}e"}/${list.size} · "
+                val raw = found[anime.malId]
+                // Sur cette fiche : une de ses saisons, ou (ADN, saisons non reliées à MAL) une recherche qui y renvoie.
+                val onThisPage = anime.malId in malIds || (hideIfOnThisPage && currentPageId != null &&
+                    raw?.let { it.adn?.id == currentPageId || it.crunchyroll?.id == currentPageId } == true)
+                // Disponibilité qui renvoie vers cette fiche alors que l'anime n'y est pas : ignorée.
+                val availability = raw?.let { a ->
+                    a.copy(crunchyroll = a.crunchyroll?.takeIf { it.id != currentPageId }, adn = a.adn?.takeIf { it.id != currentPageId })
                 }
-                // Position dans la licence (1re, 2e…), fiche et suites comprises, par date de sortie.
-                val position = franchise.orEmpty().indexOfFirst { it.malId == anime.malId } + 1
-                val total = franchise.orEmpty().size
-                val item = malCardItem(
-                    anime, availability, platforms[anime.malId], providers, crLoggedIn,
-                    subtitle = (if (position > 0) "${if (position == 1) "1re" else "${position}e"}/$total · " else "") +
-                        sequelStatus(anime, availability, platforms[anime.malId], found.containsKey(anime.malId), anime.malId in seen),
-                )
+                val subtitle = position + if (onThisPage) {
+                    sequelKind(anime) + (anime.startYear?.let { "$it · " }.orEmpty()) + "sur cette fiche"
+                } else {
+                    sequelStatus(anime, availability, platforms[anime.malId], raw != null, anime.malId in seen)
+                }
+                val item = malCardItem(anime, availability, platforms[anime.malId], providers, crLoggedIn, subtitle = subtitle)
                 MediaCard(
                     item = item.card,
                     showProviderBadge = false,
-                    onClick = { item.target?.let(onOpenSeries) ?: onOpenMal(anime.malId) },
+                    onClick = { if (!onThisPage) item.target?.let(onOpenSeries) ?: onOpenMal(anime.malId) else onOpenMal(anime.malId) },
                 )
             }
         }
     }
+}
+
+/** Type d'un anime de la licence (« Saison TV · », « OVA · »…). */
+private fun sequelKind(anime: MalAnime): String = when (anime.type?.lowercase()) {
+    "movie" -> "Film · "
+    "ova" -> "OVA · "
+    "ona" -> "ONA · "
+    "special", "tv_special" -> "Spécial · "
+    "music" -> "Clip · "
+    else -> "Saison TV · "
 }
 
 /** Statut d'une suite : à venir, dans l'app, sur une autre plateforme, introuvable ou en cours de recherche. */
@@ -210,13 +222,7 @@ private fun sequelStatus(
     availabilityChecked: Boolean,
     inMyList: Boolean,
 ): String {
-    val kind = when (anime.type?.lowercase()) {
-        "movie" -> "Film · "
-        "ova" -> "OVA · "
-        "ona" -> "ONA · "
-        "special", "tv_special" -> "Spécial · "
-        else -> "Saison TV · "
-    }
+    val kind = sequelKind(anime)
     val year = anime.startYear?.takeIf { anime.airing != "not_yet_aired" }?.let { "$it · " }.orEmpty()
     val status = year + when {
         anime.airing == "not_yet_aired" -> "Pas encore sortie" + (anime.startYear?.let { " · prévue $it" } ?: "")

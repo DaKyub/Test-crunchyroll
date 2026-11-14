@@ -249,6 +249,8 @@ class MalRepository(context: Context, clientId: () -> String, val auth: MalAuth)
 
     suspend fun sequelIds(malId: Int, priority: Boolean = false): List<Int> = api.sequelIds(malId, priority)
 
+    suspend fun franchiseIds(malId: Int, priority: Boolean = false): List<Int> = api.franchiseIds(malId, priority)
+
     private val rankingCache = ConcurrentHashMap<String, List<MalAnime>>()
 
     /** Les 1 000 premiers animes d'un classement MAL, gardés le temps de la session. */

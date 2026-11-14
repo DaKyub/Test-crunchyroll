@@ -46,8 +46,11 @@ private data class SequelFile(
     val sequels: Map<Int, SequelInfo> = emptyMap(),
     /** Suites déjà signalées comme disponibles (null = premier passage : on mémorise sans alerter). */
     val notified: Set<Int>? = null,
-    /** Fiches des suites affichées sur les pages (rangée « Suites »), toutes séries confondues. */
+    /** Fiches des animes affichés dans les frises de licence des pages, toutes séries confondues. */
     val known: Map<Int, SequelInfo> = emptyMap(),
+    /** Anime → animes de la même histoire (suites, préquelles, histoires parallèles…), et date de la vérification. */
+    val franchise: Map<Int, List<Int>> = emptyMap(),
+    val franchiseAt: Map<Int, Long> = emptyMap(),
 )
 
 /**
@@ -112,31 +115,35 @@ class SequelsRepository(context: Context, private val mal: MalRepository, privat
 
     /**
      * Licence d'une fiche dans l'ordre chronologique : les fiches MAL de la série et de ses saisons ([startIds])
-     * et toutes leurs suites (relations « suite » de MAL, de proche en proche). Relations gardées 2 semaines,
-     * fiches 3 jours ; requêtes MAL prioritaires (fiche ouverte). Une fiche sans date est mise à la fin.
+     * et, de proche en proche, tous les animes de la même histoire d'après MAL (suites, préquelles, histoires
+     * parallèles, récapitulatifs ; pas les spin-off). [onProgress] reçoit la frise au fur et à mesure.
+     * Relations gardées 2 semaines, fiches 3 jours ; requêtes MAL prioritaires (fiche ouverte). Au plus
+     * [MAX_CHAIN] animes ; une fiche sans date est mise à la fin.
      */
-    suspend fun chain(startIds: Collection<Int>): List<MalAnime> {
+    suspend fun chain(startIds: Collection<Int>, onProgress: (List<MalAnime>) -> Unit = {}): List<MalAnime> {
         val now = System.currentTimeMillis()
         val queue = ArrayDeque(startIds.distinct())
         val visited = queue.toMutableSet()
         val result = mutableListOf<MalAnime>()
-        // Les fiches de départ aussi (avec leur date) : elles situent les suites dans la licence.
+        fun sorted() = result.sortedWith(compareBy({ it.startDate ?: it.startYear?.toString() ?: "9999" }, { it.malId }))
         startIds.distinct().forEach { id -> info(id, now)?.let { result += it.toAnime() } }
-        var steps = 0
-        while (queue.isNotEmpty() && steps++ < MAX_CHAIN) {
+        onProgress(sorted())
+        while (queue.isNotEmpty() && visited.size <= MAX_CHAIN) {
             val id = queue.removeFirst()
-            val cached = data.related[id]?.takeIf { now - (data.relatedAt[id] ?: 0) < RELATED_TTL }
-            val next = cached ?: runCatching { mal.sequelIds(id, priority = true) }.getOrNull()?.also { ids ->
-                update { it.copy(related = it.related + (id to ids), relatedAt = it.relatedAt + (id to now)) }
+            val cached = data.franchise[id]?.takeIf { now - (data.franchiseAt[id] ?: 0) < RELATED_TTL }
+            val related = cached ?: runCatching { mal.franchiseIds(id, priority = true) }.getOrNull()?.also { ids ->
+                update { it.copy(franchise = it.franchise + (id to ids), franchiseAt = it.franchiseAt + (id to now)) }
             } ?: continue
-            for (sequel in next) {
-                if (!visited.add(sequel)) continue
-                queue += sequel
-                info(sequel, now)?.let { result += it.toAnime() }
+            var added = false
+            for (other in related) {
+                if (visited.size > MAX_CHAIN || !visited.add(other)) continue
+                queue += other
+                info(other, now)?.let { result += it.toAnime(); added = true }
             }
+            if (added) onProgress(sorted())
         }
         save()
-        return result.sortedWith(compareBy({ it.startDate ?: it.startYear?.toString() ?: "9999" }, { it.malId }))
+        return sorted()
     }
 
     /** Fiche (en cache 3 jours) d'un anime de la licence ; ancienne fiche ou celle sans date redemandée. */
@@ -163,7 +170,7 @@ class SequelsRepository(context: Context, private val mal: MalRepository, privat
         const val RELATED_TTL = 14L * 24 * 3600 * 1000
         const val DETAILS_TTL = 3L * 24 * 3600 * 1000
         const val MAX_PER_RUN = 120
-        /** Fiches visitées au plus pour une chaîne de suites (séries très longues). */
-        const val MAX_CHAIN = 25
+        /** Animes au plus dans une frise de licence (franchises très longues). */
+        const val MAX_CHAIN = 40
     }
 }
