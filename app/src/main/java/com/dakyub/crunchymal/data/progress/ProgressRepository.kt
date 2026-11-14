@@ -109,11 +109,15 @@ class ProgressRepository(context: Context, private val api: CrApi) {
         tree(seriesId, force = true)
     }
 
-    suspend fun tree(seriesId: String, force: Boolean = false): SeriesTree {
+    /**
+     * [priority] : fiche ouverte par l'utilisateur. Elle ne fait pas la queue derrière les calculs de fond
+     * (progression des cartes de Parcourir, de la watchlist…), limités à 3 à la fois.
+     */
+    suspend fun tree(seriesId: String, force: Boolean = false, priority: Boolean = false): SeriesTree {
         if (!force) trees[seriesId]?.let { if (isFresh(it.summary)) return it }
         return locks.getOrPut(seriesId) { Mutex() }.withLock {
             if (!force) trees[seriesId]?.let { if (isFresh(it.summary)) return@withLock it }
-            semaphore.withPermit { compute(seriesId) }.also { tree ->
+            (if (priority) compute(seriesId) else semaphore.withPermit { compute(seriesId) }).also { tree ->
                 trees[seriesId] = tree
                 _summaries.update { it + (seriesId to tree.summary) }
                 persist()

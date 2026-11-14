@@ -132,7 +132,7 @@ class SeriesViewModel(private val graph: Graph, private val seriesId: String) : 
 
     fun refreshProgress(force: Boolean) {
         viewModelScope.launch {
-            runCatching { graph.progress.tree(seriesId, force) }
+            runCatching { graph.progress.tree(seriesId, force, priority = true) }
                 .onSuccess { tree ->
                     val current = state.value
                     // Au premier chargement, on se place sur la saison de l'épisode suivant.

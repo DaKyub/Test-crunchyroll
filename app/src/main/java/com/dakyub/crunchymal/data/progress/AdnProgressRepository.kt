@@ -49,11 +49,12 @@ class AdnProgressRepository(private val adn: AdnApi, private val store: Progress
     private fun isFresh(tree: AdnSeriesTree) =
         System.currentTimeMillis() - tree.computedAt < TTL && (tree.summary != null || !adn.loggedIn.value)
 
-    suspend fun tree(showId: String, force: Boolean = false): AdnSeriesTree {
+    /** [priority] : fiche ouverte par l'utilisateur, sans attendre les calculs de fond (3 à la fois). */
+    suspend fun tree(showId: String, force: Boolean = false, priority: Boolean = false): AdnSeriesTree {
         if (!force) trees[showId]?.let { if (isFresh(it)) return it }
         return locks.getOrPut(showId) { Mutex() }.withLock {
             if (!force) trees[showId]?.let { if (isFresh(it)) return@withLock it }
-            semaphore.withPermit { compute(showId) }.also { tree ->
+            (if (priority) compute(showId) else semaphore.withPermit { compute(showId) }).also { tree ->
                 trees[showId] = tree
                 tree.summary?.let { store.put(key(showId), it) }
             }

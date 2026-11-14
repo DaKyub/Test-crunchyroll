@@ -89,6 +89,8 @@ data class AdnSeriesUi(
     val selectedSeason: Int = 0,
     val inWatchlist: Boolean? = null,
     val watchlistBusy: Boolean = false,
+    /** Liste des épisodes en cours de chargement (la fiche est déjà affichée). */
+    val episodesLoading: Boolean = false,
 ) {
     /** Épisodes groupés par saison ("1", "Saga 1 : East Blue"…), dans l'ordre de la série. */
     val seasons: List<Pair<String, List<AdnEpisodeNode>>>
@@ -105,23 +107,23 @@ class AdnSeriesViewModel(private val graph: Graph, private val showId: String) :
 
     fun load(force: Boolean = false) {
         viewModelScope.launch {
-            state.value = state.value.copy(loading = true, error = null)
-            // coroutineScope : l'échec d'une requête reste dans runCatching (sinon plantage de l'app).
-            runCatching {
-                coroutineScope {
-                    val show = async { graph.adn.show(showId) }
-                    val tree = async { runCatching { graph.adnProgress.tree(showId, force) }.getOrNull() }
-                    show.await() to tree.await()
+            state.value = state.value.copy(loading = true, error = null, episodesLoading = true)
+            // Épisodes et progression en parallèle : la fiche s'affiche dès que la série est connue,
+            // sans attendre la liste des épisodes (parfois très longue).
+            val tree = async { runCatching { graph.adnProgress.tree(showId, force, priority = true) }.getOrNull() }
+            runCatching { graph.adn.show(showId) }
+                .onSuccess { show -> state.value = state.value.copy(loading = false, show = show) }
+                .onFailure {
+                    tree.cancel()
+                    state.value = state.value.copy(loading = false, error = it.message ?: "Erreur")
+                    return@launch
                 }
-            }.onSuccess { (show, tree) ->
-                applyTree(tree, show)
-            }.onFailure {
-                state.value = state.value.copy(loading = false, error = it.message ?: "Erreur")
-            }
-            if (graph.adn.loggedIn.value) {
+            if (graph.adn.loggedIn.value) launch {
                 val inList = runCatching { graph.adn.inWatchlist(showId) }.getOrNull()
                 state.value = state.value.copy(inWatchlist = inList)
             }
+            tree.await()?.let { applyTree(it) }
+            state.value = state.value.copy(episodesLoading = false)
         }
     }
 
@@ -130,7 +132,7 @@ class AdnSeriesViewModel(private val graph: Graph, private val showId: String) :
         val episodes = tree?.episodes ?: current.episodes
         val seasons = episodes.groupBy { it.video.seasonKey }.values.toList()
         // Au premier chargement, on se place sur la saison de l'épisode suivant.
-        val selected = if (current.show == null) {
+        val selected = if (current.episodes.isEmpty()) {
             seasons.indexOfFirst { s -> s.any { it.video.id.toString() == tree?.summary?.nextEpisodeId } }.coerceAtLeast(0)
         } else current.selectedSeason.coerceAtMost((seasons.size - 1).coerceAtLeast(0))
         state.value = current.copy(
@@ -144,7 +146,7 @@ class AdnSeriesViewModel(private val graph: Graph, private val showId: String) :
 
     fun refreshProgress() {
         viewModelScope.launch {
-            runCatching { graph.adnProgress.tree(showId, force = true) }.onSuccess { applyTree(it) }
+            runCatching { graph.adnProgress.tree(showId, force = true, priority = true) }.onSuccess { applyTree(it) }
         }
     }
 
@@ -338,6 +340,9 @@ fun AdnSeriesScreen(
                             }
                         }
                     }
+                }
+                if (season == null && state.episodesLoading) {
+                    item { Text("Chargement des épisodes…", style = MaterialTheme.typography.bodyMedium) }
                 }
                 season?.let { (_, nodes) ->
                     item {
