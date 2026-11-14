@@ -77,6 +77,7 @@ import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.foundation.lazy.rememberLazyListState
 import com.dakyub.crunchymal.ui.components.ExpandableSynopsis
+import com.dakyub.crunchymal.ui.components.SynopsisWithFallback
 import kotlinx.coroutines.delay
 import java.util.Locale
 
@@ -287,14 +288,14 @@ fun AdnSeriesScreen(
                                 )
                             }
                             GenresLine(record?.genres, show.genres)
-                            show.summary?.takeIf { it.isNotBlank() }?.let {
-                                // Focus sur le résumé : la fiche remonte tout en haut (titre, note MAL).
-                                ExpandableSynopsis(
-                                    it,
-                                    onFocused = { scope.launch { delay(150); listState.animateScrollToItem(0) } },
-                                    loadFull = { record?.malId?.let { id -> graph.mal.synopsis(id) } },
-                                )
-                            }
+                            // Focus sur le résumé : la fiche remonte tout en haut (titre, note MAL).
+                            // Sans résumé ADN : celui de TMDB (français), sinon de MAL.
+                            SynopsisWithFallback(
+                                show.summary,
+                                titles = listOfNotNull(record?.englishTitle, show.originalTitle, show.title, record?.title),
+                                malId = record?.malId,
+                                onFocused = { scope.launch { delay(150); listState.animateScrollToItem(0) } },
+                            )
                             // Rangée défilante : les boutons hors écran restent accessibles à la télécommande.
                             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
                                 Button(onClick = { if (next != null) AdnApp.open(context, show, next.video) else AdnApp.openShow(context, show) }) {

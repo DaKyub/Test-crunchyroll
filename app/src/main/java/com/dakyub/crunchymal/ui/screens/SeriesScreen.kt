@@ -86,6 +86,7 @@ import android.widget.Toast
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.lazy.rememberLazyListState
 import com.dakyub.crunchymal.ui.components.ExpandableSynopsis
+import com.dakyub.crunchymal.ui.components.SynopsisWithFallback
 import kotlinx.coroutines.delay
 import java.util.Locale
 
@@ -293,16 +294,17 @@ fun SeriesScreen(
                         GenresLine(record?.genres, state.categories)
                     }
                     val synopsis = series.extendedDescription.ifBlank { series.description }
-                    if (synopsis.isNotBlank()) {
-                        item {
-                            // Focus sur le résumé : la fiche remonte tout en haut (titre, note MAL).
-                            ExpandableSynopsis(
-                                synopsis,
-                                onFocused = { scope.launch { delay(150); listState.animateScrollToItem(0) } },
-                                modifier = Modifier.fillMaxWidth(0.6f),
-                                loadFull = { malRecords[ref.malKey]?.malId?.let { graph.mal.synopsis(it) } },
-                            )
-                        }
+                    item {
+                        // Focus sur le résumé : la fiche remonte tout en haut (titre, note MAL).
+                        // Sans résumé Crunchyroll : celui de TMDB (français), sinon de MAL.
+                        val seriesRecord = malRecords[ref.malKey]
+                        SynopsisWithFallback(
+                            synopsis,
+                            titles = listOfNotNull(seriesRecord?.englishTitle, series.title, seriesRecord?.title),
+                            malId = seriesRecord?.malId,
+                            onFocused = { scope.launch { delay(150); listState.animateScrollToItem(0) } },
+                            modifier = Modifier.fillMaxWidth(0.6f),
+                        )
                     }
                     item {
                         // Rangée défilante : les boutons hors écran restent accessibles à la télécommande.

@@ -1,0 +1,44 @@
+package com.dakyub.crunchymal.ui.components
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.tv.material3.MaterialTheme
+import androidx.tv.material3.Text
+import com.dakyub.crunchymal.LocalGraph
+
+/**
+ * Résumé d'une fiche : celui du service ([primary]) ; s'il est vide, celui de TMDB en français, sinon celui
+ * de MAL en anglais, avec la source indiquée. [titles] : titres pour trouver la série sur TMDB (anglais
+ * ou d'origine d'abord), [malId] : fiche MAL de la série.
+ */
+@Composable
+fun SynopsisWithFallback(
+    primary: String?,
+    titles: List<String>,
+    malId: Int?,
+    onFocused: () -> Unit,
+    modifier: Modifier = Modifier,
+    movie: Boolean = false,
+) {
+    val graph = LocalGraph.current
+    val loadMal: (suspend () -> String?)? = malId?.let { id -> { graph.mal.synopsis(id) } }
+    if (!primary.isNullOrBlank()) {
+        ExpandableSynopsis(primary, onFocused = onFocused, modifier = modifier, loadFull = loadMal)
+        return
+    }
+    val searchTitles = titles.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+    val fallback by produceState<Pair<String, String>?>(null, searchTitles, malId) {
+        value = runCatching { graph.watchPlatforms.frenchOverview(searchTitles, movie) }.getOrNull()?.let { it to "Résumé TMDB" }
+            ?: malId?.let { id -> runCatching { graph.mal.synopsis(id) }.getOrNull() }?.let { it to "Résumé MyAnimeList (en anglais)" }
+    }
+    val (text, source) = fallback ?: return
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        ExpandableSynopsis(text, onFocused = onFocused)
+        Text(source, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}

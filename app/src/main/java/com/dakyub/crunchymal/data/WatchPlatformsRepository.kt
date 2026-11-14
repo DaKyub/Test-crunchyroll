@@ -52,6 +52,9 @@ private data class TmdbHit(
 private data class TmdbHits(val results: List<TmdbHit> = emptyList())
 
 @Serializable
+private data class TmdbOverview(val overview: String = "")
+
+@Serializable
 private data class TmdbProvider(@SerialName("provider_name") val name: String = "")
 
 @Serializable
@@ -450,6 +453,26 @@ class WatchPlatformsRepository(context: Context, private val settings: Settings)
             if (similarity(best) >= 0.5) return best.id
         }
         return null
+    }
+
+    /** Résumés français déjà cherchés (titres → texte, vide si TMDB n'en a pas), le temps de la session. */
+    private val overviews = ConcurrentHashMap<String, String>()
+
+    /**
+     * Résumé en français de la série (ou du film) TMDB la plus proche de [titles], pour les fiches dont le
+     * service ne fournit aucun résumé. null si pas de clé TMDB, rien trouvé ou résumé vide.
+     */
+    suspend fun frenchOverview(titles: List<String>, movie: Boolean = false): String? {
+        if (settings.tmdbKey.isBlank()) return null
+        val kind = if (movie) "movie" else "tv"
+        val cacheKey = kind + ":" + titles.joinToString("|")
+        overviews[cacheKey]?.let { return it.ifBlank { null } }
+        val id = findTmdbId(titles, kind) ?: return null
+        val text = runCatching {
+            Http.json.decodeFromString<TmdbOverview>(tmdb("$kind/$id") { setQueryParameter("language", "fr-FR") }).overview.trim()
+        }.getOrNull() ?: return null
+        overviews[cacheKey] = text
+        return text.ifBlank { null }
     }
 
     /** Identifiant TMDB d'une série à partir d'un identifiant TVDB ([source] « tvdb_id ») ou IMDb (« imdb_id »). */

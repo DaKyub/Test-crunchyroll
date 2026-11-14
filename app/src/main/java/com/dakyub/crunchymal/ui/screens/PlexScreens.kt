@@ -65,6 +65,7 @@ import com.dakyub.crunchymal.data.plex.PlexItem
 import com.dakyub.crunchymal.data.progress.WatchStatus
 import com.dakyub.crunchymal.ui.components.CenteredMessage
 import com.dakyub.crunchymal.ui.components.ExpandableSynopsis
+import com.dakyub.crunchymal.ui.components.SynopsisWithFallback
 import com.dakyub.crunchymal.ui.components.GenresLine
 import com.dakyub.crunchymal.ui.components.GridPosterWidth
 import com.dakyub.crunchymal.ui.components.MalBadge
@@ -412,10 +413,13 @@ fun PlexShowScreen(ratingKey: String, onOpenSeries: (SeriesRef) -> Unit, onOpenM
                                 )
                             }
                             GenresLine(record?.genres, emptyList())
-                            show.summary?.takeIf { it.isNotBlank() }?.let {
-                                // Focus sur le résumé : la fiche remonte tout en haut (titre, note MAL).
-                                ExpandableSynopsis(it, onFocused = { scope.launch { delay(150); listState.animateScrollToItem(0) } })
-                            }
+                            // Focus sur le résumé : la fiche remonte tout en haut (titre, note MAL).
+                            SynopsisWithFallback(
+                                show.summary,
+                                titles = listOfNotNull(record?.englishTitle) + ref.malTitles,
+                                malId = record?.malId,
+                                onFocused = { scope.launch { delay(150); listState.animateScrollToItem(0) } },
+                            )
                             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
                                 Button(onClick = {
                                     val episode = next ?: state.episodes.firstOrNull()
