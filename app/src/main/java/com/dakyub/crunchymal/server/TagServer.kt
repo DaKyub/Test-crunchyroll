@@ -8,6 +8,8 @@ import com.dakyub.crunchymal.data.CompanionsRepository
 import com.dakyub.crunchymal.data.DiagnosticsUploader
 import com.dakyub.crunchymal.data.Http
 import com.dakyub.crunchymal.data.SettingsBackup
+import com.dakyub.crunchymal.data.SettingsField
+import com.dakyub.crunchymal.data.SettingsFields
 import com.dakyub.crunchymal.data.mal.MalRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -76,10 +78,20 @@ private data class WebToken(val token: String = "")
 @Serializable
 private data class WebTokenResult(val result: String)
 
+@Serializable
+private data class WebFields(val fields: List<SettingsField>)
+
+@Serializable
+private data class WebFieldsSave(val changes: Map<String, String> = emptyMap())
+
+@Serializable
+private data class WebFieldsResult(val report: List<String>, val fields: List<SettingsField>)
+
 /**
  * Petit serveur HTTP sur le réseau local : le téléphone (même Wi-Fi) ouvre une page qui liste toute la
  * liste MAL avec une case par personne, pour marquer d'un coup « vu seul » / « vu avec Prénom ».
- * La page /backup sauvegarde et restaure les réglages de l'app, la page /token reçoit le jeton GitHub.
+ * La page /backup sauvegarde et restaure les réglages de l'app, la page /token reçoit le jeton GitHub et
+ * la page /fields tous les champs de texte des réglages.
  * Un jeton aléatoire, renouvelé à chaque démarrage, est exigé dans l'adresse.
  */
 class TagServer(
@@ -88,6 +100,7 @@ class TagServer(
     private val companions: CompanionsRepository,
     private val backup: SettingsBackup,
     private val diagnostics: DiagnosticsUploader,
+    private val fields: SettingsFields,
 ) {
     data class State(val url: String? = null, val error: String? = null)
 
@@ -203,6 +216,13 @@ class TagServer(
                 val token = Http.json.decodeFromString<WebToken>(body).token
                 if (token.isBlank()) throw IllegalArgumentException("Jeton vide.")
                 Http.json.encodeToString(WebTokenResult(diagnostics.setTokenAndTest(token)))
+            }
+            method == "GET" && path == "/fields" ->
+                respond(s, 200, "text/html; charset=utf-8", context.assets.open("fields.html").use { it.readBytes() })
+            method == "GET" && path == "/api/fields" -> json(s) { Http.json.encodeToString(WebFields(fields.current())) }
+            method == "POST" && path == "/api/fields" -> json(s) {
+                val report = fields.apply(Http.json.decodeFromString<WebFieldsSave>(body).changes)
+                Http.json.encodeToString(WebFieldsResult(report, fields.current()))
             }
             else -> respond(s, 404, "text/plain", "Introuvable".toByteArray())
         }

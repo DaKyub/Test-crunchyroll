@@ -56,6 +56,12 @@ private val Audios = listOf("ja-JP" to "Japonais", "fr-FR" to "Français", "en-U
 
 @Composable
 fun SettingsScreen() {
+    // « Saisie des champs » : tous les champs de texte sur un écran (et depuis le téléphone).
+    var showFields by rememberSaveable { mutableStateOf(false) }
+    if (showFields) {
+        SettingsFieldsScreen(onBack = { showFields = false })
+        return
+    }
     val graph = LocalGraph.current
     val settings = graph.settings
     val context = LocalContext.current
@@ -101,6 +107,16 @@ fun SettingsScreen() {
         verticalArrangement = Arrangement.spacedBy(16.dp),
         modifier = Modifier.fillMaxSize(),
     ) {
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Button(onClick = { showFields = true }) { Text("Saisie des champs (clés, comptes, jetons…)") }
+                Text(
+                    "Tous les champs de texte sur un seul écran, à remplir à la télécommande ou depuis le téléphone.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
         lastCrash?.let { crash ->
             item { Section("Dernier plantage") }
             item { Text(crash, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error) }

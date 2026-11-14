@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Réglages CrunchyMAL</title>
+<style>
+:root { --bg:#f6f6f7; --card:#fff; --text:#16161a; --muted:#6b6b76; --line:#e2e2e6; --accent:#f47521; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#121214; --card:#1c1c20; --text:#ececf0; --muted:#9a9aa6; --line:#2c2c33; }
+}
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--text); font:15px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; padding:16px 16px 96px; }
+h1 { margin:0 0 6px; font-size:20px; }
+.intro { margin:0 0 14px; color:var(--muted); font-size:14px; }
+section { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:14px; }
+h2 { margin:0 0 10px; font-size:16px; }
+label { display:block; font-size:14px; margin:0 0 4px; }
+.field { margin-bottom:12px; }
+.field:last-child { margin-bottom:0; }
+input { display:block; width:100%; font:14px system-ui,sans-serif; padding:9px; border-radius:8px;
+  border:1px solid var(--line); background:var(--bg); color:var(--text); }
+input.dirty { border-color:var(--accent); }
+.hint { font-size:12px; color:var(--muted); margin-top:3px; word-break:break-all; }
+.bar { position:fixed; left:0; right:0; bottom:0; padding:12px 16px; background:var(--card); border-top:1px solid var(--line); }
+button { width:100%; font-size:16px; padding:12px; border-radius:10px; border:0; background:var(--accent); color:#fff; }
+button:disabled { opacity:.5; }
+#report { white-space:pre-wrap; font-size:14px; }
+#report.err { color:#d33; }
+</style>
+</head>
+<body>
+<h1>Réglages CrunchyMAL</h1>
+<p class="intro">Colle ou modifie les champs voulus, puis « Enregistrer ». Seuls les champs modifiés (bordure orange)
+  sont envoyés à la Shield. Les secrets ne sont jamais réaffichés : un champ secret laissé vide reste inchangé.</p>
+<div id="form">Chargement…</div>
+<section id="result" hidden><h2>Résultat</h2><div id="report"></div></section>
+<div class="bar"><button id="save" disabled>Enregistrer</button></div>
+<script>
+var key = new URLSearchParams(location.search).get('k') || '';
+var form = document.getElementById('form');
+var save = document.getElementById('save');
+var result = document.getElementById('result');
+var report = document.getElementById('report');
+var initial = {};
+
+function api(method, body) {
+  return fetch('/api/fields?k=' + encodeURIComponent(key), {
+    method: method, body: body ? JSON.stringify(body) : undefined,
+    headers: body ? { 'Content-Type': 'application/json' } : {}
+  }).then(function (r) {
+    return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || ('Erreur ' + r.status)); return j; });
+  });
+}
+
+function render(fields) {
+  form.textContent = '';
+  initial = {};
+  var sections = {};
+  fields.forEach(function (f) {
+    var sec = sections[f.section];
+    if (!sec) {
+      sec = sections[f.section] = document.createElement('section');
+      var h = document.createElement('h2'); h.textContent = f.section; sec.appendChild(h);
+      form.appendChild(sec);
+    }
+    var wrap = document.createElement('div'); wrap.className = 'field';
+    var label = document.createElement('label'); label.textContent = f.label; label.htmlFor = 'f_' + f.key;
+    var input = document.createElement('input');
+    input.id = 'f_' + f.key; input.dataset.key = f.key;
+    input.type = f.secret ? 'password' : 'text';
+    input.autocomplete = 'off'; input.autocapitalize = 'off'; input.spellcheck = false;
+    input.setAttribute('autocorrect', 'off');
+    input.value = f.value || '';
+    if (f.secret) input.placeholder = f.filled ? '(enregistré — laisser vide pour garder)' : '';
+    initial[f.key] = input.value;
+    input.addEventListener('input', update);
+    wrap.appendChild(label); wrap.appendChild(input);
+    if (f.hint) { var hint = document.createElement('div'); hint.className = 'hint'; hint.textContent = f.hint; wrap.appendChild(hint); }
+    sec.appendChild(wrap);
+  });
+  update();
+}
+
+function changes() {
+  var out = {};
+  form.querySelectorAll('input').forEach(function (input) {
+    if (input.value !== initial[input.dataset.key]) out[input.dataset.key] = input.value;
+  });
+  return out;
+}
+
+function update() {
+  var c = changes();
+  form.querySelectorAll('input').forEach(function (input) { input.classList.toggle('dirty', input.dataset.key in c); });
+  save.disabled = Object.keys(c).length === 0;
+}
+
+save.addEventListener('click', function () {
+  save.disabled = true;
+  save.textContent = 'Enregistrement…';
+  api('POST', { changes: changes() }).then(function (j) {
+    report.className = ''; report.textContent = j.report.join('\n');
+    render(j.fields);
+  }).catch(function (e) {
+    report.className = 'err'; report.textContent = e.message;
+    update();
+  }).then(function () {
+    save.textContent = 'Enregistrer';
+    result.hidden = false;
+    result.scrollIntoView({ behavior: 'smooth' });
+  });
+});
+
+api('GET').then(function (j) { render(j.fields); }).catch(function (e) { form.textContent = e.message; });
+</script>
+</body>
+</html>
