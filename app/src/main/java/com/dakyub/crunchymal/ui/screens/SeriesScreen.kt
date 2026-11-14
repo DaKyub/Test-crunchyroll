@@ -211,15 +211,39 @@ private fun seasonMalKey(seriesKey: String, index: Int, season: CrSeason, record
 private val nonTvSeasonTitle = Regex("""(?i)\b(OVA|OAV|OAD|ONA|special|spécial|movie|film)s?\b""")
 
 /**
- * Élément de la licence (frise MAL) dont le titre correspond nettement à celui de la saison Crunchyroll
- * (« … : Visions of Coleus ») : plus fiable que la fiche MAL de la saison quand celle-ci est mal choisie.
+ * Élément de la licence (frise MAL) qui correspond à une saison Crunchyroll, plus fiable que la fiche MAL de
+ * la saison quand celle-ci est mal choisie :
+ * 1. titre nettement proche, en comparant aussi l'identifiant d'URL (anglais : le titre affiché est en
+ *    français, « Le rêve de Coleus » pour « Visions of Coleus ») ;
+ * 2. sinon, l'unique élément sorti à 10 jours près de la diffusion d'origine du premier épisode.
  */
-private fun franchiseMatch(season: CrSeason, franchise: List<MalAnime>): MalAnime? {
-    if (season.title.isBlank() || genericSeasonTitle.matches(season.title)) return null
-    return franchise
-        .map { anime -> anime to anime.allTitles.filter { it.isNotBlank() }.maxOfOrNull { TitleMatcher.similarity(season.title, it) }.let { it ?: 0.0 } }
+private fun franchiseMatch(node: SeasonNode, franchise: List<MalAnime>): MalAnime? {
+    if (franchise.isEmpty()) return null
+    val season = node.season
+    val titles = listOf(season.title, season.slugTitle.replace('-', ' '))
+        .filter { it.isNotBlank() && !genericSeasonTitle.matches(it) }
+    franchise
+        .map { anime -> anime to (anime.allTitles.filter { it.isNotBlank() }.flatMap { t -> titles.map { TitleMatcher.similarity(it, t) } }.maxOrNull() ?: 0.0) }
         .filter { it.second >= 0.85 }
-        .maxByOrNull { it.second }?.first
+        .maxByOrNull { it.second }
+        ?.let { return it.first }
+    val aired = node.episodes.mapNotNull { it.episode.episodeAirDate.takeIf { d -> d.length >= 10 } }.minOrNull()
+        ?.let { epochDay(it) } ?: return null
+    val near = franchise.filter { anime ->
+        val start = anime.startDate?.let { epochDay(it) } ?: return@filter false
+        kotlin.math.abs(start - aired) <= 10
+    }
+    return near.singleOrNull()
+}
+
+/** Jour (depuis 1970) d'une date « 2022-03-29… », null si elle n'est pas complète. */
+private fun epochDay(date: String): Long? {
+    if (date.length < 10) return null
+    return runCatching {
+        java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+            .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+            .parse(date.take(10))!!.time / 86_400_000L
+    }.getOrNull()
 }
 
 /** Type d'une saison : celui de l'élément de licence correspondant, sinon de sa fiche MAL, sinon déduit du titre. */
@@ -318,7 +342,7 @@ fun SeriesScreen(
             val franchise by remember(sequelStart) { graph.sequels.franchise(sequelStart) }.collectAsState()
             val seasonMatches = remember(tree, franchise) {
                 val list = franchise.orEmpty()
-                tree?.seasons?.mapIndexedNotNull { index, node -> franchiseMatch(node.season, list)?.let { index to it } }?.toMap().orEmpty()
+                tree?.seasons?.mapIndexedNotNull { index, node -> franchiseMatch(node, list)?.let { index to it } }?.toMap().orEmpty()
             }
             // Synchro MAL : épisodes vus de chaque saison reportés sur sa fiche MAL (option des réglages).
             val syncTargets = tree?.seasons?.mapIndexedNotNull { index, node ->
