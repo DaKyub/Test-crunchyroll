@@ -69,6 +69,7 @@ import com.dakyub.crunchymal.ui.components.rememberMalRecord
 import com.dakyub.crunchymal.ui.components.rememberSeasonRatings
 import com.dakyub.crunchymal.data.ratings.firstEpisodeNumber
 import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.launch
@@ -105,10 +106,13 @@ class AdnSeriesViewModel(private val graph: Graph, private val showId: String) :
     fun load(force: Boolean = false) {
         viewModelScope.launch {
             state.value = state.value.copy(loading = true, error = null)
+            // coroutineScope : l'échec d'une requête reste dans runCatching (sinon plantage de l'app).
             runCatching {
-                val show = async { graph.adn.show(showId) }
-                val tree = async { runCatching { graph.adnProgress.tree(showId, force) }.getOrNull() }
-                show.await() to tree.await()
+                coroutineScope {
+                    val show = async { graph.adn.show(showId) }
+                    val tree = async { runCatching { graph.adnProgress.tree(showId, force) }.getOrNull() }
+                    show.await() to tree.await()
+                }
             }.onSuccess { (show, tree) ->
                 applyTree(tree, show)
             }.onFailure {

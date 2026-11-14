@@ -77,6 +77,7 @@ import com.dakyub.crunchymal.ui.components.airingLabel
 import com.dakyub.crunchymal.ui.components.rememberMalRecord
 import com.dakyub.crunchymal.ui.components.seasonChipColors
 import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -300,10 +301,14 @@ class PlexShowViewModel(private val graph: Graph, private val ratingKey: String)
     fun load() {
         viewModelScope.launch {
             state.value = state.value.copy(loading = true, error = null)
+            // coroutineScope : l'échec d'une requête reste dans runCatching (sinon il remonte au viewModelScope
+            // et fait planter l'app quand le serveur Plex est injoignable).
             runCatching {
-                val show = async { graph.plex.item(ratingKey) }
-                val episodes = async { graph.plex.episodes(ratingKey) }
-                show.await() to episodes.await()
+                coroutineScope {
+                    val show = async { graph.plex.item(ratingKey) }
+                    val episodes = async { graph.plex.episodes(ratingKey) }
+                    show.await() to episodes.await()
+                }
             }.onSuccess { (show, episodes) ->
                 val current = state.value
                 val seasons = episodes.groupBy { it.parentIndex ?: 1 }.toSortedMap().keys.toList()
