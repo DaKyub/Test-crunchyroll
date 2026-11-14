@@ -34,6 +34,8 @@ data class MalAnime(
     val airing: String? = null,
     /** Durée moyenne d'un épisode en minutes (liste MAL seulement). */
     val episodeMinutes: Int? = null,
+    /** Début de diffusion (« 2016-08-10 », parfois seulement « 2016-08 » ou « 2016 »). */
+    val startDate: String? = null,
 ) {
     val url: String get() = "https://myanimelist.net/anime/$malId"
 
@@ -87,6 +89,7 @@ private data class Node(
         synopsis = synopsis?.takeIf { it.isNotBlank() },
         airing = status?.takeIf { it.isNotBlank() },
         episodeMinutes = averageEpisodeDuration?.takeIf { it > 0 }?.let { (it + 30) / 60 },
+        startDate = startDate?.takeIf { it.isNotBlank() },
     )
 }
 

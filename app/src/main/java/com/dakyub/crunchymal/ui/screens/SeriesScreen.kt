@@ -66,6 +66,7 @@ import com.dakyub.crunchymal.ui.components.MalBadge
 import com.dakyub.crunchymal.ui.components.MalRecommendationsRow
 import com.dakyub.crunchymal.ui.components.SequelsRow
 import com.dakyub.crunchymal.ui.components.airingLabel
+import com.dakyub.crunchymal.ui.components.malTypeLabel
 import com.dakyub.crunchymal.ui.theme.CrunchyOrange
 import com.dakyub.crunchymal.ui.components.seasonChipColors
 import com.dakyub.crunchymal.ui.components.MediaCard
@@ -206,10 +207,32 @@ private fun seasonMalKey(seriesKey: String, index: Int, season: CrSeason, record
     else -> "seasonmal:${season.id}"
 }
 
+/**
+ * Nom d'une saison : « OVA 2016 », « Film 2021 »… quand la fiche MAL n'est pas une série TV (Crunchyroll les
+ * numérote comme des saisons), sinon [tvLabel] avec le numéro Crunchyroll.
+ */
+private fun seasonLabel(season: CrSeason, record: MalRecord?, tvLabel: String = "S"): String =
+    malTypeLabel(record?.takeIf { it.malId != null }?.type)
+        ?.let { type -> listOfNotNull(type, record?.startDate?.take(4)).joinToString(" ") }
+        ?: "$tvLabel${season.seasonNumber}"
+
+/**
+ * Ordre d'affichage des saisons (indices dans [seasons]) : chronologique d'après les dates MAL, car Crunchyroll
+ * place les OVA et films à la fin. Une saison sans date reste juste après la précédente.
+ */
+private fun chronologicalOrder(seriesKey: String, seasons: List<SeasonNode>, records: Map<String, MalRecord>): List<Int> {
+    var last = ""
+    val dates = seasons.mapIndexed { index, node ->
+        records[seasonMalKey(seriesKey, index, node.season, records)]?.takeIf { it.malId != null }?.startDate?.also { last = it } ?: last
+    }
+    return seasons.indices.sortedWith(compareBy({ dates[it] }, { it }))
+}
+
 /** Fiches MAL de chaque saison, pour « Ma liste MAL » et « Vu avec… ». */
 private fun seasonChoices(seriesId: String, seasons: List<SeasonNode>, records: Map<String, MalRecord>): List<MalEntryChoice> =
     seasons.mapIndexed { index, node ->
-        MalEntryChoice("Saison ${node.season.seasonNumber}", seasonMalKey("series:$seriesId", index, node.season, records))
+        val key = seasonMalKey("series:$seriesId", index, node.season, records)
+        MalEntryChoice(seasonLabel(node.season, records[key], tvLabel = "Saison "), key)
     }
 
 @Composable
@@ -352,8 +375,11 @@ fun SeriesScreen(
                         }
                     } else if (tree.seasons.isNotEmpty()) {
                         item {
+                            // Ordre chronologique d'après MAL (OVA et films à leur place), avec leur type.
+                            val order = chronologicalOrder(ref.malKey, tree.seasons, malRecords)
                             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                itemsIndexed(tree.seasons) { index, node ->
+                                items(order) { index ->
+                                    val node = tree.seasons[index]
                                     val s = node.season
                                     val key = seasonMalKey(ref.malKey, index, s, malRecords)
                                     val titles = if (key == ref.malKey) ref.malTitles
@@ -366,7 +392,7 @@ fun SeriesScreen(
                                         colors = seasonChipColors(CrunchyOrange),
                                     ) {
                                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            Text("S${s.seasonNumber} · $watched/${node.episodes.size}")
+                                            Text("${seasonLabel(s, malRecords[key])} · $watched/${node.episodes.size}")
                                             MalBadge(key, titles)
                                             // Diffusion de la saison d'après MAL (en cours, terminée, pas encore sortie).
                                             airingLabel(malRecords[key]?.airing)?.let { Text(it, style = MaterialTheme.typography.labelSmall) }

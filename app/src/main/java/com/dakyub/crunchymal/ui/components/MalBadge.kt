@@ -59,6 +59,16 @@ fun MalBadge(key: String, titles: List<String>, modifier: Modifier = Modifier, l
     }
 }
 
+/** Type MAL autre qu'une saison TV (« OVA », « Film »…), null pour une série TV ou un type inconnu. */
+fun malTypeLabel(type: String?): String? = when (type?.lowercase()) {
+    "ova" -> "OVA"
+    "ona" -> "ONA"
+    "special", "tv_special" -> "Spécial"
+    "movie" -> "Film"
+    "music" -> "Clip"
+    else -> null
+}
+
 /** Statut de diffusion MAL en français (« En cours », « Terminé », « Pas encore sorti »). */
 fun airingLabel(status: String?): String? = when (status) {
     "currently_airing" -> "En cours"

@@ -35,6 +35,10 @@ data class MalRecord(
     val englishTitle: String? = null,
     /** Diffusion (finished_airing, currently_airing, not_yet_aired) ; null = ancienne fiche à rafraîchir. */
     val airing: String? = null,
+    /** Type MAL (tv, ova, movie, special…) ; null = ancienne fiche à rafraîchir. */
+    val type: String? = null,
+    /** Début de diffusion d'après MAL, pour remettre les saisons et OVA dans l'ordre chronologique. */
+    val startDate: String? = null,
 )
 
 class MalRepository(context: Context, clientId: () -> String, val auth: MalAuth) {
@@ -88,7 +92,7 @@ class MalRepository(context: Context, clientId: () -> String, val auth: MalAuth)
         return when {
             r.manual && r.malId == null -> false
             r.malId == null -> age > NO_MATCH_TTL
-            r.genres == null || r.airing == null -> true
+            r.genres == null || r.airing == null || r.type == null -> true
             else -> age > SCORE_TTL
         }
     }
@@ -287,6 +291,8 @@ class MalRepository(context: Context, clientId: () -> String, val auth: MalAuth)
         genres = genres,
         englishTitle = titleEnglish,
         airing = airing,
+        type = type ?: "unknown",
+        startDate = startDate,
     )
 
     private companion object {
