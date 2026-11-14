@@ -26,9 +26,16 @@ class HttpException(val code: Int, val body: String) : IOException("HTTP $code: 
 
 /** Exécute la requête et renvoie le corps, ou lève [HttpException] si le statut n'est pas 2xx. */
 suspend fun OkHttpClient.fetch(request: Request): String = withContext(Dispatchers.IO) {
-    newCall(request).execute().use { response ->
-        val body = response.body?.string().orEmpty()
-        if (!response.isSuccessful) throw HttpException(response.code, body)
-        body
+    val t0 = Perf.now()
+    try {
+        newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            Perf.http(request.url, response.code, body.length, Perf.now() - t0)
+            if (!response.isSuccessful) throw HttpException(response.code, body)
+            body
+        }
+    } catch (e: IOException) {
+        if (e !is HttpException) Perf.http(request.url, -1, 0, Perf.now() - t0)
+        throw e
     }
 }

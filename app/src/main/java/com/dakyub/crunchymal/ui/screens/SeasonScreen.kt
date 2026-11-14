@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal.ui.screens
 
+import com.dakyub.crunchymal.data.Perf
 import com.dakyub.crunchymal.ui.components.nextPlatformFilter
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
@@ -109,7 +110,7 @@ class SeasonViewModel(private val graph: Graph) : ViewModel() {
         val season = ui.value.season
         viewModelScope.launch {
             ui.value = ui.value.copy(loading = true, error = null)
-            runCatching { graph.mal.seasonal(season.year, season.season.api) }
+            runCatching { Perf.span("Onglet Saison", "${season.season.api} ${season.year}") { graph.mal.seasonal(season.year, season.season.api) } }
                 .onSuccess { list ->
                     if (ui.value.season != season) return@onSuccess
                     ui.value = ui.value.copy(loading = false, anime = list)

@@ -45,7 +45,7 @@ object Foreground {
  * reprennent quand on y revient ; une nouvelle demande de la même clé les rattache à l'onglet courant.
  */
 class PriorityWorkQueue(private val scope: CoroutineScope, private val workers: Int, private val name: String) {
-    private class Task(val key: String, var owner: String?, var seq: Long, var work: suspend () -> Unit)
+    private class Task(val key: String, var owner: String?, var seq: Long, var work: suspend () -> Unit, val submittedAt: Long = Perf.now())
 
     private val tasks = LinkedHashMap<String, Task>()
     private val running = HashSet<String>()
@@ -53,6 +53,7 @@ class PriorityWorkQueue(private val scope: CoroutineScope, private val workers: 
     private val wake = Channel<Unit>(Channel.CONFLATED)
 
     init {
+        Perf.register(this)
         repeat(workers) {
             scope.launch {
                 while (true) {
@@ -61,8 +62,11 @@ class PriorityWorkQueue(private val scope: CoroutineScope, private val workers: 
                         wake.receive()
                         continue
                     }
+                    val started = Perf.now()
+                    Perf.record("File $name", "attente", started - task.submittedAt)
                     try {
                         task.work()
+                        Perf.record("File $name", "travail", Perf.now() - started)
                     } catch (e: Exception) {
                         Log.w("PriorityWorkQueue", "$name : échec pour ${task.key}", e)
                     } finally {
@@ -95,6 +99,18 @@ class PriorityWorkQueue(private val scope: CoroutineScope, private val workers: 
             }
         }
         wake.trySend(Unit)
+    }
+
+    /** État de la file pour le journal de performances. */
+    @Synchronized
+    fun snapshot(): String {
+        val current = Foreground.owner.value ?: OWNERLESS
+        val visible = tasks.values.count { Foreground.isVisible(it.key) }
+        val tab = tasks.values.count { !Foreground.isVisible(it.key) && (it.owner == current || it.owner == OWNERLESS) }
+        val background = tasks.values.count { it.owner == null }
+        val paused = tasks.size - visible - tab - background
+        return "File $name : $workers exécutants, ${running.size} en cours, ${tasks.size} en attente " +
+            "(à l'écran $visible, onglet $tab, fond $background, en pause $paused)"
     }
 
     /** En attente ou en cours pour [key]. */

@@ -244,6 +244,9 @@ class MalRepository(context: Context, clientId: () -> String, val auth: MalAuth)
 
     suspend fun seasonal(year: Int, season: String): List<MalAnime> = api.seasonal(year, season)
 
+    /** Accès direct à l'API (sans cache), pour le benchmark de chargement. */
+    val rawApi: MalApi get() = api
+
     suspend fun sequelIds(malId: Int, priority: Boolean = false): List<Int> = api.sequelIds(malId, priority)
 
     private val rankingCache = ConcurrentHashMap<String, List<MalAnime>>()

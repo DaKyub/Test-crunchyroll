@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal.ui.screens
 
+import com.dakyub.crunchymal.data.Perf
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
 import com.dakyub.crunchymal.ui.components.nextCompanionFilter
@@ -264,7 +265,9 @@ class BrowseViewModel(private val graph: Graph) : ViewModel() {
         job?.cancel()
         job = viewModelScope.launch {
             ui.value = ui.value.copy(loading = true, error = null)
-            val results = selections.values.map { selection -> async { selection.provider to runCatching { load(selection, alpha) } } }.awaitAll()
+            val results = selections.values.map { selection ->
+                async { selection.provider to runCatching { Perf.span("Onglet Parcourir", "${selection.provider.label} ${selection.title}") { load(selection, alpha) } } }
+            }.awaitAll()
             val cr = results.firstOrNull { it.first == Provider.CRUNCHYROLL }?.second?.getOrNull().orEmpty()
             val adn = results.firstOrNull { it.first == Provider.ADN }?.second?.getOrNull().orEmpty()
             // Les deux plateformes dans une seule grille, sans doublon (une série sur les deux porte les deux badges).

@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal.ui.screens
 
+import com.dakyub.crunchymal.data.Perf
 import com.dakyub.crunchymal.ui.components.malGenreLabel
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -166,7 +167,7 @@ class DiscoverViewModel(private val graph: Graph) : ViewModel() {
         viewModelScope.launch {
             ui.value = ui.value.copy(loading = true, error = null)
             graph.mal.refreshMyListSeenIds()
-            runCatching { graph.mal.ranking(ranking.api) }
+            runCatching { Perf.span("Onglet Découvrir", "classement ${ranking.api}") { graph.mal.ranking(ranking.api) } }
                 .onSuccess { list ->
                     if (ui.value.ranking != ranking) return@onSuccess
                     ui.value = ui.value.copy(loading = false, anime = list)

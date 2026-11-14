@@ -1,6 +1,7 @@
 package com.dakyub.crunchymal.data.mal
 
 import com.dakyub.crunchymal.data.Http
+import com.dakyub.crunchymal.data.Perf
 import com.dakyub.crunchymal.data.HttpException
 import com.dakyub.crunchymal.data.fetch
 import kotlinx.coroutines.delay
@@ -168,7 +169,10 @@ class MalApi(private val clientId: () -> String) {
      * recherches de fond (notes des cartes de Parcourir…) au lieu d'attendre la fin de la file.
      */
     private suspend fun <T> throttled(priority: Boolean, block: suspend () -> T): T {
+        val queuedAt = Perf.now()
         suspend fun paced(): T {
+            // Attente derrière la limite de débit (et les autres requêtes MAL), hors durée de la requête.
+            Perf.record("Attente débit MAL", if (priority) "prioritaire" else "fond", Perf.now() - queuedAt)
             val wait = lastCall + MIN_INTERVAL_MS - System.currentTimeMillis()
             if (wait > 0) delay(wait)
             lastCall = System.currentTimeMillis()

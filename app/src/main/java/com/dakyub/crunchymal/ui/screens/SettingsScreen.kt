@@ -44,6 +44,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.dakyub.crunchymal.LocalGraph
 import com.dakyub.crunchymal.ui.components.TvTextField
+import com.dakyub.crunchymal.data.loadBenchmark
 import com.dakyub.crunchymal.ui.components.QrCode
 import com.dakyub.crunchymal.ui.components.UpdateButton
 import com.dakyub.crunchymal.ui.components.label
@@ -561,7 +562,8 @@ fun SettingsScreen(onNavigate: (String) -> Unit = {}) {
         }
         item { TvTextField(githubToken, { githubToken = it }, "Jeton GitHub (github_pat_…)", password = true) }
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            // Rangée défilante : les boutons hors écran restent accessibles à la télécommande.
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
                 Button(onClick = {
                     settings.githubToken = githubToken
                     githubToken = settings.githubToken
@@ -569,6 +571,10 @@ fun SettingsScreen(onNavigate: (String) -> Unit = {}) {
                     graph.diagnostics.launchTest()
                 }) { Text("Enregistrer le jeton") }
                 OutlinedButton(onClick = { graph.diagnostics.launchTest() }) { Text("Tester le jeton") }
+                // Temps de chargement : test chronométré + journal depuis le lancement (voir data/Perf.kt).
+                OutlinedButton(onClick = { sendDiagnostic("Benchmark de chargement") { graph.loadBenchmark() } }) {
+                    Text("Benchmark de chargement")
+                }
                 OutlinedButton(onClick = { val appContext = context.applicationContext
                     sendDiagnostic("Diagnostic général") { generalDiagnostic(graph, appContext) } }) {
                     Text("Envoyer un diagnostic général")
