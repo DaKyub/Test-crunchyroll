@@ -12,9 +12,10 @@ import androidx.tv.material3.Text
 import com.dakyub.crunchymal.LocalGraph
 
 /**
- * Résumé d'une fiche : celui du service ([primary]) ; s'il est vide, celui de TMDB en français, sinon celui
- * de MAL en anglais, avec la source indiquée. [titles] : titres pour trouver la série sur TMDB (anglais
- * ou d'origine d'abord), [malId] : fiche MAL de la série.
+ * Résumé d'une fiche Crunchyroll / ADN / Plex : celui de TMDB en français en priorité (le catalogue de
+ * Crunchyroll a des résumés qui parlent parfois d'une autre série), sinon celui du service ([primary]),
+ * sinon celui de MAL en anglais. La source est indiquée ; avec TMDB, le résumé du service ([service]) reste
+ * lisible en dépliant le texte. [titles] : titres pour trouver la série sur TMDB, [malId] : fiche MAL.
  */
 @Composable
 fun SynopsisWithFallback(
@@ -24,22 +25,38 @@ fun SynopsisWithFallback(
     onFocused: () -> Unit,
     modifier: Modifier = Modifier,
     movie: Boolean = false,
+    service: String = "du service",
 ) {
     val graph = LocalGraph.current
-    val loadMal: (suspend () -> String?)? = malId?.let { id -> { graph.mal.synopsis(id) } }
-    if (!primary.isNullOrBlank()) {
-        ExpandableSynopsis(primary, onFocused = onFocused, modifier = modifier, loadFull = loadMal)
-        return
-    }
     val searchTitles = titles.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
-    val fallback by produceState<Pair<String, String>?>(null, searchTitles, malId) {
-        value = runCatching { graph.watchPlatforms.frenchOverview(searchTitles, movie) }.getOrNull()?.let { it to "Résumé TMDB" }
-            ?: malId?.let { id -> runCatching { graph.mal.synopsis(id) }.getOrNull() }?.let { it to "Résumé MyAnimeList (en anglais)" }
+    val hasTmdb = graph.settings.tmdbKey.isNotBlank()
+    // "" : TMDB n'a rien (ou pas de clé) ; null : recherche en cours (rien d'affiché, pour éviter un changement de texte).
+    val french by produceState<String?>(if (hasTmdb) null else "", searchTitles, movie) {
+        if (hasTmdb) value = runCatching { graph.watchPlatforms.frenchOverview(searchTitles, movie) }.getOrNull().orEmpty()
     }
-    val (text, source) = fallback ?: return
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        ExpandableSynopsis(text, onFocused = onFocused)
-        Text(source, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    val tmdb = french ?: return
+    val own = primary?.takeIf { it.isNotBlank() }
+    val loadMal: (suspend () -> String?)? = malId?.let { id -> { graph.mal.synopsis(id) } }
+    when {
+        tmdb.isNotBlank() -> Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            // Déplié (OK), le résumé du service suit celui de TMDB.
+            val text = if (own != null && own.trim() != tmdb.trim()) "$tmdb\n\n— Résumé $service —\n$own" else tmdb
+            ExpandableSynopsis(text, onFocused = onFocused)
+            Text(
+                "Résumé TMDB" + if (own != null) " · OK pour lire aussi celui $service" else "",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        own != null -> ExpandableSynopsis(own, onFocused = onFocused, modifier = modifier, loadFull = loadMal)
+        else -> {
+            val mal by produceState<String?>(null, malId) { value = malId?.let { id -> runCatching { graph.mal.synopsis(id) }.getOrNull() } }
+            val text = mal ?: return
+            Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                ExpandableSynopsis(text, onFocused = onFocused)
+                Text("Résumé MyAnimeList (en anglais)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
     }
 }
 

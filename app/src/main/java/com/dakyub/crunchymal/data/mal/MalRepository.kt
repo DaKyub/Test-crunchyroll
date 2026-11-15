@@ -221,6 +221,19 @@ class MalRepository(context: Context, clientId: () -> String, val auth: MalAuth)
         runCatching { myList() }
     }
 
+    /**
+     * Rattache [key] à [anime] (fiche trouvée autrement que par la recherche de titres, ex. la saison d'une
+     * fiche Crunchyroll reconnue dans la licence), sauf correction manuelle. La note complète suit au besoin.
+     */
+    suspend fun adopt(key: String, anime: MalAnime) {
+        loaded.join()
+        val existing = _records.value[key]
+        if (existing?.manual == true || existing?.malId == anime.malId) return
+        // genres = null : fiche à compléter (note, votes, genres) par la requête qui suit.
+        put(key, anime.toRecord(System.currentTimeMillis(), manual = false).copy(genres = null))
+        request(key, emptyList())
+    }
+
     /** Enregistre une fiche déjà connue (ex. liste MAL) pour que les badges l'affichent sans recherche. */
     suspend fun seed(key: String, anime: MalAnime) {
         loaded.join()

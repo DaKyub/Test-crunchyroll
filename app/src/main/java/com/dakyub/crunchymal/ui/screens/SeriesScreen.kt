@@ -81,6 +81,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import com.dakyub.crunchymal.data.mal.MalRecord
 import com.dakyub.crunchymal.data.mal.TitleMatcher
 import com.dakyub.crunchymal.data.crunchyroll.CrSeason
+import com.dakyub.crunchymal.data.crunchyroll.CrEpisode
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.LaunchedEffect
 import android.widget.Toast
@@ -273,9 +274,16 @@ private fun seasonStart(node: SeasonNode, record: MalRecord?, match: MalAnime? =
  * Nom d'une saison : « OVA 2016 », « Film 2021 »… quand ce n'est pas une saison TV (Crunchyroll les
  * numérote comme des saisons), sinon [tvLabel] avec le numéro Crunchyroll.
  */
-private fun seasonLabel(node: SeasonNode, record: MalRecord?, tvLabel: String = "S", match: MalAnime? = null): String =
+private fun seasonLabel(
+    node: SeasonNode,
+    record: MalRecord?,
+    tvLabel: String = "S",
+    match: MalAnime? = null,
+    tvNumber: TvNumber? = null,
+): String =
     seasonType(node.season, record, match)
         ?.let { type -> listOfNotNull(type, seasonStart(node, record, match).take(4).ifBlank { null }).joinToString(" ") }
+        ?: tvNumber?.label(tvLabel)
         ?: "$tvLabel${node.season.seasonNumber}"
 
 /**
@@ -295,16 +303,115 @@ private fun chronologicalOrder(
     return seasons.indices.sortedWith(compareBy({ dates[it] }, { it }))
 }
 
+/** « Part 2 », « Partie 2 », « Cour 2 », « 2nd Part »… : numéro de partie d'une saison découpée. */
+private val partNumber = Regex("""(?i)\b(?:part|partie|cour)\s*(\d+|ii|iii|iv)\b|\b(\d+)(?:st|nd|rd|th)\s+(?:part|cour)\b""")
+
+private fun partOf(titles: List<String>): Int? = titles.firstNotNullOfOrNull { title ->
+    partNumber.find(title)?.let { m ->
+        when (val raw = m.groupValues[1].ifBlank { m.groupValues[2] }.lowercase()) {
+            "ii" -> 2
+            "iii" -> 3
+            "iv" -> 4
+            else -> raw.toIntOrNull()
+        }
+    }
+}
+
+/** Numéro d'une saison TV calculé par l'app ([number]) et, pour une saison découpée, sa partie. */
+private data class TvNumber(val number: Int, val part: Int?) {
+    fun label(prefix: String) = "$prefix$number" + (part?.let { " · partie $it" } ?: "")
+}
+
+/**
+ * Numérote les saisons TV dans l'ordre chronologique ([order]) : les OVA, films et spéciaux (« Memories » de
+ * My Hero Academia, que Crunchyroll compte comme saison 7) ne comptent pas, et la 2e partie d'une saison
+ * (« Part 2 ») garde le numéro de la précédente. Crunchyroll décale sinon tous les numéros suivants.
+ */
+private fun tvNumbers(
+    seriesKey: String,
+    order: List<Int>,
+    seasons: List<SeasonNode>,
+    records: Map<String, MalRecord>,
+    matches: Map<Int, MalAnime>,
+): Map<Int, TvNumber> {
+    val out = HashMap<Int, TvNumber>()
+    var number = 0
+    var lastPart = 1
+    for (index in order) {
+        val node = seasons[index]
+        val record = records[seasonMalKey(seriesKey, index, node.season, records)]
+        if (seasonType(node.season, record, matches[index]) != null) continue
+        val titles = listOf(node.season.title, node.season.slugTitle.replace('-', ' ')) + matches[index]?.allTitles.orEmpty()
+        // Partie suivante de la saison précédente seulement (« Part 3 » de JoJo après une saison sans partie
+        // est une nouvelle saison, pas la 3e partie de la précédente).
+        val part = partOf(titles)?.takeIf { number > 0 && it == lastPart + 1 }
+        if (part == null) {
+            number++
+            lastPart = 1
+        } else {
+            lastPart = part
+        }
+        out[index] = TvNumber(number, part)
+    }
+    return out
+}
+
+/**
+ * Défauts du catalogue Crunchyroll dans une saison : épisodes sans sous-titres français (ou anglais) alors
+ * que la plupart des autres en ont, et numéros d'épisodes manquants.
+ */
+private fun catalogDefects(node: SeasonNode): CatalogDefects {
+    val episodes = node.episodes.filter { it.available }.map { it.episode }
+    if (episodes.isEmpty()) return CatalogDefects()
+    fun missing(locale: String): List<CrEpisode> {
+        val ok = episodes.count { it.understandableIn(locale) }
+        // Défaut seulement si la saison est bien proposée dans cette langue (au moins la moitié des épisodes).
+        return if (ok * 2 >= episodes.size && ok < episodes.size) episodes.filter { !it.understandableIn(locale) } else emptyList()
+    }
+    val noFrench = missing("fr-FR")
+    val noEnglish = missing("en-US")
+    val numbers = episodes.mapNotNull { it.episodeNumber }.distinct().sorted()
+    val gaps = if (numbers.size >= 2) (numbers.first()..numbers.last()).filter { it !in numbers } else emptyList()
+    return CatalogDefects(noFrench.map { it.id }.toSet(), noEnglish.map { it.id }.toSet(), noFrench, noEnglish, gaps)
+}
+
+private data class CatalogDefects(
+    val noFrenchIds: Set<String> = emptySet(),
+    val noEnglishIds: Set<String> = emptySet(),
+    val noFrench: List<CrEpisode> = emptyList(),
+    val noEnglish: List<CrEpisode> = emptyList(),
+    val gaps: List<Int> = emptyList(),
+) {
+    val any: Boolean get() = noFrench.isNotEmpty() || noEnglish.isNotEmpty() || gaps.isNotEmpty()
+
+    /** Ligne affichée sous les épisodes, null si la saison n'a pas de défaut. */
+    fun text(): String? {
+        fun eps(list: List<CrEpisode>) =
+            list.take(8).joinToString(", ") { "E" + it.episode.ifBlank { it.episodeNumber?.toString() ?: "?" } } +
+                if (list.size > 8) " et ${list.size - 8} autres" else ""
+        val parts = listOfNotNull(
+            noFrench.takeIf { it.isNotEmpty() }?.let { "${eps(it)} sans sous-titres français" },
+            noEnglish.takeIf { it.isNotEmpty() }?.let { "${eps(it)} sans sous-titres anglais" },
+            gaps.takeIf { it.isNotEmpty() }?.let { g ->
+                g.take(8).joinToString(", ") { "E$it" } + (if (g.size > 8) " et ${g.size - 8} autres" else "") +
+                    (if (g.size > 1) " absents" else " absent") + " de la saison"
+            },
+        )
+        return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ", prefix = "⚠ Défauts Crunchyroll : ")
+    }
+}
+
 /** Fiches MAL de chaque saison, pour « Ma liste MAL » et « Vu avec… ». */
 private fun seasonChoices(
     seriesId: String,
     seasons: List<SeasonNode>,
     records: Map<String, MalRecord>,
     matches: Map<Int, MalAnime> = emptyMap(),
+    numbers: Map<Int, TvNumber> = emptyMap(),
 ): List<MalEntryChoice> =
     seasons.mapIndexed { index, node ->
         val key = seasonMalKey("series:$seriesId", index, node.season, records)
-        MalEntryChoice(seasonLabel(node, records[key], tvLabel = "Saison ", match = matches[index]), key)
+        MalEntryChoice(seasonLabel(node, records[key], tvLabel = "Saison ", match = matches[index], tvNumber = numbers[index]), key)
     }
 
 @Composable
@@ -344,6 +451,22 @@ fun SeriesScreen(
                 val list = franchise.orEmpty()
                 tree?.seasons?.mapIndexedNotNull { index, node -> franchiseMatch(node, list)?.let { index to it } }?.toMap().orEmpty()
             }
+            // Saison reconnue dans la licence : sa note MAL est celle de cet élément (Crunchyroll décale les numéros
+            // de saison, la recherche « saison N » tombait sur une autre saison). Pas pour la saison 1 (fiche série).
+            LaunchedEffect(seasonMatches) {
+                tree?.seasons?.forEachIndexed { index, node ->
+                    val match = seasonMatches[index] ?: return@forEachIndexed
+                    val key = seasonMalKey(ref.malKey, index, node.season, malRecords)
+                    if (key != ref.malKey) graph.mal.adopt(key, match)
+                }
+            }
+            val seasonOrder = remember(tree, malRecords, seasonMatches) {
+                tree?.let { chronologicalOrder(ref.malKey, it.seasons, malRecords, seasonMatches) }.orEmpty()
+            }
+            val seasonNumbers = remember(tree, malRecords, seasonMatches, seasonOrder) {
+                tree?.let { tvNumbers(ref.malKey, seasonOrder, it.seasons, malRecords, seasonMatches) }.orEmpty()
+            }
+            val defects = remember(tree) { tree?.seasons?.map { catalogDefects(it) }.orEmpty() }
             // Synchro MAL : épisodes vus de chaque saison reportés sur sa fiche MAL (option des réglages).
             val syncTargets = tree?.seasons?.mapIndexedNotNull { index, node ->
                 malRecords[seasonMalKey(ref.malKey, index, node.season, malRecords)]?.malId
@@ -402,7 +525,7 @@ fun SeriesScreen(
                     val synopsis = series.extendedDescription.ifBlank { series.description }
                     item {
                         // Focus sur le résumé : la fiche remonte tout en haut (titre, note MAL).
-                        // Sans résumé Crunchyroll : celui de TMDB (français), sinon de MAL.
+                        // Résumé TMDB (français) en priorité, puis celui de Crunchyroll, puis celui de MAL.
                         val seriesRecord = malRecords[ref.malKey]
                         SynopsisWithFallback(
                             synopsis,
@@ -410,6 +533,7 @@ fun SeriesScreen(
                             malId = seriesRecord?.malId,
                             onFocused = { scope.launch { delay(150); listState.animateScrollToItem(0) } },
                             modifier = Modifier.fillMaxWidth(0.6f),
+                            service = "de Crunchyroll",
                         )
                     }
                     item {
@@ -440,7 +564,7 @@ fun SeriesScreen(
                             OutlinedButton(onClick = { malListOpen = true }) { Text("Ma liste MAL") }
                             CompanionsButton(
                                 listOf(MalEntryChoice("Série", "series:${series.id}")) +
-                                    seasonChoices(series.id, state.tree?.seasons.orEmpty(), malRecords, seasonMatches)
+                                    seasonChoices(series.id, state.tree?.seasons.orEmpty(), malRecords, seasonMatches, seasonNumbers)
                             )
                             OutlinedButton(onClick = { correcting = ref.malKey to (ref.malTitles.firstOrNull() ?: series.title) }) {
                                 Text("Corriger MAL")
@@ -459,7 +583,7 @@ fun SeriesScreen(
                     } else if (tree.seasons.isNotEmpty()) {
                         item {
                             // Ordre chronologique d'après MAL (OVA et films à leur place), avec leur type.
-                            val order = chronologicalOrder(ref.malKey, tree.seasons, malRecords, seasonMatches)
+                            val order = seasonOrder
                             // Fiches en cache sans type ni date : complétées pour cette série seulement.
                             LaunchedEffect(tree.seasons.size, malRecords.size) {
                                 tree.seasons.forEachIndexed { index, node ->
@@ -472,7 +596,7 @@ fun SeriesScreen(
                                     val s = node.season
                                     val key = seasonMalKey(ref.malKey, index, s, malRecords)
                                     val titles = if (key == ref.malKey) ref.malTitles
-                                    else seasonMalTitles(series.title, series.slugTitle, s.title, s.slugTitle, s.seasonNumber)
+                                    else seasonMalTitles(series.title, series.slugTitle, s.title, s.slugTitle, seasonNumbers[index]?.number ?: s.seasonNumber)
                                     val watched = node.episodes.count { it.watched }
                                     FilterChip(
                                         selected = index == state.selectedSeason,
@@ -481,7 +605,10 @@ fun SeriesScreen(
                                         colors = seasonChipColors(CrunchyOrange),
                                     ) {
                                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            Text("${seasonLabel(node, malRecords[key], match = seasonMatches[index])} · $watched/${node.episodes.size}")
+                                            Text(
+                                                (if (defects.getOrNull(index)?.any == true) "⚠ " else "") +
+                                                    "${seasonLabel(node, malRecords[key], match = seasonMatches[index], tvNumber = seasonNumbers[index])} · $watched/${node.episodes.size}"
+                                            )
                                             MalBadge(key, titles)
                                             // Diffusion de la saison d'après MAL (en cours, terminée, pas encore sortie).
                                             airingLabel(malRecords[key]?.airing)?.let { Text(it, style = MaterialTheme.typography.labelSmall) }
@@ -497,7 +624,8 @@ fun SeriesScreen(
                                 .filter { it.isNotBlank() }.distinct()
                             val ratings = rememberSeasonRatings(
                                 ratingTitles,
-                                season?.season?.seasonNumber ?: 1,
+                                // Numéro de saison calculé (sans les spéciaux que Crunchyroll compte comme saisons).
+                                seasonNumbers[state.selectedSeason]?.number ?: season?.season?.seasonNumber ?: 1,
                                 episodeCount = season?.episodes?.size ?: 0,
                                 episodesBefore = tree.seasons.take(state.selectedSeason).sumOf { it.episodes.size },
                             )
@@ -519,6 +647,8 @@ fun SeriesScreen(
                                                     series = SeriesRef(ep.id, "${if (node.watched) "✓ " else ""}${ep.label} · ${ep.title}", wideUrl = ep.images.thumbnail.best(400)),
                                                     subtitle = listOfNotNull(
                                                         "à venir".takeIf { !node.available },
+                                                        "⚠ sans s.-t. FR".takeIf { ep.id in defects.getOrNull(state.selectedSeason)?.noFrenchIds.orEmpty() },
+                                                        "⚠ sans s.-t. EN".takeIf { ep.id in defects.getOrNull(state.selectedSeason)?.noEnglishIds.orEmpty() },
                                                         rating?.label,
                                                         if (ep.durationMs > 0) "${ep.durationMs / 60000} min" else null,
                                                     ).joinToString(" · ").ifBlank { null },
@@ -529,6 +659,9 @@ fun SeriesScreen(
                                                 showMal = false,
                                             )
                                         }
+                                    }
+                                    defects.getOrNull(state.selectedSeason)?.text()?.let {
+                                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                                     }
                                     if (ratings.info.isNotBlank()) {
                                         Text(ratings.info, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

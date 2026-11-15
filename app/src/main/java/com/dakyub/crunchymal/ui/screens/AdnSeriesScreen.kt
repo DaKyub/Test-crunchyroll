@@ -289,12 +289,13 @@ fun AdnSeriesScreen(
                             }
                             GenresLine(record?.genres, show.genres)
                             // Focus sur le résumé : la fiche remonte tout en haut (titre, note MAL).
-                            // Sans résumé ADN : celui de TMDB (français), sinon de MAL.
+                            // Résumé TMDB (français) en priorité, puis celui d'ADN, puis celui de MAL.
                             SynopsisWithFallback(
                                 show.summary,
                                 titles = listOfNotNull(record?.englishTitle, show.originalTitle, show.title, record?.title),
                                 malId = record?.malId,
                                 onFocused = { scope.launch { delay(150); listState.animateScrollToItem(0) } },
+                                service = "d'ADN",
                             )
                             // Rangée défilante : les boutons hors écran restent accessibles à la télécommande.
                             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {

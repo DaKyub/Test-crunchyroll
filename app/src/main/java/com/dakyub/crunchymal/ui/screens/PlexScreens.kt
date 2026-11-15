@@ -419,6 +419,7 @@ fun PlexShowScreen(ratingKey: String, onOpenSeries: (SeriesRef) -> Unit, onOpenM
                                 titles = listOfNotNull(record?.englishTitle) + ref.malTitles,
                                 malId = record?.malId,
                                 onFocused = { scope.launch { delay(150); listState.animateScrollToItem(0) } },
+                                service = "de Plex",
                             )
                             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
                                 Button(onClick = {

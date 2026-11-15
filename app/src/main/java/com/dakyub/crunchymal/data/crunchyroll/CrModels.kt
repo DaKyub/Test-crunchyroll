@@ -164,8 +164,15 @@ data class CrEpisode(
     @SerialName("availability_starts") val availabilityStarts: String = "",
     @SerialName("premium_available_date") val premiumAvailableDate: String = "",
     @SerialName("episode_air_date") val episodeAirDate: String = "",
+    /** Langue audio de cette version de l'épisode (« ja-JP », « fr-FR »…). */
+    @SerialName("audio_locale") val audioLocale: String = "",
+    /** Langues des sous-titres proposés (« fr-FR », « en-US »…). */
+    @SerialName("subtitle_locales") val subtitleLocales: List<String> = emptyList(),
 ) {
     val releaseDate: String get() = premiumAvailableDate.ifBlank { availabilityStarts }.ifBlank { episodeAirDate }
+
+    /** Épisode compréhensible dans la langue [locale] : doublé dans cette langue, ou sous-titré. */
+    fun understandableIn(locale: String): Boolean = audioLocale == locale || locale in subtitleLocales
 
     /** Faux pour un épisode annoncé mais pas encore sorti (dates ISO UTC comparées comme du texte). */
     fun isAvailable(nowIso: String): Boolean =
