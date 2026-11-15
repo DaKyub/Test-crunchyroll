@@ -413,7 +413,22 @@ fun SettingsScreen(onNavigate: (String) -> Unit = {}) {
                 } else if (graph.diagnostics.configured) {
                     // Analyse complète envoyée sur GitHub (tâche de fond) ; l'écran en affiche le début.
                     adnAnalysis = null
-                    sendDiagnostic("Analyse de l'app ADN") { listOf("Paquet : $pkg") + AppAnalyzer.analyze(appContext, pkg, limit = 3000) }
+                    sendDiagnostic("Analyse de l'app ADN") {
+                        // Liens déclarés par l'app ADN (intent-filter du manifeste), puis chaînes de son code évoquant
+                        // des liens vers un épisode ou une série.
+                        val version = runCatching { appContext.packageManager.getPackageInfo(pkg, 0).versionName }.getOrNull()
+                        listOf("Paquet : $pkg · version $version", "", "Liens acceptés (intent-filter) :") +
+                            ManifestReader.intentFilters(appContext, pkg) +
+                            listOf("", "Chaînes du code :") +
+                            AppAnalyzer.analyze(
+                                appContext, pkg, limit = 1500,
+                                extra = Regex("(?i)anidn|animationdigitalnetwork|adn\\.fr|/video/|/show/|deep.?link|app.?link"),
+                                keep = { s ->
+                                    !(s.startsWith("L") && s.endsWith(";")) ||
+                                        Regex("(?i)deep.?link|uri|route|intent|anidn").containsMatchIn(s)
+                                },
+                            )
+                    }
                 } else {
                     adnAnalyzing = true
                     scope.launch {
