@@ -1,6 +1,8 @@
 package com.dakyub.crunchymal
 
 import android.content.ActivityNotFoundException
+import android.content.ComponentName
+import android.content.pm.PackageManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -56,6 +58,68 @@ object AdnApp {
         return null
     }
 
+    /**
+     * Banc d'essai : l'app ADN TV 7 ne déclare plus aucun lien. On lance donc directement son écran principal
+     * (composant explicite, qui passe outre l'absence de liens déclarés) en lui donnant l'épisode de diverses
+     * façons ; l'utilisateur dit laquelle lance l'épisode, et elle est retenue ([saveVariant]).
+     */
+    class Variant(val label: String, val build: (Intent, AdnShow?, AdnVideo) -> Intent)
+
+    private fun webUrl(host: String, show: AdnShow?, video: AdnVideo): String {
+        val path = (show ?: video.show)?.urlPath?.takeIf { it.isNotBlank() }
+        return if (path != null) "https://$host/video/$path/${video.id}" else "https://$host/video/${video.id}"
+    }
+
+    val VARIANTS = listOf(
+        Variant("Écran principal + adresse androidtv.animationdigitalnetwork.com") { base, show, video ->
+            base.setAction(Intent.ACTION_VIEW).setData(Uri.parse(webUrl("androidtv.animationdigitalnetwork.com", show, video)))
+        },
+        Variant("Écran principal + adresse animationdigitalnetwork.com") { base, show, video ->
+            base.setAction(Intent.ACTION_VIEW).setData(Uri.parse(webUrl("animationdigitalnetwork.com", show, video)))
+        },
+        Variant("Écran principal + anidn://video/<id>") { base, _, video ->
+            base.setAction(Intent.ACTION_VIEW).setData(Uri.parse("anidn://video/${video.id}"))
+        },
+        Variant("Écran principal + identifiants en extras (videoId, showId…)") { base, show, video ->
+            val showId = (show ?: video.show)?.id
+            base.putExtra("videoId", video.id).putExtra("video_id", video.id).putExtra("id", video.id)
+                .apply { showId?.let { putExtra("showId", it).putExtra("show_id", it) } }
+                .putExtra("videoIdString", video.id.toString())
+        },
+        Variant("Écran principal + adresse en extras (url, deeplink, link)") { base, show, video ->
+            val url = webUrl("animationdigitalnetwork.com", show, video)
+            base.putExtra("url", url).putExtra("deeplink", url).putExtra("deepLink", url).putExtra("link", url).putExtra("uri", url)
+        },
+        Variant("Écran principal (MAIN) + adresse androidtv… en données") { base, show, video ->
+            base.setAction(Intent.ACTION_MAIN).setData(Uri.parse(webUrl("androidtv.animationdigitalnetwork.com", show, video)))
+        },
+    )
+
+    /** Intention explicite vers l'écran principal de l'app ADN, prête à recevoir l'épisode. */
+    private fun mainActivity(context: Context): Intent? {
+        val pkg = packageName(context) ?: return null
+        val pm = context.packageManager
+        val component: ComponentName = (pm.getLeanbackLaunchIntentForPackage(pkg) ?: pm.getLaunchIntentForPackage(pkg))?.component ?: return null
+        return Intent().setComponent(component).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+    }
+
+    fun variantIntent(context: Context, index: Int, show: AdnShow?, video: AdnVideo): Intent? =
+        VARIANTS.getOrNull(index)?.let { variant -> mainActivity(context)?.let { variant.build(it, show, video) } }
+
+    fun savedVariant(context: Context): Int = context.getSharedPreferences("adn_links", Context.MODE_PRIVATE).getInt("variant", -1)
+
+    fun saveVariant(context: Context, index: Int) {
+        context.getSharedPreferences("adn_links", Context.MODE_PRIVATE).edit().putInt("variant", index).apply()
+    }
+
+    /** Écrans de l'app ADN ouvrables par une autre app (pour le diagnostic). */
+    fun exportedActivities(context: Context): List<String> {
+        val pkg = packageName(context) ?: return listOf("App ADN introuvable")
+        @Suppress("DEPRECATION")
+        val info = runCatching { context.packageManager.getPackageInfo(pkg, PackageManager.GET_ACTIVITIES) }.getOrNull()
+        return info?.activities.orEmpty().filter { it.exported }.map { it.name }.ifEmpty { listOf("aucun") }
+    }
+
     /** Formats acceptés par l'app ADN installée, pour le diagnostic (« Analyser l'app ADN »). */
     fun acceptedFormats(context: Context): List<String> {
         val sample = AdnShow(id = 1, urlPath = "1-exemple")
@@ -104,6 +168,11 @@ object AdnApp {
 
     /** Ouvre l'épisode s'il est fourni (lecture directe), sinon la fiche de la série. */
     fun open(context: Context, show: AdnShow?, video: AdnVideo?) {
+        // Méthode retenue au banc d'essai (ADN TV 7 sans liens déclarés).
+        val variant = savedVariant(context)
+        if (video != null && variant >= 0) {
+            variantIntent(context, variant, show, video)?.let { if (start(context, it)) return }
+        }
         val episode = video?.let { firstAccepted(context, EPISODE_TEMPLATES, show, it, "episode") }
         if (episode != null) {
             start(context, episode)

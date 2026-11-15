@@ -417,7 +417,9 @@ fun SettingsScreen(onNavigate: (String) -> Unit = {}) {
                         // Liens déclarés par l'app ADN (intent-filter du manifeste), puis chaînes de son code évoquant
                         // des liens vers un épisode ou une série.
                         val version = runCatching { appContext.packageManager.getPackageInfo(pkg, 0).versionName }.getOrNull()
-                        listOf("Paquet : $pkg · version $version", "", "Formats de liens essayés par CrunchyMAL :") +
+                        listOf("Paquet : $pkg · version $version", "", "Écrans ouvrables par une autre app :") +
+                            AdnApp.exportedActivities(appContext) +
+                            listOf("", "Formats de liens essayés par CrunchyMAL :") +
                             AdnApp.acceptedFormats(appContext) +
                             listOf("", "Liens acceptés (intent-filter) :") +
                             ManifestReader.intentFilters(appContext, pkg) +
@@ -445,6 +447,59 @@ fun SettingsScreen(onNavigate: (String) -> Unit = {}) {
                     }
                 }
             }) { Text(if (adnAnalyzing) "Analyse en cours…" else "Analyser l'app ADN (liens et liste)") }
+        }
+        item {
+            // Banc d'essai : ADN TV 7 n'accepte plus de liens ; on cherche la façon de lui faire lancer un épisode.
+            var trial by rememberSaveable { mutableStateOf(-1) }
+            var saved by remember { mutableStateOf(AdnApp.savedVariant(context)) }
+            var sample by remember { mutableStateOf<Pair<AdnShow?, AdnVideo>?>(null) }
+            var benchStatus by remember { mutableStateOf<String?>(null) }
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "Lecture des épisodes : l'app ADN TV 7 n'accepte plus de liens. Le banc d'essai l'ouvre de " +
+                        "${AdnApp.VARIANTS.size} façons avec un épisode de ton historique ; reviens ici après chaque essai " +
+                        "et valide celui qui a lancé l'épisode." +
+                        (if (saved >= 0) " Méthode retenue : essai ${saved + 1}." else ""),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
+                    Button(onClick = {
+                        scope.launch {
+                            val episode = sample ?: runCatching {
+                                graph.adn.viewingHistory().firstOrNull { it.show != null }?.let { it.show to it }
+                                    ?: graph.adn.catalog(order = "popular", limit = 1).firstOrNull()?.let { show ->
+                                        graph.adn.episodes(show.id.toString()).firstOrNull()?.let { show to it }
+                                    }
+                            }.getOrNull()
+                            if (episode == null) {
+                                benchStatus = "Aucun épisode ADN trouvé pour l'essai."
+                                return@launch
+                            }
+                            sample = episode
+                            val next = (trial + 1) % AdnApp.VARIANTS.size
+                            trial = next
+                            benchStatus = "Essai ${next + 1}/${AdnApp.VARIANTS.size} : ${AdnApp.VARIANTS[next].label} " +
+                                "(${episode.first?.title.orEmpty()} · ${episode.second.label})"
+                            AdnApp.start(context, AdnApp.variantIntent(context, next, episode.first, episode.second))
+                        }
+                    }) { Text(if (trial < 0) "Tester l'ouverture d'un épisode" else "Essai suivant (${(trial + 1) % AdnApp.VARIANTS.size + 1}/${AdnApp.VARIANTS.size})") }
+                    if (trial >= 0) {
+                        OutlinedButton(onClick = {
+                            AdnApp.saveVariant(context, trial)
+                            saved = trial
+                            toast("Essai ${trial + 1} retenu pour lancer les épisodes ADN")
+                        }) { Text("✓ L'essai ${trial + 1} a lancé l'épisode") }
+                    }
+                    if (saved >= 0) {
+                        OutlinedButton(onClick = {
+                            AdnApp.saveVariant(context, -1)
+                            saved = -1
+                        }) { Text("Oublier la méthode retenue") }
+                    }
+                }
+                benchStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
+            }
         }
         item {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
