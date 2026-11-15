@@ -484,6 +484,25 @@ fun SettingsScreen(onNavigate: (String) -> Unit = {}) {
                             AdnApp.start(context, AdnApp.variantIntent(context, next, episode.first, episode.second))
                         }
                     }) { Text(if (trial < 0) "Tester l'ouverture d'un épisode" else "Essai suivant (${(trial + 1) % AdnApp.VARIANTS.size + 1}/${AdnApp.VARIANTS.size})") }
+                    // Navigateur TV (TV Bro…) : la page de l'épisode, si son lecteur sait lire les vidéos protégées.
+                    OutlinedButton(onClick = {
+                        scope.launch {
+                            val episode = sample ?: runCatching {
+                                graph.adn.viewingHistory().firstOrNull { it.show != null }?.let { it.show to it }
+                                    ?: graph.adn.catalog(order = "popular", limit = 1).firstOrNull()?.let { show ->
+                                        graph.adn.episodes(show.id.toString()).firstOrNull()?.let { show to it }
+                                    }
+                            }.getOrNull()
+                            if (episode == null) {
+                                benchStatus = "Aucun épisode ADN trouvé pour l'essai."
+                                return@launch
+                            }
+                            sample = episode
+                            val url = episode.second.url ?: "(adresse reconstruite)"
+                            benchStatus = "Navigateur : ${episode.first?.title.orEmpty()} · ${episode.second.label} · $url"
+                            AdnApp.openInBrowser(context, episode.first, episode.second)
+                        }
+                    }) { Text("Essayer un épisode dans le navigateur") }
                     if (trial >= 0) {
                         OutlinedButton(onClick = {
                             AdnApp.saveVariant(context, trial)

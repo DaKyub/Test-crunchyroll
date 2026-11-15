@@ -63,6 +63,8 @@ data class AdnVideo(
     /** Progression de l'utilisateur (renvoyée par la liste et l'historique quand on est connecté). */
     val user: AdnUserProgress? = null,
     val show: AdnShow? = null,
+    /** Adresse de l'épisode sur le site ADN, quand l'API la donne. */
+    val url: String? = null,
 ) {
     /** Libellé de saison : "1", "Saga 1 : East Blue", "Arc 1 : Bullet"… */
     val seasonKey: String get() = season?.takeIf { it.isNotBlank() } ?: "1"

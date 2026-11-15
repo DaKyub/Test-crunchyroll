@@ -95,6 +95,21 @@ object AdnApp {
         },
     )
 
+    /**
+     * Page web de l'épisode (adresse donnée par l'API, sinon reconstruite), ouverte dans le navigateur installé
+     * (TV Bro…) : l'app ADN TV 7 ne se laisse pas ouvrir sur un épisode. Faux si aucun navigateur.
+     */
+    fun openInBrowser(context: Context, show: AdnShow?, video: AdnVideo): Boolean {
+        val url = video.url?.takeIf { it.startsWith("http") } ?: webUrl("animationdigitalnetwork.com", show, video)
+        return try {
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            true
+        } catch (_: ActivityNotFoundException) {
+            Toast.makeText(context, "Aucun navigateur installé (TV Bro, sur le Play Store de la Shield)", Toast.LENGTH_LONG).show()
+            false
+        }
+    }
+
     /** Intention explicite vers l'écran principal de l'app ADN, prête à recevoir l'épisode. */
     private fun mainActivity(context: Context): Intent? {
         val pkg = packageName(context) ?: return null
