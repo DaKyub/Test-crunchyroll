@@ -10,7 +10,7 @@ import com.dakyub.crunchymal.data.SeriesRef
 fun playEpisode(context: Context, series: SeriesRef, episodeId: String) {
     when (series.provider) {
         Provider.CRUNCHYROLL -> OfficialApp.openEpisode(context, episodeId, series.id.ifBlank { null })
-        Provider.ADN -> AdnApp.open(context, series.id, episodeId)
+        Provider.ADN -> AdnApp.open(context, series.id, episodeId, series.title)
     }
 }
 
@@ -18,9 +18,8 @@ fun playEpisode(context: Context, series: SeriesRef, episodeId: String) {
 fun seriesIntent(context: Context, provider: Provider, seriesId: String): Intent? {
     val intent = when (provider) {
         Provider.CRUNCHYROLL -> Intent(Intent.ACTION_VIEW, Uri.parse("crunchyroll://series/$seriesId")).setPackage(OfficialApp.PACKAGE)
-        Provider.ADN -> AdnApp.packageName(context)?.let {
-            Intent(Intent.ACTION_VIEW, Uri.parse("anidn://show/$seriesId")).setPackage(it)
-        }
+        // ADN TV 7 n'accepte plus de lien vers un contenu : son accueil.
+        Provider.ADN -> return AdnApp.launchIntent(context)
     }
     return intent?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
 }
@@ -29,9 +28,8 @@ fun seriesIntent(context: Context, provider: Provider, seriesId: String): Intent
 fun episodeIntent(context: Context, series: SeriesRef, episodeId: String): Intent? {
     val intent = when (series.provider) {
         Provider.CRUNCHYROLL -> Intent(Intent.ACTION_VIEW, Uri.parse("crunchyroll://episode/$episodeId")).setPackage(OfficialApp.PACKAGE)
-        Provider.ADN -> AdnApp.packageName(context)?.let {
-            Intent(Intent.ACTION_VIEW, Uri.parse("anidn://video/$episodeId")).setPackage(it)
-        }
+        // ADN TV 7 n'accepte plus de lien vers un contenu : son accueil.
+        Provider.ADN -> return AdnApp.launchIntent(context)
     }
     // CLEAR_TASK : l'app officielle déjà ouverte traite le lien au lieu de revenir à son dernier écran.
     return intent?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)

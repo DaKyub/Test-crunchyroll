@@ -167,48 +167,83 @@ object AdnApp {
     }
 
     /** Ouvre l'épisode s'il est fourni (lecture directe), sinon la fiche de la série. */
-    fun open(context: Context, show: AdnShow?, video: AdnVideo?) {
-        // Méthode retenue au banc d'essai (ADN TV 7 sans liens déclarés).
+    /**
+     * Ouvre l'épisode s'il est fourni, sinon la fiche de la série. L'app ADN TV 7 ne se laisse plus ouvrir sur un
+     * contenu (aucun lien accepté, et le banc d'essai a montré qu'elle ignore aussi les autres façons) : elle
+     * s'ouvre alors sur son accueil, avec un rappel de ce qu'il faut lancer. [title] : titre de la série quand
+     * seuls les identifiants sont connus.
+     */
+    fun open(context: Context, show: AdnShow?, video: AdnVideo?, title: String? = null) {
+        // Méthode retenue au banc d'essai, si une version d'ADN en accepte une.
         val variant = savedVariant(context)
         if (video != null && variant >= 0) {
-            variantIntent(context, variant, show, video)?.let { if (start(context, it)) return }
+            variantIntent(context, variant, show, video)?.let { if (launch(context, it)) return }
         }
         val episode = video?.let { firstAccepted(context, EPISODE_TEMPLATES, show, it, "episode") }
-        if (episode != null) {
-            start(context, episode)
+        if (episode != null && launch(context, episode)) return
+        val page = firstAccepted(context, SHOW_TEMPLATES, show ?: video?.show, null, "show")
+        if (page != null && launch(context, page)) {
+            if (video != null) remind(context, reminder(show, video, title))
             return
         }
-        val page = firstAccepted(context, SHOW_TEMPLATES, show ?: video?.show, null, "show")
-        if (page != null && video != null) {
-            Toast.makeText(context, "ADN n'accepte pas de lien vers l'épisode : ouverture de la fiche", Toast.LENGTH_LONG).show()
-        }
-        start(context, page)
+        openHome(context, reminder(show, video, title))
     }
 
     /** Même chose à partir des identifiants seuls (cartes des rangées / de la watchlist). */
-    fun open(context: Context, showId: String, videoId: String?) =
-        open(context, showId.toIntOrNull()?.let { AdnShow(id = it) }, videoId?.toIntOrNull()?.let { AdnVideo(id = it) })
+    fun open(context: Context, showId: String, videoId: String?, title: String? = null) =
+        open(context, showId.toIntOrNull()?.let { AdnShow(id = it) }, videoId?.toIntOrNull()?.let { AdnVideo(id = it) }, title)
 
-    fun openShow(context: Context, show: AdnShow) = start(context, firstAccepted(context, SHOW_TEMPLATES, show, null, "show"))
+    fun openShow(context: Context, show: AdnShow) {
+        val page = firstAccepted(context, SHOW_TEMPLATES, show, null, "show")
+        if (page == null || !launch(context, page)) openHome(context, show.title.takeIf { it.isNotBlank() }?.let { "Dans ADN, ouvre : $it" })
+    }
 
-    fun start(context: Context, intent: Intent?): Boolean {
-        if (intent != null) {
-            try {
-                context.startActivity(intent)
-                return true
-            } catch (_: ActivityNotFoundException) {
-            } catch (_: SecurityException) {
-            }
-        }
-        val pkg = packageName(context)
+    /** « Dans ADN, lance : Frieren · Épisode 5 » (ce qui est connu de la série et de l'épisode). */
+    private fun reminder(show: AdnShow?, video: AdnVideo?, title: String?): String? {
+        val series = (show ?: video?.show)?.title?.takeIf { it.isNotBlank() } ?: title?.takeIf { it.isNotBlank() }
+        val episode = video?.label?.takeIf { it.isNotBlank() }
+        val what = listOfNotNull(series, episode).joinToString(" · ").ifBlank { return null }
+        return "Dans ADN, lance : $what"
+    }
+
+    /** Message affiché assez longtemps pour être lu une fois ADN ouvert (deux messages longs à la suite). */
+    private fun remind(context: Context, text: String?) {
+        if (text == null) return
+        Toast.makeText(context, text, Toast.LENGTH_LONG).show()
+        Toast.makeText(context, text, Toast.LENGTH_LONG).show()
+    }
+
+    /** Intention qui ouvre l'app ADN sur son accueil (chaîne de l'écran d'accueil, notifications). */
+    fun launchIntent(context: Context): Intent? {
+        val pkg = packageName(context) ?: return null
         val pm = context.packageManager
-        val launch = pkg?.let { pm.getLeanbackLaunchIntentForPackage(it) ?: pm.getLaunchIntentForPackage(it) }
+        return (pm.getLeanbackLaunchIntentForPackage(pkg) ?: pm.getLaunchIntentForPackage(pkg))?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+
+    /** Ouvre ADN sur son accueil avec le rappel [reminder] ; message si l'app n'est pas installée. */
+    fun openHome(context: Context, reminder: String?) {
+        val launch = launchIntent(context)
         if (launch != null) {
-            context.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            if (intent != null) Toast.makeText(context, "Lien refusé : ADN ouvert à l'accueil", Toast.LENGTH_LONG).show()
+            context.startActivity(launch)
+            remind(context, reminder)
         } else {
             Toast.makeText(context, "L'application ADN n'est pas installée", Toast.LENGTH_LONG).show()
         }
+    }
+
+    private fun launch(context: Context, intent: Intent): Boolean = try {
+        context.startActivity(intent)
+        true
+    } catch (_: ActivityNotFoundException) {
+        false
+    } catch (_: SecurityException) {
+        false
+    }
+
+    /** Lance [intent], sinon l'accueil d'ADN (banc d'essai). */
+    fun start(context: Context, intent: Intent?): Boolean {
+        if (intent != null && launch(context, intent)) return true
+        openHome(context, null)
         return false
     }
 }
