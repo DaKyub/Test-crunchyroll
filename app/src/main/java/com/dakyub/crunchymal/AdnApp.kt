@@ -16,11 +16,58 @@ object AdnApp {
     private val KNOWN_PACKAGES = listOf("fr.anidn", "fr.anidn.tv", "com.adn.tv")
 
     /**
-     * Liens profonds de l'app ADN TV (validés sur Shield) : anidn://video/<id> lance l'épisode,
-     * anidn://show/<id> ouvre la fiche de la série.
+     * Formats de liens possibles, essayés dans l'ordre : on demande à Android lequel l'app ADN installée sait
+     * ouvrir (ses intent-filter), au lieu d'en supposer un seul. anidn://video/<id> marchait jusqu'à une mise
+     * à jour d'ADN qui l'a retiré (« Lien refusé »). Le format qui marche est retenu pour les fois suivantes.
      */
-    private const val EPISODE_TEMPLATE = "anidn://video/{video}"
-    private const val SHOW_TEMPLATE = "anidn://show/{show}"
+    private val EPISODE_TEMPLATES = listOf(
+        "anidn://video/{video}",
+        "anidn://videos/{video}",
+        "anidn://watch/{video}",
+        "anidn://player/{video}",
+        "anidn://play/{video}",
+        "https://animationdigitalnetwork.com/video/{spath}/{video}",
+        "https://animationdigitalnetwork.fr/video/{spath}/{video}",
+        "https://animationdigitalnetwork.com/video/{video}",
+        "https://animationdigitalnetwork.fr/video/{video}",
+    )
+    private val SHOW_TEMPLATES = listOf(
+        "anidn://show/{show}",
+        "anidn://shows/{show}",
+        "https://animationdigitalnetwork.com/video/{spath}",
+        "https://animationdigitalnetwork.fr/video/{spath}",
+        "https://animationdigitalnetwork.com/show/{show}",
+    )
+
+    /** Premier format (dans [templates]) que l'app ADN accepte pour ce contenu, avec le dernier qui a marché en tête. */
+    private fun firstAccepted(context: Context, templates: List<String>, show: AdnShow?, video: AdnVideo?, remembered: String): Intent? {
+        val prefs = context.getSharedPreferences("adn_links", Context.MODE_PRIVATE)
+        val last = prefs.getString(remembered, null)
+        val ordered = listOfNotNull(last) + templates.filter { it != last }
+        val pm = context.packageManager
+        for (template in ordered) {
+            val intent = buildIntent(context, template, show, video) ?: continue
+            @Suppress("DEPRECATION")
+            if (pm.resolveActivity(intent, 0) != null) {
+                prefs.edit().putString(remembered, template).apply()
+                return intent
+            }
+        }
+        return null
+    }
+
+    /** Formats acceptés par l'app ADN installée, pour le diagnostic (« Analyser l'app ADN »). */
+    fun acceptedFormats(context: Context): List<String> {
+        val sample = AdnShow(id = 1, urlPath = "1-exemple")
+        val video = AdnVideo(id = 2, show = sample)
+        val pm = context.packageManager
+        return (EPISODE_TEMPLATES + SHOW_TEMPLATES).map { template ->
+            val intent = buildIntent(context, template, sample, video)
+            @Suppress("DEPRECATION")
+            val ok = intent != null && pm.resolveActivity(intent, 0) != null
+            (if (ok) "✓ " else "✗ ") + template
+        }
+    }
 
     /** Paquet de l'app ADN installée (connu ou trouvé par son nom dans le lanceur), ou null. */
     fun packageName(context: Context): String? {
@@ -57,16 +104,23 @@ object AdnApp {
 
     /** Ouvre l'épisode s'il est fourni (lecture directe), sinon la fiche de la série. */
     fun open(context: Context, show: AdnShow?, video: AdnVideo?) {
-        val intent = video?.let { buildIntent(context, EPISODE_TEMPLATE, show, it) }
-            ?: buildIntent(context, SHOW_TEMPLATE, show, video)
-        start(context, intent)
+        val episode = video?.let { firstAccepted(context, EPISODE_TEMPLATES, show, it, "episode") }
+        if (episode != null) {
+            start(context, episode)
+            return
+        }
+        val page = firstAccepted(context, SHOW_TEMPLATES, show ?: video?.show, null, "show")
+        if (page != null && video != null) {
+            Toast.makeText(context, "ADN n'accepte pas de lien vers l'épisode : ouverture de la fiche", Toast.LENGTH_LONG).show()
+        }
+        start(context, page)
     }
 
     /** Même chose à partir des identifiants seuls (cartes des rangées / de la watchlist). */
     fun open(context: Context, showId: String, videoId: String?) =
         open(context, showId.toIntOrNull()?.let { AdnShow(id = it) }, videoId?.toIntOrNull()?.let { AdnVideo(id = it) })
 
-    fun openShow(context: Context, show: AdnShow) = start(context, buildIntent(context, SHOW_TEMPLATE, show, null))
+    fun openShow(context: Context, show: AdnShow) = start(context, firstAccepted(context, SHOW_TEMPLATES, show, null, "show"))
 
     fun start(context: Context, intent: Intent?): Boolean {
         if (intent != null) {

@@ -417,7 +417,9 @@ fun SettingsScreen(onNavigate: (String) -> Unit = {}) {
                         // Liens déclarés par l'app ADN (intent-filter du manifeste), puis chaînes de son code évoquant
                         // des liens vers un épisode ou une série.
                         val version = runCatching { appContext.packageManager.getPackageInfo(pkg, 0).versionName }.getOrNull()
-                        listOf("Paquet : $pkg · version $version", "", "Liens acceptés (intent-filter) :") +
+                        listOf("Paquet : $pkg · version $version", "", "Formats de liens essayés par CrunchyMAL :") +
+                            AdnApp.acceptedFormats(appContext) +
+                            listOf("", "Liens acceptés (intent-filter) :") +
                             ManifestReader.intentFilters(appContext, pkg) +
                             listOf("", "Chaînes du code :") +
                             AppAnalyzer.analyze(
