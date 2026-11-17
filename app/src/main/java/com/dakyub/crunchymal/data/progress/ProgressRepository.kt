@@ -1,5 +1,11 @@
 package com.dakyub.crunchymal.data.progress
 
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineScope
+import com.dakyub.crunchymal.data.Perf
 import com.dakyub.crunchymal.data.CacheLoads
 import com.dakyub.crunchymal.data.CacheWriter
 import com.dakyub.crunchymal.data.DateUtils
@@ -59,6 +65,7 @@ data class ProgressSummary(
         }
 }
 
+@Serializable
 data class EpisodeNode(val episode: CrEpisode, val watched: Boolean, val playheadSec: Long, val available: Boolean = true) {
     val progress: Float
         get() = if (watched) 1f else if (episode.durationMs > 0) {
@@ -66,8 +73,10 @@ data class EpisodeNode(val episode: CrEpisode, val watched: Boolean, val playhea
         } else 0f
 }
 
+@Serializable
 data class SeasonNode(val season: CrSeason, val episodes: List<EpisodeNode>)
 
+@Serializable
 data class SeriesTree(val seriesId: String, val seasons: List<SeasonNode>, val summary: ProgressSummary)
 
 /**
@@ -80,6 +89,37 @@ class ProgressRepository(context: Context, private val api: CrApi) {
     private val locks = ConcurrentHashMap<String, Mutex>()
     private val semaphore = Semaphore(3)
     private val writeLock = Mutex()
+
+    /** Saisons et épisodes de chaque série ouverte, gardés sur disque : la fiche s'affiche avant la mise à jour. */
+    private val treeDir = File(context.filesDir, "series_trees")
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    private fun treeFile(seriesId: String) = File(treeDir, seriesId.filter { it.isLetterOrDigit() || it == '_' || it == '-' } + ".json")
+
+    /**
+     * Dernier arbre connu de la série, même ancien (mémoire, sinon disque), pour afficher tout de suite les
+     * saisons et les épisodes pendant que [tree] recalcule. null si la fiche n'a jamais été ouverte.
+     */
+    suspend fun cachedTree(seriesId: String): SeriesTree? = trees[seriesId] ?: stale[seriesId] ?: withContext(Dispatchers.IO) {
+        runCatching { Http.json.decodeFromString<SeriesTree>(treeFile(seriesId).readText()) }.getOrNull()
+    }
+
+    /** Arbres retirés par [invalidate] : encore bons à afficher en attendant le recalcul. */
+    private val stale = ConcurrentHashMap<String, SeriesTree>()
+
+    private fun saveTree(tree: SeriesTree) {
+        scope.launch {
+            runCatching {
+                treeDir.mkdirs()
+                val file = treeFile(tree.seriesId)
+                val tmp = File(file.path + ".tmp")
+                tmp.writeText(Http.json.encodeToString(tree))
+                if (!tmp.renameTo(file)) { file.writeText(tmp.readText()); tmp.delete() }
+                // Les fiches les plus récentes seulement.
+                treeDir.listFiles()?.sortedByDescending { it.lastModified() }?.drop(MAX_TREES)?.forEach { it.delete() }
+            }
+        }
+    }
 
     /** Appelé par [clear] pour vider aussi les caches liés (progression ADN). */
     var onClear: () -> Unit = {}
@@ -119,6 +159,8 @@ class ProgressRepository(context: Context, private val api: CrApi) {
             if (!force) trees[seriesId]?.let { if (isFresh(it.summary)) return@withLock it }
             (if (priority) compute(seriesId) else semaphore.withPermit { compute(seriesId) }).also { tree ->
                 trees[seriesId] = tree
+                stale.remove(seriesId)
+                saveTree(tree)
                 _summaries.update { it + (seriesId to tree.summary) }
                 persist()
             }
@@ -126,11 +168,15 @@ class ProgressRepository(context: Context, private val api: CrApi) {
     }
 
     private suspend fun compute(seriesId: String): SeriesTree = coroutineScope {
+        val t0 = Perf.now()
         val seasons = originalSeasons(api.seasons(seriesId))
         val episodesBySeason = seasons.map { season -> async { season to episodesOf(season) } }.awaitAll()
+        Perf.record("Fiche Crunchyroll", "saisons + épisodes", Perf.now() - t0, "${seasons.size} saisons")
 
+        val t1 = Perf.now()
         val allIds = episodesBySeason.flatMap { (_, eps) -> eps.flatMap { ep -> listOf(ep.id) + ep.versions.map { it.guid } } }
         val playheads = api.playheads(allIds).associateBy { it.contentId }
+        Perf.record("Fiche Crunchyroll", "positions de lecture", Perf.now() - t1, "${allIds.distinct().size} identifiants")
 
         val nowIso = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US)
             .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
@@ -218,11 +264,13 @@ class ProgressRepository(context: Context, private val api: CrApi) {
     }
 
     fun invalidate(seriesId: String) {
-        trees.remove(seriesId)
+        trees.remove(seriesId)?.let { stale[seriesId] = it }
     }
 
     suspend fun clear() {
         trees.clear()
+        stale.clear()
+        withContext(Dispatchers.IO) { runCatching { treeDir.deleteRecursively() } }
         onClear()
         _summaries.value = emptyMap()
         writeLock.withLock { file.delete() }
@@ -230,6 +278,8 @@ class ProgressRepository(context: Context, private val api: CrApi) {
 
     private companion object {
         const val TTL = 6L * 3600 * 1000
+        /** Fiches gardées sur disque (les plus récentes). */
+        const val MAX_TREES = 150
     }
 }
 

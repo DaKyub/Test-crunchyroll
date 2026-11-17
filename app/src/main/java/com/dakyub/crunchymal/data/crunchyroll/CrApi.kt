@@ -1,5 +1,10 @@
 package com.dakyub.crunchymal.data.crunchyroll
 
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.async
 import kotlinx.serialization.decodeFromString
 import com.dakyub.crunchymal.data.Http
 import com.dakyub.crunchymal.data.HttpException
@@ -131,8 +136,11 @@ class CrApi(private val auth: CrAuth, private val settings: Settings) {
             get<CrListResponse<CrPanel>>("/content/v2/cms/objects/${chunk.joinToString(",")}").all
         }
 
-    suspend fun series(id: String): CrSeries =
-        get<CrListResponse<CrSeries>>("/content/v2/cms/series/$id").all.first()
+    private val seriesCache = java.util.concurrent.ConcurrentHashMap<String, CrSeries>()
+
+    /** Fiche d'une série (titre, résumé, images), gardée le temps de la session : rouvrir une fiche est immédiat. */
+    suspend fun series(id: String): CrSeries = seriesCache[id]
+        ?: get<CrListResponse<CrSeries>>("/content/v2/cms/series/$id").all.first().also { seriesCache[id] = it }
 
     suspend fun seasons(seriesId: String): List<CrSeason> =
         get<CrListResponse<CrSeason>>(
@@ -143,10 +151,20 @@ class CrApi(private val auth: CrAuth, private val settings: Settings) {
     suspend fun episodes(seasonId: String): List<CrEpisode> =
         get<CrListResponse<CrEpisode>>("/content/v2/cms/seasons/$seasonId/episodes").all
 
-    suspend fun playheads(contentIds: List<String>): List<CrPlayhead> =
-        contentIds.filter { it.isNotBlank() }.distinct().chunked(50).flatMap { chunk ->
-            get<CrListResponse<CrPlayhead>>("/content/v2/$account/playheads?content_ids=${chunk.joinToString(",")}").all
-        }
+    /**
+     * Positions de lecture, par paquets de 50 identifiants demandés en parallèle (8 à la fois) : une longue
+     * série en a des dizaines (chaque épisode × ses versions audio), qui prenaient plusieurs secondes à la suite.
+     */
+    suspend fun playheads(contentIds: List<String>): List<CrPlayhead> = coroutineScope {
+        val limit = Semaphore(8)
+        contentIds.filter { it.isNotBlank() }.distinct().chunked(50).map { chunk ->
+            async {
+                limit.withPermit {
+                    get<CrListResponse<CrPlayhead>>("/content/v2/$account/playheads?content_ids=${chunk.joinToString(",")}").all
+                }
+            }
+        }.awaitAll().flatten()
+    }
 
     suspend fun isInWatchlist(contentId: String): Boolean =
         get<CrListResponse<kotlinx.serialization.json.JsonObject>>(

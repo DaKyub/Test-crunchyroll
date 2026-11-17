@@ -1,5 +1,7 @@
 package com.dakyub.crunchymal.data.ratings
 
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.async
 import android.util.Log
 import com.dakyub.crunchymal.data.Http
 import com.dakyub.crunchymal.data.HttpException
@@ -101,18 +103,23 @@ class RatingsRepository(private val settings: Settings) {
         if (titles.isEmpty()) return SeasonRatings.EMPTY
         val key = titles.joinToString("|").lowercase() + "#$seasonNumber#$episodeCount#$episodesBefore"
         seasons[key]?.let { return it }
-        val errors = mutableListOf<String>()
+        // Liste partagée par les deux sources, interrogées en parallèle.
+        val errors: MutableList<String> = java.util.Collections.synchronizedList(mutableListOf<String>())
         val seriesIds = resolve(titles, errors)
         if (seriesIds.imdb == null && seriesIds.tmdb == null) {
             return SeasonRatings(emptyMap(), (listOf("Notes : série introuvable sur IMDb/TMDB") + errors).joinToString(" · "))
                 .also { if (errors.isEmpty()) seasons[key] = it }
         }
 
-        val imdb = seriesIds.imdb?.let { id ->
-            relative("IMDb", seasonNumber, episodeCount, episodesBefore, errors) { omdbSeason(id, it) }
-        }
-        val tmdb = seriesIds.tmdb?.let { id ->
-            relative("TMDB", seasonNumber, episodeCount, episodesBefore, errors) { tmdbSeason(id, it) }
+        // IMDb et TMDB en même temps : les notes d'une saison arrivent deux fois plus vite.
+        val (imdb, tmdb) = coroutineScope {
+            val imdbAsync = async {
+                seriesIds.imdb?.let { id -> relative("IMDb", seasonNumber, episodeCount, episodesBefore, errors) { omdbSeason(id, it) } }
+            }
+            val tmdbAsync = async {
+                seriesIds.tmdb?.let { id -> relative("TMDB", seasonNumber, episodeCount, episodesBefore, errors) { tmdbSeason(id, it) } }
+            }
+            imdbAsync.await() to tmdbAsync.await()
         }
         // IMDb en priorité, TMDB pour les épisodes qu'IMDb ne note pas.
         val byRelative = tmdb?.first.orEmpty() + imdb?.first.orEmpty()

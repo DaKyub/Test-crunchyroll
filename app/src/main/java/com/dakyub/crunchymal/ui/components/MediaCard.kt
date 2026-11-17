@@ -76,35 +76,41 @@ fun MediaCard(
                             .padding(6.dp),
                     )
                 }
-                val graph = LocalGraph.current
-                // États dérivés : la carte ne se redessine que si sa fiche MAL, ses marques ou son badge Plex
-                // changent, pas à chaque note reçue pour une autre série.
-                val records = graph.mal.records.collectAsState()
-                val malKey = item.series.malKey
-                val malId by remember(malKey) { derivedStateOf { records.value[malKey]?.malId } }
-                // Série présente sur le serveur Plex (sauf cartes déjà issues de Plex).
-                val plexIndex = graph.plexLibrary.index.collectAsState()
-                val plex by remember(item, showMal) {
-                    derivedStateOf {
-                        if (!showMal || item.badges.any { it.startsWith("Plex") }) null
-                        else plexIndex.value.find(malId, listOf(item.series.title) + item.series.malTitles)
-                    }
-                }
-                // Badges de plateformes (liste MAL), sinon badge du service quand plusieurs sont affichés ; puis Plex.
-                val providers by graph.providers.selected.collectAsState()
-                Column(Modifier.align(Alignment.TopStart).padding(6.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                if (!showMal) {
+                    // Carte d'épisode : ni note MAL, ni badge Plex, ni marques « vu avec ». Rien à observer,
+                    // ce qui allège l'affichage d'une saison (une carte par épisode).
                     if (item.badges.isNotEmpty()) {
-                        PlatformBadges(item.badges)
-                    } else if (showMal && showProviderBadge && providers.size > 1 && item.series.id.isNotBlank()) {
-                        BadgeText(
-                            (listOf(item.series.provider) + item.series.alsoOn).distinct().joinToString("+") { it.badge },
-                            if (item.series.provider == Provider.ADN) AdnBlue else CrunchyOrange,
-                        )
+                        Column(Modifier.align(Alignment.TopStart).padding(6.dp)) { PlatformBadges(item.badges) }
                     }
-                    plex?.let { BadgeText(it.label, PlexColor) }
-                }
-                // Avec qui la série a été vue (tags de la liste MAL).
-                if (showMal) {
+                } else {
+                    val graph = LocalGraph.current
+                    // États dérivés : la carte ne se redessine que si sa fiche MAL, ses marques ou son badge Plex
+                    // changent, pas à chaque note reçue pour une autre série.
+                    val records = graph.mal.records.collectAsState()
+                    val malKey = item.series.malKey
+                    val malId by remember(malKey) { derivedStateOf { records.value[malKey]?.malId } }
+                    // Série présente sur le serveur Plex (sauf cartes déjà issues de Plex).
+                    val plexIndex = graph.plexLibrary.index.collectAsState()
+                    val plex by remember(item) {
+                        derivedStateOf {
+                            if (item.badges.any { it.startsWith("Plex") }) null
+                            else plexIndex.value.find(malId, listOf(item.series.title) + item.series.malTitles)
+                        }
+                    }
+                    // Badges de plateformes (liste MAL), sinon badge du service quand plusieurs sont affichés ; puis Plex.
+                    val providers by graph.providers.selected.collectAsState()
+                    Column(Modifier.align(Alignment.TopStart).padding(6.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        if (item.badges.isNotEmpty()) {
+                            PlatformBadges(item.badges)
+                        } else if (showProviderBadge && providers.size > 1 && item.series.id.isNotBlank()) {
+                            BadgeText(
+                                (listOf(item.series.provider) + item.series.alsoOn).distinct().joinToString("+") { it.badge },
+                                if (item.series.provider == Provider.ADN) AdnBlue else CrunchyOrange,
+                            )
+                        }
+                        plex?.let { BadgeText(it.label, PlexColor) }
+                    }
+                    // Avec qui la série a été vue (tags de la liste MAL).
                     val marks = graph.companions.byMalId.collectAsState()
                     val seenWithState = remember(malKey) { derivedStateOf { malId?.let { marks.value[it] } } }
                     val seenWith = seenWithState.value

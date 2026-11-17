@@ -1,5 +1,8 @@
 package com.dakyub.crunchymal.ui.screens
 
+import androidx.compose.runtime.derivedStateOf
+import kotlinx.coroutines.flow.update
+import com.dakyub.crunchymal.data.Perf
 import com.dakyub.crunchymal.data.progress.SeasonNode
 import com.dakyub.crunchymal.ui.components.TrailerButton
 import com.dakyub.crunchymal.ui.components.PlanToWatchButton
@@ -113,6 +116,8 @@ class SeriesViewModel(private val graph: Graph, private val seriesId: String) : 
     }
 
     fun load() {
+        // Saisons et épisodes en même temps que la fiche (ils ne dépendent que de l'identifiant).
+        refreshProgress(force = false)
         viewModelScope.launch {
             state.value = state.value.copy(loading = true, error = null)
             val series = try {
@@ -130,23 +135,37 @@ class SeriesViewModel(private val graph: Graph, private val seriesId: String) : 
                 val inList = runCatching { graph.api.isInWatchlist(seriesId) }.getOrNull()
                 state.value = state.value.copy(inWatchlist = inList)
             }
-            refreshProgress(force = false)
+        }
+    }
+
+    private fun show(tree: SeriesTree) {
+        // update : la fiche, la watchlist et les catégories modifient l'état en parallèle.
+        state.update { current ->
+            // Au premier chargement, on se place sur la saison de l'épisode suivant.
+            val selected = if (current.tree == null) {
+                tree.seasons.indexOfFirst { s -> s.episodes.any { it.episode.id == tree.summary.nextEpisodeId } }
+                    .coerceAtLeast(0)
+            } else current.selectedSeason.coerceAtMost((tree.seasons.size - 1).coerceAtLeast(0))
+            current.copy(tree = tree, treeError = null, selectedSeason = selected)
         }
     }
 
     fun refreshProgress(force: Boolean) {
         viewModelScope.launch {
+            val opened = Perf.now()
+            // Dernier état connu (mémoire ou disque) affiché tout de suite, puis mis à jour.
+            if (state.value.tree == null) {
+                graph.progress.cachedTree(seriesId)?.let { cached ->
+                    if (state.value.tree == null) show(cached)
+                    Perf.record("Fiche Crunchyroll", "épisodes affichés (cache)", Perf.now() - opened)
+                }
+            }
             runCatching { graph.progress.tree(seriesId, force, priority = true) }
                 .onSuccess { tree ->
-                    val current = state.value
-                    // Au premier chargement, on se place sur la saison de l'épisode suivant.
-                    val selected = if (current.tree == null) {
-                        tree.seasons.indexOfFirst { s -> s.episodes.any { it.episode.id == tree.summary.nextEpisodeId } }
-                            .coerceAtLeast(0)
-                    } else current.selectedSeason.coerceAtMost((tree.seasons.size - 1).coerceAtLeast(0))
-                    state.value = current.copy(tree = tree, treeError = null, selectedSeason = selected)
+                    show(tree)
+                    Perf.record("Fiche Crunchyroll", "épisodes à jour", Perf.now() - opened)
                 }
-                .onFailure { state.value = state.value.copy(treeError = it.message) }
+                .onFailure { error -> state.update { it.copy(treeError = error.message) } }
         }
     }
 
@@ -427,7 +446,15 @@ fun SeriesScreen(
     val context = LocalContext.current
     var correcting by remember { mutableStateOf<Pair<String, String>?>(null) } // clé MAL, requête
     var malListOpen by remember { mutableStateOf(false) }
-    val malRecords by graph.mal.records.collectAsState()
+    // Seules les fiches MAL de cette série (série + saisons) comptent : sans ce filtre, toute la fiche se
+    // redessinait (ordre des saisons, numéros, épisodes) à chaque note reçue pour n'importe quelle autre série.
+    val allRecords = graph.mal.records.collectAsState()
+    val pageKeys = remember(seriesId, state.tree) {
+        listOf("series:$seriesId") + state.tree?.seasons.orEmpty().flatMap { listOf("season:${it.season.id}", "seasonmal:${it.season.id}") }
+    }
+    val malRecords by remember(pageKeys) {
+        derivedStateOf { pageKeys.mapNotNull { key -> allRecords.value[key]?.let { key to it } }.toMap() }
+    }
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.onResume() }
 
@@ -585,7 +612,7 @@ fun SeriesScreen(
                             // Ordre chronologique d'après MAL (OVA et films à leur place), avec leur type.
                             val order = seasonOrder
                             // Fiches en cache sans type ni date : complétées pour cette série seulement.
-                            LaunchedEffect(tree.seasons.size, malRecords.size) {
+                            LaunchedEffect(tree.seasons.size, malRecords.keys) {
                                 tree.seasons.forEachIndexed { index, node ->
                                     graph.mal.requestType(seasonMalKey(ref.malKey, index, node.season, malRecords))
                                 }
