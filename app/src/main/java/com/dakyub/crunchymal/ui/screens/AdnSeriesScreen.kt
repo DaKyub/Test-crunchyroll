@@ -95,8 +95,10 @@ data class AdnSeriesUi(
     val episodesLoading: Boolean = false,
 ) {
     /** Épisodes groupés par saison ("1", "Saga 1 : East Blue"…), dans l'ordre de la série. */
-    val seasons: List<Pair<String, List<AdnEpisodeNode>>>
-        get() = episodes.groupBy { it.video.seasonKey }.map { (k, v) -> k to v }
+    // Calculé une fois par état : la fiche le lit à chaque redessin (plus de 1 000 épisodes pour One Piece).
+    val seasons: List<Pair<String, List<AdnEpisodeNode>>> by lazy {
+        episodes.groupBy { it.video.seasonKey }.map { (k, v) -> k to v }
+    }
 }
 
 class AdnSeriesViewModel(private val graph: Graph, private val showId: String) : ViewModel() {
