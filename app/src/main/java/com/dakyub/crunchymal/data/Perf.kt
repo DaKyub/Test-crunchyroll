@@ -84,7 +84,9 @@ object Perf {
             .entries.sortedWith(compareBy({ it.key.first }, { -it.value.size }))
             .forEach { (key, list) ->
                 val ms = list.map { it.ms }.sorted()
-                val failures = list.count { it.extra == "échec" || it.extra.startsWith("-1") || it.extra.firstOrNull() in '4'..'5' }
+                // Échecs : mesure marquée « échec », ou requête HTTP sans réponse (-1) / en erreur 4xx-5xx.
+                val http = key.first.startsWith("HTTP ")
+                val failures = list.count { it.extra == "échec" || (http && (it.extra.startsWith("-1") || it.extra.firstOrNull() in '4'..'5')) }
                 out += String.format(
                     Locale.FRANCE, "%-28s %-38s n=%-4d med=%-6d p90=%-6d max=%-6d%s",
                     key.first.take(28), key.second.take(38), ms.size, ms[ms.size / 2], ms[(ms.size * 9 / 10).coerceAtMost(ms.size - 1)], ms.last(),

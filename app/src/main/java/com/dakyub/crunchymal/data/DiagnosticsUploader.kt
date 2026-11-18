@@ -38,6 +38,7 @@ class DiagnosticsUploader(context: Context, private val settings: Settings) {
 
     val configured: Boolean get() = settings.githubToken.isNotBlank()
 
+    private val busy = java.util.concurrent.atomic.AtomicBoolean(false)
     private val _status = MutableStateFlow<String?>(null)
     val status: StateFlow<String?> = _status
 
@@ -123,6 +124,11 @@ class DiagnosticsUploader(context: Context, private val settings: Settings) {
             _status.value = "Ajoute d'abord un jeton GitHub (Réglages → Diagnostics) pour l'envoi automatique."
             return
         }
+        // Un seul envoi à la fois : plusieurs appuis lançaient autant de benchmarks en même temps, qui se gênaient.
+        if (!busy.compareAndSet(false, true)) {
+            _status.value = "Un envoi est déjà en cours, patiente quelques secondes…"
+            return
+        }
         _status.value = "Préparation de « $title »…"
         scope.launch {
             val content = runCatching { withContext(Dispatchers.IO) { lines() } }
@@ -132,6 +138,7 @@ class DiagnosticsUploader(context: Context, private val settings: Settings) {
             val result = runCatching { send(title, content) }
                 .fold({ "« $title » envoyé sur GitHub : issue $it" }, { failure(it) })
             _status.value = result
+            busy.set(false)
             Toast.makeText(appContext, result, Toast.LENGTH_LONG).show()
         }
     }

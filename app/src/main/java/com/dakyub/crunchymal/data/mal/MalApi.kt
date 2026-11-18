@@ -159,8 +159,10 @@ class MissingMalClientIdException : Exception("Client ID MyAnimeList manquant (P
  * Lecture publique : seul l'en-tête X-MAL-CLIENT-ID est requis.
  */
 class MalApi(private val clientId: () -> String) {
+    /** MAL laisse parfois une requête sans réponse : abandon après 12 s (puis nouvel essai) au lieu de 30. */
+    private val client = Http.client.newBuilder().callTimeout(12, java.util.concurrent.TimeUnit.SECONDS).build()
     private val gate = Mutex()
-    private var lastCall = 0L
+    @Volatile private var lastCall = 0L
     /** Requêtes prioritaires (fiche ouverte par l'utilisateur) en attente : les autres leur cèdent la place. */
     private val priorityWaiting = MutableStateFlow(0)
 
@@ -170,32 +172,31 @@ class MalApi(private val clientId: () -> String) {
      */
     private suspend fun <T> throttled(priority: Boolean, block: suspend () -> T): T {
         val queuedAt = Perf.now()
-        suspend fun paced(): T {
-            // Attente derrière la limite de débit (et les autres requêtes MAL), hors durée de la requête.
-            Perf.record("Attente débit MAL", if (priority) "prioritaire" else "fond", Perf.now() - queuedAt)
+        // Sous le verrou : seulement l'attente du créneau (un départ toutes les 400 ms). La requête elle-même
+        // part hors du verrou : une réponse de MAL qui traîne ne bloque plus toutes les autres pendant 30 s.
+        suspend fun takeSlot() {
             val wait = lastCall + MIN_INTERVAL_MS - System.currentTimeMillis()
             if (wait > 0) delay(wait)
             lastCall = System.currentTimeMillis()
-            return block()
         }
         if (priority) {
             priorityWaiting.update { it + 1 }
             try {
-                return gate.withLock { paced() }
+                gate.withLock { takeSlot() }
             } finally {
                 priorityWaiting.update { it - 1 }
             }
-        }
-        while (true) {
-            priorityWaiting.first { it == 0 }
-            gate.lock()
-            try {
-                // Une requête prioritaire est arrivée pendant l'attente : on lui laisse le tour.
-                if (priorityWaiting.value == 0) return paced()
-            } finally {
-                gate.unlock()
+        } else {
+            while (true) {
+                priorityWaiting.first { it == 0 }
+                // Une requête prioritaire arrivée pendant l'attente passe d'abord.
+                val taken = gate.withLock { if (priorityWaiting.value == 0) { takeSlot(); true } else false }
+                if (taken) break
             }
         }
+        // Attente derrière la limite de débit (et les autres requêtes MAL), hors durée de la requête.
+        Perf.record("Attente débit MAL", if (priority) "prioritaire" else "fond", Perf.now() - queuedAt)
+        return block()
     }
 
     private suspend fun get(url: String, priority: Boolean = false): String {
@@ -205,7 +206,7 @@ class MalApi(private val clientId: () -> String) {
         while (true) {
             val result = throttled(priority) {
                 runCatching {
-                    Http.client.fetch(Request.Builder().url(url).header("X-MAL-CLIENT-ID", id).build())
+                    client.fetch(Request.Builder().url(url).header("X-MAL-CLIENT-ID", id).build())
                 }
             }
             val error = result.exceptionOrNull() ?: return result.getOrThrow()
@@ -311,7 +312,7 @@ class MalApi(private val clientId: () -> String) {
             val url = "$BASE/anime/$malId".toHttpUrl().newBuilder()
                 .addQueryParameter("fields", "my_$statusFields,num_episodes")
                 .build()
-            Http.client.fetch(Request.Builder().url(url).header("Authorization", "Bearer $accessToken").build())
+            client.fetch(Request.Builder().url(url).header("Authorization", "Bearer $accessToken").build())
         }
         val node = Http.json.decodeFromString<MyStatusNode>(body)
         return node.myListStatus to node.numEpisodes
@@ -338,7 +339,7 @@ class MalApi(private val clientId: () -> String) {
                 .addQueryParameter("nsfw", "true")
                 .addQueryParameter("fields", "$statusFields,$FIELDS,main_picture,average_episode_duration")
                 .build().toString()
-            Http.client.fetch(Request.Builder().url(first).header("Authorization", "Bearer $accessToken").build())
+            client.fetch(Request.Builder().url(first).header("Authorization", "Bearer $accessToken").build())
         })
         while (true) {
             page.data.forEach { item ->
@@ -348,7 +349,7 @@ class MalApi(private val clientId: () -> String) {
             // Les pages suivantes reprennent les paramètres de la première (dont les champs demandés).
             val next = page.paging?.next ?: break
             val request = Request.Builder().url(next).header("Authorization", "Bearer $accessToken").build()
-            page = Http.json.decodeFromString<UserListResponse>(Http.client.fetch(request))
+            page = Http.json.decodeFromString<UserListResponse>(client.fetch(request))
         }
         return out
     }
@@ -364,7 +365,7 @@ class MalApi(private val clientId: () -> String) {
             .header("Authorization", "Bearer $accessToken")
             .patch(form)
             .build()
-        Http.client.fetch(request)
+        client.fetch(request)
     }
 
     /**
@@ -382,7 +383,7 @@ class MalApi(private val clientId: () -> String) {
                 .header("Authorization", "Bearer $accessToken")
                 .patch(form)
                 .build()
-            val error = runCatching { Http.client.fetch(request) }.exceptionOrNull() ?: return
+            val error = runCatching { client.fetch(request) }.exceptionOrNull() ?: return
             val retryable = error !is HttpException || error.code == 429 || error.code >= 500
             if (!retryable || ++attempt >= 4) throw error
             delay(2000L * attempt)

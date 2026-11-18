@@ -155,9 +155,9 @@ class ProgressRepository(context: Context, private val api: CrApi) {
      */
     suspend fun tree(seriesId: String, force: Boolean = false, priority: Boolean = false): SeriesTree {
         if (!force) trees[seriesId]?.let { if (isFresh(it.summary)) return it }
-        return locks.getOrPut(seriesId) { Mutex() }.withLock {
+        suspend fun locked(): SeriesTree = locks.getOrPut(seriesId) { Mutex() }.withLock {
             if (!force) trees[seriesId]?.let { if (isFresh(it.summary)) return@withLock it }
-            (if (priority) compute(seriesId) else semaphore.withPermit { compute(seriesId) }).also { tree ->
+            compute(seriesId).also { tree ->
                 trees[seriesId] = tree
                 stale.remove(seriesId)
                 saveTree(tree)
@@ -165,6 +165,9 @@ class ProgressRepository(context: Context, private val api: CrApi) {
                 persist()
             }
         }
+        // Calcul de fond : la place dans la file (3 à la fois) est prise AVANT le verrou de la série. Sinon un
+        // calcul en attente gardait ce verrou, et la fiche ouverte entre-temps attendait derrière toute la file.
+        return if (priority) locked() else semaphore.withPermit { locked() }
     }
 
     private suspend fun compute(seriesId: String): SeriesTree = coroutineScope {
@@ -279,7 +282,7 @@ class ProgressRepository(context: Context, private val api: CrApi) {
     private companion object {
         const val TTL = 6L * 3600 * 1000
         /** Fiches gardées sur disque (les plus récentes). */
-        const val MAX_TREES = 150
+        const val MAX_TREES = 300
     }
 }
 
