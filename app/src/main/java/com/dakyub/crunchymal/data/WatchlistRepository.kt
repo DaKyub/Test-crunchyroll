@@ -11,6 +11,11 @@ data class WatchlistEntry(
     val nextEpisodeId: String?,
     /** Position dans la watchlist (0 = ajout / mise à jour la plus récente). */
     val order: Int,
+    /**
+     * Empreinte de ce que le service dit de la série (épisode proposé, vu ou non, nombre d'épisodes et de
+     * saisons) : si elle change, la progression est à recalculer. null = inconnue (toujours recalculée).
+     */
+    val signal: String? = null,
 )
 
 class WatchlistRepository(private val api: CrApi) {
@@ -49,6 +54,10 @@ class WatchlistRepository(private val api: CrApi) {
                 neverWatched = item.neverWatched,
                 nextEpisodeId = if (panel.type == "episode") panel.id else null,
                 order = index,
+                // Sans le nombre d'épisodes de la série (fiche non reçue), pas d'empreinte : on recalculera.
+                signal = obj?.seriesMetadata?.let { m ->
+                    "${panel.id}|${item.fullyWatched}|${item.neverWatched}|${m.episodeCount}|${m.seasonCount}"
+                },
             )
         }.distinctBy { it.series.id }
     }

@@ -97,16 +97,17 @@ class Graph(context: Context) {
     }
 
     /**
-     * Calcule (si besoin) la progression d'une série, quel que soit son service. Une série terminée dont
-     * l'historique ne montre aucun visionnage depuis le dernier calcul n'est pas recalculée.
+     * Calcule (si besoin) la progression d'une série, quel que soit son service. Une série terminée de la
+     * watchlist n'est pas recalculée tant que son empreinte [signal] (épisode proposé, nombre d'épisodes et de
+     * saisons : voir WatchlistEntry.signal) n'a pas changé et que l'historique ne montre aucun visionnage.
      */
-    suspend fun ensureProgress(ref: SeriesRef, force: Boolean = false) {
+    suspend fun ensureProgress(ref: SeriesRef, force: Boolean = false, signal: String? = null) {
         val key = ref.progressKey
         // Historique inconnu (hors ligne, erreur) : on recalcule comme avant. Marge de 5 min sur les horloges.
         val playedSince: suspend (Long) -> Boolean = { since -> lastPlays()?.let { (it[key] ?: 0L) > since - 5 * 60_000 } ?: true }
         when (ref.provider) {
-            Provider.CRUNCHYROLL -> progress.ensureSummary(ref.id, force, playedSince)
-            Provider.ADN -> adnProgress.ensureSummary(ref.id, force, playedSince)
+            Provider.CRUNCHYROLL -> progress.ensureSummary(ref.id, force, signal, playedSince)
+            Provider.ADN -> adnProgress.ensureSummary(ref.id, force, signal, playedSince)
         }
     }
 

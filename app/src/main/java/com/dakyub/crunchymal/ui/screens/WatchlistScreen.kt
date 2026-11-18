@@ -187,7 +187,7 @@ class WatchlistViewModel(private val graph: Graph, private val source: SeriesLis
             loaded.value = Loaded(loading = false, entries = entries, error = errors.joinToString(" · ").ifBlank { null })
             entries.forEach { graph.mal.request(it.series.malKey, it.series.malTitles) }
             entries.forEach { e ->
-                launch { runCatching { graph.ensureProgress(e.series, force) } }
+                launch { runCatching { graph.ensureProgress(e.series, force, e.signal) } }
             }
         }
     }

@@ -80,12 +80,18 @@ class AdnProgressRepository(private val adn: AdnApi, private val store: Progress
 
     private fun key(showId: String) = "adn:$showId"
 
-    suspend fun ensureSummary(showId: String, force: Boolean = false, playedSince: (suspend (Long) -> Boolean)? = null) {
+    suspend fun ensureSummary(
+        showId: String,
+        force: Boolean = false,
+        signal: String? = null,
+        playedSince: (suspend (Long) -> Boolean)? = null,
+    ) {
         if (!adn.loggedIn.value) return
         CacheLoads.awaitAll()
         val existing = store.summaries.value[key(showId)]
-        if (!force && existing != null && (store.isFresh(existing) || store.isSettled(existing, playedSince))) return
-        tree(showId, force = true)
+        if (!force && existing != null && (store.isFresh(existing) || store.isSettled(key(showId), existing, signal, playedSince))) return
+        val tree = tree(showId, force = true)
+        if (signal != null) tree.summary?.let { store.put(key(showId), it.copy(signal = signal)) }
     }
 
     private fun isFresh(tree: AdnSeriesTree) =

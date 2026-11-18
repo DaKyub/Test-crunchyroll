@@ -55,6 +55,8 @@ data class ProgressSummary(
     val nextReleased: String? = null,
     /** Encore en diffusion (épisodes annoncés, ou dernier sorti il y a peu) ; null = ancienne version du cache. */
     val airing: Boolean? = null,
+    /** Empreinte de la série dans la watchlist au moment du calcul (voir WatchlistEntry.signal). */
+    val signal: String? = null,
 ) {
     val status: WatchStatus
         get() = when {
@@ -143,24 +145,38 @@ class ProgressRepository(context: Context, private val api: CrApi) {
     }
 
     /**
-     * Résumé encore valable au-delà de 6 h : série dont la diffusion est finie (plus de nouvel épisode à
-     * attendre), calculée il y a moins de 14 jours, et que l'historique ne montre pas regardée depuis
-     * ([playedSince] : vrai si un épisode a été vu après la date donnée, ou si l'historique est inconnu).
+     * Résumé encore valable au-delà de 6 h. Il faut tout à la fois :
+     * - une diffusion finie au dernier calcul, il y a moins de 3 à 5 jours (étalé selon la série) ;
+     * - la même empreinte [signal] qu'au calcul : le service propose toujours le même épisode, avec le même
+     *   nombre d'épisodes et de saisons (une nouvelle saison ou un nouvel épisode la change) ;
+     * - aucun visionnage depuis ([playedSince] : vrai si un épisode a été vu après la date donnée, ou si
+     *   l'historique est inconnu).
+     * Sans empreinte (série hors watchlist), le résumé n'est jamais prolongé.
      */
-    suspend fun isSettled(s: ProgressSummary, playedSince: (suspend (Long) -> Boolean)?): Boolean =
-        playedSince != null && s.remainingAfterLast != null && s.airing == false &&
-            System.currentTimeMillis() - s.computedAt < SETTLED_TTL && !playedSince(s.computedAt)
+    suspend fun isSettled(key: String, s: ProgressSummary, signal: String?, playedSince: (suspend (Long) -> Boolean)?): Boolean {
+        if (signal == null || playedSince == null || s.signal != signal) return false
+        if (s.remainingAfterLast == null || s.airing != false) return false
+        val ttl = SETTLED_TTL + (key.hashCode().mod(48)) * 3600_000L
+        return System.currentTimeMillis() - s.computedAt < ttl && !playedSince(s.computedAt)
+    }
 
     /**
-     * S'assure qu'un résumé récent existe (utilisé par la watchlist pour les filtres). Avec [playedSince], les
-     * séries terminées et non regardées depuis ne sont pas recalculées : au démarrage, cela évite de relire
-     * les épisodes de toute la watchlist (plus de mille requêtes).
+     * S'assure qu'un résumé récent existe (utilisé par la watchlist pour les filtres). Avec [signal] et
+     * [playedSince], une série terminée dont rien n'a changé n'est pas recalculée : au démarrage, cela évite
+     * de relire les épisodes de toute la watchlist (plus de mille requêtes).
      */
-    suspend fun ensureSummary(seriesId: String, force: Boolean = false, playedSince: (suspend (Long) -> Boolean)? = null) {
+    suspend fun ensureSummary(
+        seriesId: String,
+        force: Boolean = false,
+        signal: String? = null,
+        playedSince: (suspend (Long) -> Boolean)? = null,
+    ) {
         loaded.join()
         val existing = _summaries.value[seriesId]
-        if (!force && existing != null && (isFresh(existing) || isSettled(existing, playedSince))) return
-        tree(seriesId, force = true)
+        if (!force && existing != null && (isFresh(existing) || isSettled(seriesId, existing, signal, playedSince))) return
+        val tree = tree(seriesId, force = true)
+        // L'empreinte du moment est gardée avec le résumé, pour la comparer la prochaine fois.
+        if (signal != null) put(seriesId, tree.summary.copy(signal = signal))
     }
 
     /**
@@ -311,7 +327,8 @@ class ProgressRepository(context: Context, private val api: CrApi) {
 
     private companion object {
         const val TTL = 6L * 3600 * 1000
-        const val SETTLED_TTL = 14L * 24 * 3600 * 1000
+        /** Durée minimale de prolongation d'une série terminée (jusqu'à 48 h de plus, selon la série). */
+        const val SETTLED_TTL = 3L * 24 * 3600 * 1000
         /** Fiches gardées sur disque (les plus récentes). */
         const val MAX_TREES = 300
     }

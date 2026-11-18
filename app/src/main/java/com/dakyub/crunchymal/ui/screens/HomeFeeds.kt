@@ -150,7 +150,7 @@ suspend fun Graph.newEpisodeCards(providers: Set<Provider>): List<CardItem> {
         cr.await() + adnEntries.await()
     }
     coroutineScope {
-        entries.map { e -> async { runCatching { ensureProgress(e.series) } } }.awaitAll()
+        entries.map { e -> async { runCatching { ensureProgress(e.series, signal = e.signal) } } }.awaitAll()
     }
     val summaries = progress.summaries.value
     val cutoff = DateUtils.isoDaysAgo(21)

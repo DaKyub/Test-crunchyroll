@@ -26,6 +26,7 @@ class AdnWatchlistRepository(private val adn: AdnApi) {
             neverWatched = video.user == null && (video.order ?: 0) <= 1,
             nextEpisodeId = video.id.toString(),
             order = index,
+            signal = "${video.id}|${video.user?.watchDate}|${show.episodeCount}|${show.nextVideoReleaseDate}",
         )
     }.distinctBy { it.series.id }
 }
