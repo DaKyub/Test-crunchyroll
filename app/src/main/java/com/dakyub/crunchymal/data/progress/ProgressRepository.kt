@@ -142,11 +142,24 @@ class ProgressRepository(context: Context, private val api: CrApi) {
         persist()
     }
 
-    /** S'assure qu'un résumé récent existe (utilisé par la watchlist pour les filtres). */
-    suspend fun ensureSummary(seriesId: String, force: Boolean = false) {
+    /**
+     * Résumé encore valable au-delà de 6 h : série dont la diffusion est finie (plus de nouvel épisode à
+     * attendre), calculée il y a moins de 14 jours, et que l'historique ne montre pas regardée depuis
+     * ([playedSince] : vrai si un épisode a été vu après la date donnée, ou si l'historique est inconnu).
+     */
+    suspend fun isSettled(s: ProgressSummary, playedSince: (suspend (Long) -> Boolean)?): Boolean =
+        playedSince != null && s.remainingAfterLast != null && s.airing == false &&
+            System.currentTimeMillis() - s.computedAt < SETTLED_TTL && !playedSince(s.computedAt)
+
+    /**
+     * S'assure qu'un résumé récent existe (utilisé par la watchlist pour les filtres). Avec [playedSince], les
+     * séries terminées et non regardées depuis ne sont pas recalculées : au démarrage, cela évite de relire
+     * les épisodes de toute la watchlist (plus de mille requêtes).
+     */
+    suspend fun ensureSummary(seriesId: String, force: Boolean = false, playedSince: (suspend (Long) -> Boolean)? = null) {
         loaded.join()
         val existing = _summaries.value[seriesId]
-        if (!force && existing != null && isFresh(existing)) return
+        if (!force && existing != null && (isFresh(existing) || isSettled(existing, playedSince))) return
         tree(seriesId, force = true)
     }
 
@@ -298,6 +311,7 @@ class ProgressRepository(context: Context, private val api: CrApi) {
 
     private companion object {
         const val TTL = 6L * 3600 * 1000
+        const val SETTLED_TTL = 14L * 24 * 3600 * 1000
         /** Fiches gardées sur disque (les plus récentes). */
         const val MAX_TREES = 300
     }

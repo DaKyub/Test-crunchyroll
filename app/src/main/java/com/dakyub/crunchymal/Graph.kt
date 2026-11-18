@@ -1,5 +1,8 @@
 package com.dakyub.crunchymal
 
+import com.dakyub.crunchymal.data.DateUtils
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.Mutex
 import com.dakyub.crunchymal.data.mal.SequelsRepository
 import com.dakyub.crunchymal.data.mal.ForYouRepository
 import com.dakyub.crunchymal.data.mal.MalCompletion
@@ -67,10 +70,44 @@ class Graph(context: Context) {
     val settingsFields = SettingsFields(settings, companions, adn, mal, ratings, watchPlatforms, diagnostics)
     val tagServer = TagServer(context, mal, companions, SettingsBackup(context, mal), diagnostics, settingsFields)
 
-    /** Calcule (si besoin) la progression d'une série, quel que soit son service. */
-    suspend fun ensureProgress(ref: SeriesRef, force: Boolean = false) = when (ref.provider) {
-        Provider.CRUNCHYROLL -> progress.ensureSummary(ref.id, force)
-        Provider.ADN -> adnProgress.ensureSummary(ref.id, force)
+    /** Dernier visionnage de chaque série d'après les historiques (ms), relu au plus toutes les 10 min ; null = inconnu. */
+    private class Plays(val at: Long, val byKey: Map<String, Long>?)
+    @Volatile private var plays: Plays? = null
+    private val playsLock = Mutex()
+
+    private suspend fun lastPlays(): Map<String, Long>? = playsLock.withLock {
+        // Un échec est gardé 1 min (pas une nouvelle tentative par série), un succès 10 min.
+        plays?.takeIf { System.currentTimeMillis() - it.at < (if (it.byKey == null) 60_000 else 10 * 60_000) }
+            ?.let { return@withLock it.byKey }
+        val merged = runCatching {
+            val cr = if (auth.loggedIn.value) {
+                history.lastPlayed().mapNotNull { (id, date) -> DateUtils.parse(date)?.time?.let { id to it } }
+            } else emptyList()
+            val adnPlays = if (adn.loggedIn.value) {
+                adn.viewingHistory().mapNotNull { video ->
+                    val show = video.show?.id ?: return@mapNotNull null
+                    DateUtils.parse(video.user?.watchDate)?.time?.let { "adn:$show" to it }
+                }
+            } else emptyList()
+            // Plusieurs épisodes d'une série : le plus récent.
+            (cr + adnPlays).groupBy({ it.first }, { it.second }).mapValues { it.value.max() }
+        }.getOrNull()
+        plays = Plays(System.currentTimeMillis(), merged)
+        merged
+    }
+
+    /**
+     * Calcule (si besoin) la progression d'une série, quel que soit son service. Une série terminée dont
+     * l'historique ne montre aucun visionnage depuis le dernier calcul n'est pas recalculée.
+     */
+    suspend fun ensureProgress(ref: SeriesRef, force: Boolean = false) {
+        val key = ref.progressKey
+        // Historique inconnu (hors ligne, erreur) : on recalcule comme avant. Marge de 5 min sur les horloges.
+        val playedSince: suspend (Long) -> Boolean = { since -> lastPlays()?.let { (it[key] ?: 0L) > since - 5 * 60_000 } ?: true }
+        when (ref.provider) {
+            Provider.CRUNCHYROLL -> progress.ensureSummary(ref.id, force, playedSince)
+            Provider.ADN -> adnProgress.ensureSummary(ref.id, force, playedSince)
+        }
     }
 
     /** Progression calculable pour cette série (ADN : il faut être connecté). */
