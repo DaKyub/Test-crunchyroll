@@ -103,6 +103,8 @@ data class SeriesUi(
     val treeError: String? = null,
     val inWatchlist: Boolean? = null,
     val selectedSeason: Int = 0,
+    /** Épisodes affichés avant que la progression soit connue (première ouverture) : ni coches ni compteurs. */
+    val treePartial: Boolean = false,
     /** Catégories Crunchyroll (repli quand MAL n'a pas de genres). */
     val categories: List<String> = emptyList(),
 )
@@ -138,15 +140,20 @@ class SeriesViewModel(private val graph: Graph, private val seriesId: String) : 
         }
     }
 
-    private fun show(tree: SeriesTree) {
+    /** L'utilisateur a choisi une saison : on ne la change plus à sa place. */
+    private var seasonPicked = false
+
+    private fun show(tree: SeriesTree, partial: Boolean = false) {
         // update : la fiche, la watchlist et les catégories modifient l'état en parallèle.
         state.update { current ->
-            // Au premier chargement, on se place sur la saison de l'épisode suivant.
-            val selected = if (current.tree == null) {
+            // Un arbre complet ne doit pas être remplacé par des épisodes sans progression.
+            if (partial && current.tree != null) return@update current
+            // Au premier chargement (ou quand la progression arrive), on se place sur la saison de l'épisode suivant.
+            val selected = if (current.tree == null || (current.treePartial && !seasonPicked)) {
                 tree.seasons.indexOfFirst { s -> s.episodes.any { it.episode.id == tree.summary.nextEpisodeId } }
                     .coerceAtLeast(0)
             } else current.selectedSeason.coerceAtMost((tree.seasons.size - 1).coerceAtLeast(0))
-            current.copy(tree = tree, treeError = null, selectedSeason = selected)
+            current.copy(tree = tree, treeError = null, selectedSeason = selected, treePartial = partial)
         }
     }
 
@@ -160,7 +167,15 @@ class SeriesViewModel(private val graph: Graph, private val seriesId: String) : 
                     Perf.record("Fiche Crunchyroll", "épisodes affichés (cache)", Perf.now() - opened)
                 }
             }
-            runCatching { graph.progress.tree(seriesId, force, priority = true) }
+            runCatching {
+                graph.progress.tree(seriesId, force, priority = true) { episodes ->
+                    // Jamais ouverte : les épisodes d'abord, la progression une seconde plus tard.
+                    viewModelScope.launch {
+                        show(episodes, partial = true)
+                        Perf.record("Fiche Crunchyroll", "épisodes affichés (sans progression)", Perf.now() - opened)
+                    }
+                }
+            }
                 .onSuccess { tree ->
                     show(tree)
                     Perf.record("Fiche Crunchyroll", "épisodes à jour", Perf.now() - opened)
@@ -180,6 +195,7 @@ class SeriesViewModel(private val graph: Graph, private val seriesId: String) : 
     }
 
     fun selectSeason(index: Int) {
+        seasonPicked = true
         state.value = state.value.copy(selectedSeason = index)
     }
 
@@ -465,7 +481,9 @@ fun SeriesScreen(
         series != null -> {
             val ref = SeriesRef(series.id, series.title, series.slugTitle)
             val tree = state.tree
-            val summary = tree?.summary
+            // Progression pas encore connue : pas de « Reprendre », de compteurs ni de synchro MAL.
+            val partial = state.treePartial
+            val summary = tree?.summary?.takeIf { !partial }
             val listState = rememberLazyListState()
             // Licence complète (frise MAL) : rangée « Toute la licence » et type / date des saisons (OVA…).
             val sequelStart = remember(tree, malRecords) {
@@ -495,7 +513,7 @@ fun SeriesScreen(
             }
             val defects = remember(tree) { tree?.seasons?.map { catalogDefects(it) }.orEmpty() }
             // Synchro MAL : épisodes vus de chaque saison reportés sur sa fiche MAL (option des réglages).
-            val syncTargets = tree?.seasons?.mapIndexedNotNull { index, node ->
+            val syncTargets = tree?.takeIf { !partial }?.seasons?.mapIndexedNotNull { index, node ->
                 malRecords[seasonMalKey(ref.malKey, index, node.season, malRecords)]?.malId
                     ?.let { it to node.episodes.count { e -> e.watched } }
             }.orEmpty()
@@ -634,7 +652,8 @@ fun SeriesScreen(
                                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                             Text(
                                                 (if (defects.getOrNull(index)?.any == true) "⚠ " else "") +
-                                                    "${seasonLabel(node, malRecords[key], match = seasonMatches[index], tvNumber = seasonNumbers[index])} · $watched/${node.episodes.size}"
+                                                    "${seasonLabel(node, malRecords[key], match = seasonMatches[index], tvNumber = seasonNumbers[index])} · " +
+                                                    if (partial) "${node.episodes.size} ép." else "$watched/${node.episodes.size}"
                                             )
                                             MalBadge(key, titles)
                                             // Diffusion de la saison d'après MAL (en cours, terminée, pas encore sortie).

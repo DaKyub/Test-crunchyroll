@@ -47,7 +47,7 @@ class Graph(context: Context) {
     val updates = UpdateManager(context)
     val providers = ProviderSelection(settings)
     val adn = AdnApi(context)
-    val adnProgress = AdnProgressRepository(adn, progress).also { repo -> progress.onClear = repo::clearCache }
+    val adnProgress = AdnProgressRepository(adn, progress, java.io.File(context.filesDir, "adn_trees")).also { repo -> progress.onClear = repo::clearCache }
     val adnWatchlist = AdnWatchlistRepository(adn)
     val ratings = RatingsRepository(settings)
     val availability = AvailabilityRepository(context, api, adn)

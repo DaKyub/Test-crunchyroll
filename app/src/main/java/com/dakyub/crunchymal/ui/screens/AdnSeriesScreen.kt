@@ -112,12 +112,23 @@ class AdnSeriesViewModel(private val graph: Graph, private val showId: String) :
     fun load(force: Boolean = false) {
         viewModelScope.launch {
             state.value = state.value.copy(loading = true, error = null, episodesLoading = true)
+            // Fiche déjà ouverte : dernier état connu (mémoire ou disque) affiché tout de suite, puis mis à jour.
+            if (state.value.show == null) {
+                graph.adnProgress.cachedTree(showId)?.let { cached ->
+                    if (cached.show != null && state.value.show == null) applyTree(cached, cached.show)
+                }
+            }
             // Épisodes et progression en parallèle : la fiche s'affiche dès que la série est connue,
             // sans attendre la liste des épisodes (parfois très longue).
             val tree = async { runCatching { graph.adnProgress.tree(showId, force, priority = true) }.getOrNull() }
             runCatching { graph.adn.show(showId) }
                 .onSuccess { show -> state.value = state.value.copy(loading = false, show = show) }
                 .onFailure {
+                    // Hors ligne avec un état en cache : la fiche reste affichée telle quelle.
+                    if (state.value.show != null) {
+                        state.value = state.value.copy(loading = false, episodesLoading = false)
+                        return@launch
+                    }
                     tree.cancel()
                     state.value = state.value.copy(loading = false, error = it.message ?: "Erreur")
                     return@launch
@@ -126,7 +137,10 @@ class AdnSeriesViewModel(private val graph: Graph, private val showId: String) :
                 val inList = runCatching { graph.adn.inWatchlist(showId) }.getOrNull()
                 state.value = state.value.copy(inWatchlist = inList)
             }
-            tree.await()?.let { applyTree(it) }
+            tree.await()?.let {
+                applyTree(it)
+                graph.adnProgress.remember(it, state.value.show)
+            }
             state.value = state.value.copy(episodesLoading = false)
         }
     }

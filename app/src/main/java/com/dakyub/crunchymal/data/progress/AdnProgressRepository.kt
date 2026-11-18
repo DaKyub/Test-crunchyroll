@@ -1,5 +1,16 @@
 package com.dakyub.crunchymal.data.progress
 
+import java.io.File
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.Serializable
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineScope
+import com.dakyub.crunchymal.data.adn.AdnShow
+import com.dakyub.crunchymal.data.Http
 import com.dakyub.crunchymal.data.CacheLoads
 import com.dakyub.crunchymal.data.DateUtils
 import com.dakyub.crunchymal.data.adn.AdnApi
@@ -12,17 +23,21 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import java.util.concurrent.ConcurrentHashMap
 
+@Serializable
 data class AdnEpisodeNode(val video: AdnVideo, val watched: Boolean, val stoptime: Int, val available: Boolean) {
     val progress: Float
         get() = if (watched) 1f else if (video.duration > 0) (stoptime.toFloat() / video.duration).coerceIn(0f, 1f) else 0f
 }
 
 /** [summary] est null quand la progression est inconnue (pas connecté à ADN, ou historique injoignable). */
+@Serializable
 data class AdnSeriesTree(
     val showId: String,
     val episodes: List<AdnEpisodeNode>,
     val summary: ProgressSummary?,
     val computedAt: Long = System.currentTimeMillis(),
+    /** Fiche de la série au moment du calcul, pour rouvrir la fiche sans attendre (cache disque). */
+    val show: AdnShow? = null,
 )
 
 /**
@@ -31,8 +46,35 @@ data class AdnSeriesTree(
  * épisodes avant le dernier regardé sont considérés comme vus. Les résumés sont rangés avec ceux de
  * Crunchyroll sous la clé "adn:<id>" (voir [com.dakyub.crunchymal.data.SeriesRef.progressKey]).
  */
-class AdnProgressRepository(private val adn: AdnApi, private val store: ProgressRepository) {
+class AdnProgressRepository(private val adn: AdnApi, private val store: ProgressRepository, private val dir: File) {
     private val trees = ConcurrentHashMap<String, AdnSeriesTree>()
+    /** Arbres retirés par [invalidate] : encore bons à afficher en attendant le recalcul. */
+    private val stale = ConcurrentHashMap<String, AdnSeriesTree>()
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    private fun treeFile(showId: String) = File(dir, showId.filter { it.isLetterOrDigit() } + ".json")
+
+    /**
+     * Dernier état connu de la série, même ancien (mémoire, sinon disque), pour afficher tout de suite la
+     * fiche et ses épisodes pendant que [tree] recalcule. null si la fiche n'a jamais été ouverte.
+     */
+    suspend fun cachedTree(showId: String): AdnSeriesTree? = trees[showId] ?: stale[showId] ?: withContext(Dispatchers.IO) {
+        runCatching { Http.json.decodeFromString<AdnSeriesTree>(treeFile(showId).readText()) }.getOrNull()
+    }
+
+    /** Garde sur disque l'arbre d'une fiche ouverte, avec la fiche [show] de la série. */
+    fun remember(tree: AdnSeriesTree, show: AdnShow?) {
+        scope.launch {
+            runCatching {
+                dir.mkdirs()
+                val file = treeFile(tree.showId)
+                val tmp = File(file.path + ".tmp")
+                tmp.writeText(Http.json.encodeToString(tree.copy(show = show)))
+                if (!tmp.renameTo(file)) { file.writeText(tmp.readText()); tmp.delete() }
+                dir.listFiles()?.sortedByDescending { it.lastModified() }?.drop(MAX_TREES)?.forEach { it.delete() }
+            }
+        }
+    }
     private val locks = ConcurrentHashMap<String, Mutex>()
     private val semaphore = Semaphore(3)
 
@@ -52,13 +94,16 @@ class AdnProgressRepository(private val adn: AdnApi, private val store: Progress
     /** [priority] : fiche ouverte par l'utilisateur, sans attendre les calculs de fond (3 à la fois). */
     suspend fun tree(showId: String, force: Boolean = false, priority: Boolean = false): AdnSeriesTree {
         if (!force) trees[showId]?.let { if (isFresh(it)) return it }
-        return locks.getOrPut(showId) { Mutex() }.withLock {
+        suspend fun locked(): AdnSeriesTree = locks.getOrPut(showId) { Mutex() }.withLock {
             if (!force) trees[showId]?.let { if (isFresh(it)) return@withLock it }
-            (if (priority) compute(showId) else semaphore.withPermit { compute(showId) }).also { tree ->
+            compute(showId).also { tree ->
                 trees[showId] = tree
+                stale.remove(showId)
                 tree.summary?.let { store.put(key(showId), it) }
             }
         }
+        // La place dans la file est prise avant le verrou de la série (voir ProgressRepository.tree).
+        return if (priority) locked() else semaphore.withPermit { locked() }
     }
 
     private suspend fun compute(showId: String): AdnSeriesTree = coroutineScope {
@@ -105,14 +150,18 @@ class AdnProgressRepository(private val adn: AdnApi, private val store: Progress
     }
 
     fun invalidate(showId: String) {
-        trees.remove(showId)
+        trees.remove(showId)?.let { stale[showId] = it }
     }
 
     fun clearCache() {
         trees.clear()
+        stale.clear()
+        scope.launch { runCatching { dir.deleteRecursively() } }
     }
 
     private companion object {
         const val TTL = 6L * 3600 * 1000
+        /** Fiches ouvertes gardées sur disque (les plus récentes). */
+        const val MAX_TREES = 150
     }
 }

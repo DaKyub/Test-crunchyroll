@@ -1,5 +1,6 @@
 package com.dakyub.crunchymal.data.progress
 
+import com.dakyub.crunchymal.data.crunchyroll.CrPlayhead
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.SupervisorJob
@@ -153,11 +154,17 @@ class ProgressRepository(context: Context, private val api: CrApi) {
      * [priority] : fiche ouverte par l'utilisateur. Elle ne fait pas la queue derrière les calculs de fond
      * (progression des cartes de Parcourir, de la watchlist…), limités à 3 à la fois.
      */
-    suspend fun tree(seriesId: String, force: Boolean = false, priority: Boolean = false): SeriesTree {
+    suspend fun tree(
+        seriesId: String,
+        force: Boolean = false,
+        priority: Boolean = false,
+        /** Reçoit les saisons et épisodes dès qu'ils sont connus, avant la progression (rien de vu, non enregistré). */
+        onEpisodes: ((SeriesTree) -> Unit)? = null,
+    ): SeriesTree {
         if (!force) trees[seriesId]?.let { if (isFresh(it.summary)) return it }
         suspend fun locked(): SeriesTree = locks.getOrPut(seriesId) { Mutex() }.withLock {
             if (!force) trees[seriesId]?.let { if (isFresh(it.summary)) return@withLock it }
-            compute(seriesId).also { tree ->
+            compute(seriesId, onEpisodes).also { tree ->
                 trees[seriesId] = tree
                 stale.remove(seriesId)
                 saveTree(tree)
@@ -170,17 +177,27 @@ class ProgressRepository(context: Context, private val api: CrApi) {
         return if (priority) locked() else semaphore.withPermit { locked() }
     }
 
-    private suspend fun compute(seriesId: String): SeriesTree = coroutineScope {
+    private suspend fun compute(seriesId: String, onEpisodes: ((SeriesTree) -> Unit)? = null): SeriesTree = coroutineScope {
         val t0 = Perf.now()
         val seasons = originalSeasons(api.seasons(seriesId))
         val episodesBySeason = seasons.map { season -> async { season to episodesOf(season) } }.awaitAll()
         Perf.record("Fiche Crunchyroll", "saisons + épisodes", Perf.now() - t0, "${seasons.size} saisons")
+        // Épisodes affichables tout de suite ; les positions de lecture suivent.
+        onEpisodes?.invoke(assemble(seriesId, episodesBySeason, emptyMap()))
 
         val t1 = Perf.now()
         val allIds = episodesBySeason.flatMap { (_, eps) -> eps.flatMap { ep -> listOf(ep.id) + ep.versions.map { it.guid } } }
         val playheads = api.playheads(allIds).associateBy { it.contentId }
         Perf.record("Fiche Crunchyroll", "positions de lecture", Perf.now() - t1, "${allIds.distinct().size} identifiants")
+        assemble(seriesId, episodesBySeason, playheads)
+    }
 
+    /** Arbre de la série à partir de ses épisodes et des positions de lecture connues ([playheads]). */
+    private fun assemble(
+        seriesId: String,
+        episodesBySeason: List<Pair<CrSeason, List<CrEpisode>>>,
+        playheads: Map<String, CrPlayhead>,
+    ): SeriesTree {
         val nowIso = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US)
             .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
             .format(java.util.Date())
@@ -208,7 +225,7 @@ class ProgressRepository(context: Context, private val api: CrApi) {
         val next = if (lastWatchedIndex >= 0) flat.getOrNull(lastWatchedIndex + 1)
         else flat.firstOrNull { it.playheadSec > 0 } ?: flat.firstOrNull()
 
-        SeriesTree(
+        return SeriesTree(
             seriesId = seriesId,
             seasons = nodes,
             summary = ProgressSummary(
