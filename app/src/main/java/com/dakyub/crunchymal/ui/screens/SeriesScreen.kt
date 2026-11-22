@@ -246,30 +246,54 @@ private fun seasonMalKey(seriesKey: String, index: Int, season: CrSeason, record
 /** Titre Crunchyroll d'une saison qui n'est pas une saison TV (« … OAD », « OVA », « Film »…). */
 private val nonTvSeasonTitle = Regex("""(?i)\b(OVA|OAV|OAD|ONA|special|spécial|movie|film)s?\b""")
 
+/** « Season 2 », « Saison 2 », « 2nd Season », « … 2 », « … II » : numéro de saison écrit dans un titre. */
+private val seasonInTitle = Regex("""(?i)\b(?:season|saison|cour)\s*(\d+)\b|\b(\d+)(?:st|nd|rd|th)\s+season\b|\s(\d|ii|iii|iv|v)\s*\)?\s*$""")
+
+private fun seasonNumberIn(title: String): Int? = seasonInTitle.find(title)?.groupValues?.drop(1)?.firstOrNull { it.isNotBlank() }
+    ?.lowercase()?.let { when (it) { "ii" -> 2; "iii" -> 3; "iv" -> 4; "v" -> 5; else -> it.toIntOrNull() } }
+
 /**
- * Élément de la licence (frise MAL) qui correspond à une saison Crunchyroll, plus fiable que la fiche MAL de
- * la saison quand celle-ci est mal choisie :
- * 1. titre nettement proche, en comparant aussi l'identifiant d'URL (anglais : le titre affiché est en
- *    français, « Le rêve de Coleus » pour « Visions of Coleus ») ;
- * 2. sinon, l'unique élément sorti à 10 jours près de la diffusion d'origine du premier épisode.
+ * Élément de la licence (frise MAL) qui correspond à chaque saison Crunchyroll (indice → élément), plus fiable
+ * que la fiche MAL de la saison quand celle-ci est mal choisie :
+ * 1. l'unique élément sorti à 10 jours près de la diffusion d'origine du premier épisode ;
+ * 2. sinon un titre nettement proche (titre affiché ou identifiant d'URL, en anglais : « Le rêve de Coleus »
+ *    pour « Visions of Coleus »), avec le même numéro de saison : « … (Saison 2) » ne doit pas tomber sur la
+ *    saison 1, dont le titre est identique une fois la parenthèse retirée par la comparaison.
+ * Un élément ne sert qu'à une saison : en cas de doublon, la correspondance par date, puis la plus proche, l'emporte.
  */
-private fun franchiseMatch(node: SeasonNode, franchise: List<MalAnime>): MalAnime? {
-    if (franchise.isEmpty()) return null
-    val season = node.season
-    val titles = listOf(season.title, season.slugTitle.replace('-', ' '))
-        .filter { it.isNotBlank() && !genericSeasonTitle.matches(it) }
-    franchise
-        .map { anime -> anime to (anime.allTitles.filter { it.isNotBlank() }.flatMap { t -> titles.map { TitleMatcher.similarity(it, t) } }.maxOrNull() ?: 0.0) }
-        .filter { it.second >= 0.85 }
-        .maxByOrNull { it.second }
-        ?.let { return it.first }
-    val aired = node.episodes.mapNotNull { it.episode.episodeAirDate.takeIf { d -> d.length >= 10 } }.minOrNull()
-        ?.let { epochDay(it) } ?: return null
-    val near = franchise.filter { anime ->
-        val start = anime.startDate?.let { epochDay(it) } ?: return@filter false
-        kotlin.math.abs(start - aired) <= 10
+private fun franchiseMatches(seasons: List<SeasonNode>, franchise: List<MalAnime>): Map<Int, MalAnime> {
+    if (franchise.isEmpty()) return emptyMap()
+    class Candidate(val index: Int, val anime: MalAnime, val byDate: Boolean, val score: Double)
+
+    fun byDate(node: SeasonNode): MalAnime? {
+        val aired = node.episodes.mapNotNull { it.episode.episodeAirDate.takeIf { d -> d.length >= 10 } }.minOrNull()
+            ?.let { epochDay(it) } ?: return null
+        return franchise.filter { anime ->
+            val start = anime.startDate?.let { epochDay(it) } ?: return@filter false
+            kotlin.math.abs(start - aired) <= 10
+        }.singleOrNull()
     }
-    return near.singleOrNull()
+
+    fun byTitle(node: SeasonNode): Pair<MalAnime, Double>? {
+        val season = node.season
+        val titles = listOf(season.title, season.slugTitle.replace('-', ' '))
+            .filter { it.isNotBlank() && !genericSeasonTitle.matches(it) }
+        if (titles.isEmpty()) return null
+        val number = titles.firstNotNullOfOrNull { seasonNumberIn(it) } ?: 1
+        return franchise
+            .filter { anime -> (anime.allTitles.firstNotNullOfOrNull { seasonNumberIn(it) } ?: 1) == number }
+            .map { anime -> anime to (anime.allTitles.filter { it.isNotBlank() }.flatMap { t -> titles.map { TitleMatcher.similarity(it, t) } }.maxOrNull() ?: 0.0) }
+            .filter { it.second >= 0.85 }
+            .maxByOrNull { it.second }
+    }
+
+    return seasons.mapIndexedNotNull { index, node ->
+        byDate(node)?.let { Candidate(index, it, byDate = true, score = 1.0) }
+            ?: byTitle(node)?.let { (anime, score) -> Candidate(index, anime, byDate = false, score = score) }
+    }
+        .groupBy { it.anime.malId }.values
+        .map { group -> group.maxWith(compareBy<Candidate>({ it.byDate }, { it.score })) }
+        .associate { it.index to it.anime }
 }
 
 /** Jour (depuis 1970) d'une date « 2022-03-29… », null si elle n'est pas complète. */
@@ -494,7 +518,7 @@ fun SeriesScreen(
             val franchise by remember(sequelStart) { graph.sequels.franchise(sequelStart) }.collectAsState()
             val seasonMatches = remember(tree, franchise) {
                 val list = franchise.orEmpty()
-                tree?.seasons?.mapIndexedNotNull { index, node -> franchiseMatch(node, list)?.let { index to it } }?.toMap().orEmpty()
+                tree?.let { franchiseMatches(it.seasons, list) }.orEmpty()
             }
             // Saison reconnue dans la licence : sa note MAL est celle de cet élément (Crunchyroll décale les numéros
             // de saison, la recherche « saison N » tombait sur une autre saison). Pas pour la saison 1 (fiche série).
